@@ -105,3 +105,10 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# --- DUCK MOW ---
+# Frame captures from the editor and browser review passes. Regenerated on demand by the
+# Duck/Sim menu items, and there are hundreds of megabytes of them.
+/[Cc]aptures/
+# Blender preview renders, likewise regenerated.
+/Art/Blender/previews/
