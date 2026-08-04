@@ -604,7 +604,10 @@ namespace DuckMow.EditorTools
             // planted as woods and parkland — a few dense groves with a soft edge, a thin parkland
             // scatter near the venue, and specimen trees on the ground the tour flies over.
             var quadCentre = new Vector3(Venue.Spacing * 0.5f, 0f, Venue.Spacing * 0.5f);
-            const float TreeLimit = 190f;
+            // Pulled in toward the venue. Woods sitting out near the limit read as a distant tree
+            // line with a bare gap between them and the championship ground; brought closer they
+            // enclose it, and the plots feel like they are in a park rather than on a plain.
+            const float TreeLimit = 155f;
 
             // A grove: dense in the middle, thinning out, with no hard edge.
             void Grove(Vector3 centre, float radius, int count, int seed, float minScale, float maxScale)
@@ -624,16 +627,16 @@ namespace DuckMow.EditorTools
             }
 
             // Four woods, placed on the quarters the venue does not use and kept off the skyline.
-            Grove(quadCentre + new Vector3(-168f, 0f, -40f), 34f, 26, 200, 0.85f, 1.45f);
-            Grove(quadCentre + new Vector3(-120f, 0f, 118f), 30f, 20, 240, 0.80f, 1.35f);
-            Grove(quadCentre + new Vector3(126f, 0f, -128f), 32f, 22, 270, 0.80f, 1.40f);
-            Grove(quadCentre + new Vector3(150f, 0f, 92f), 28f, 18, 300, 0.75f, 1.30f);
+            Grove(quadCentre + new Vector3(-118f, 0f, -30f), 32f, 26, 200, 0.85f, 1.45f);
+            Grove(quadCentre + new Vector3(-86f, 0f, 96f), 28f, 20, 240, 0.80f, 1.35f);
+            Grove(quadCentre + new Vector3(94f, 0f, -104f), 30f, 22, 270, 0.80f, 1.40f);
+            Grove(quadCentre + new Vector3(112f, 0f, 74f), 26f, 18, 300, 0.75f, 1.30f);
 
             // An orchard: the one place regular spacing is right, because someone planted it.
             for (int gz = 0; gz < 4; gz++)
                 for (int gx = 0; gx < 6; gx++)
-                    Tree(quadCentre + new Vector3(-158f + gx * 12f + Range(-1.5f, 1.5f), 0f,
-                                                  46f + gz * 12f + Range(-1.5f, 1.5f)),
+                    Tree(quadCentre + new Vector3(-124f + gx * 11f + Range(-1.5f, 1.5f), 0f,
+                                                  30f + gz * 11f + Range(-1.5f, 1.5f)),
                          Range(0.72f, 0.95f), 340 + gz * 6 + gx);
 
             // Parkland: singles and pairs on the open ground between the plots and the woods, thin
@@ -641,7 +644,7 @@ namespace DuckMow.EditorTools
             for (int i = 0; i < 20; i++)
             {
                 float a = Range(0f, Mathf.PI * 2f);
-                float r = Range(92f, 150f);
+                float r = Range(70f, 118f);
                 Vector3 p = quadCentre + new Vector3(Mathf.Cos(a) * r, 0f, Mathf.Sin(a) * r);
                 Tree(p, Range(0.9f, 1.45f), 400 + i);
                 // Half of them get a companion, because parkland trees come in twos and threes.

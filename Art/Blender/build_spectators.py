@@ -208,6 +208,8 @@ def main():
         meshes = [p[0] for p in parts]
         hi = max(max(v.co.z for v in ob.data.vertices) for ob in meshes)
         bake_ao(meshes, floor=0.78, dist=0.16, samples=24, ground=True, ground_size=1.2)
+        L.joint_audit(parts[0][0], parts[1][0], parts[1][1], name, near=0.22,
+                      tol=0.004)
         for ob, piv in parts:
             set_pivot(ob, piv)
         root = make_empty(name + "_Root", (0, 0, 0))

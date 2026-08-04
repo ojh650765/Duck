@@ -585,12 +585,16 @@ namespace DuckMow.EditorTools
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
             RenderSettings.fogColor = Hex(P.Haze);
-            // Starts past the venue so the championship ground itself is never hazed — the far
-            // corner of the quad is about 200 m from the player's own plot — and finishes before
-            // the camera's 420 m clip plane, so the edge of the world is atmosphere rather than a
-            // cut. The hills live between those two numbers, which is why they read as distance.
-            RenderSettings.fogStartDistance = 215f;
-            RenderSettings.fogEndDistance = 400f;
+            // The band between the venue and the clip plane, and nothing else.
+            //
+            // It has to clear the whole championship ground, because the reveal and the tour look
+            // at it from ninety metres up and two hundred metres back — at 215 m the far plots
+            // were washing out white in exactly the shots the venue exists for. And it has to be
+            // solid before the camera's 420 m clip plane, or the edge of the world is a cut rather
+            // than distance. That leaves 300 to 405, which is where the hills live: the venue stays
+            // crisp, the skyline stays hazed, and nothing is ever seen to end.
+            RenderSettings.fogStartDistance = 300f;
+            RenderSettings.fogEndDistance = 405f;
 
             var sky = AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/M_Sky.mat");
             if (sky != null) RenderSettings.skybox = sky;

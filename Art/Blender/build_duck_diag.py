@@ -91,8 +91,8 @@ def build_body():
     # shoulders, running up THROUGH the head pivot and dying 32 mm above it
     # inside the skull's socket
     neck = [
-        ring_z(N, 0.268, 0.036, 0.038, 2.0, 0.0, -0.056),
-        ring_z(N, 0.300, 0.034, 0.034, 2.0, 0.0, -0.050),
+        ring_z(N, 0.268, 0.038, 0.040, 2.0, 0.0, -0.056),
+        ring_z(N, 0.300, 0.036, 0.036, 2.0, 0.0, -0.050),
         ring_z(N, 0.322, 0.029, 0.029, 2.0, 0.0, -0.050),
         ring_z(N, 0.332, 0.015, 0.015, 2.0, 0.0, -0.050),
     ]
@@ -133,13 +133,8 @@ def build_head():
     rings = [egg_ring(N, *s) for s in HEAD]
     # the skull's underside IS the socket: four sections lying exactly on the
     # sphere about the head pivot, lofted straight on into the skull
-    # Built with ring_z on egg_ring's half-step phase, NOT with sweep_rings:
-    # sweep_rings frames a vertical path as rt=-X, so its rings wind the other
-    # way round from egg_ring and lofting the two index-to-index twists the
-    # skin 180 deg through its own axis.
     sp, sr = L.socket_path(NECK_PIV, (0, 0, 1), NECK_R, lats=(24, 55, 84, 104))
-    sock = [ring_z(N, p.z, r, r, 2.0, p.x, p.y, TAU * 0.5 / N)
-            for p, r in zip(sp, sr)]
+    sock = L.sweep_rings(sp, sr, n=N, tangents=[(0, 0, 1)] * 4)
     head_faces, _ = mb.pole_loft(sock + rings, CREAM,
                                  pole_a=tuple(NECK_PIV - Vector((0, 0, NECK_R))),
                                  pole_b=(0.0, -0.046, 0.456))
@@ -369,6 +364,14 @@ def main():
     # AO baked in world space while everything is still at the origin
     bake_ao(meshes, floor=0.76, dist=0.13, samples=32, ground=False)
     L.joint_audit(body, head, (0.0, -0.050, 0.300), "Duck", near=0.22)
+    from mathutils import Vector as _V
+    _P = _V((0.0, -0.050, 0.300))
+    _ds = sorted((head.matrix_world @ v.co - _P).length for v in head.data.vertices)[:5]
+    print('DIAGVERTS', ['%.4f' % d for d in _ds])
+    _fs = sorted(((head.matrix_world @ f.center - _P).length, f.index) for f in head.data.polygons)[:5]
+    for _d, _i in _fs:
+        print('DIAGFACE %.4f %s v=%d' % (_d, head.data.polygons[_i].center, len(head.data.polygons[_i].vertices)))
+
 
     # pivots -------------------------------------------------------------
     set_pivot(body, (0.0, 0.0, 0.0))              # seat contact
@@ -380,9 +383,6 @@ def main():
     set_pivot(tail, (0.0, 0.066, 0.206))          # tail root
     set_pivot(fl,   (0.080, -0.192, -0.108))      # ankle
     set_pivot(fr,   (-0.080, -0.192, -0.108))
-
-    if L.want_tilt():
-        L.tilt_sheet(head, meshes, NECK_PIV, None, "duck")
 
     root = make_empty("Duck_Root", (0, 0, 0))
     for o in (body, head, wl, wr, tail, fl, fr):

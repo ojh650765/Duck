@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -63,6 +64,51 @@ namespace DuckMow.EditorTools
             return rivals.ToArray();
         }
 
+        /// <summary>
+        /// Collects pieces that share a material and emits one mesh per material.
+        ///
+        /// A plot's fence is about a hundred posts and two hundred rails. Spawning each as its own
+        /// GameObject is a renderer, a transform and a culling entry apiece — nine hundred of them
+        /// across three plots, for geometry that never moves and is identical to the arena fence
+        /// that has always been built as a single combined mesh. This is that same trick, kept
+        /// local so the venue builder does not have to reach into the environment builder.
+        /// </summary>
+        class Batch
+        {
+            readonly Dictionary<Material, List<CombineInstance>> _byMaterial = new();
+
+            public void Add(Mesh mesh, Matrix4x4 trs, Material mat)
+            {
+                if (mesh == null || mat == null) return;
+                if (!_byMaterial.TryGetValue(mat, out var list))
+                    _byMaterial[mat] = list = new List<CombineInstance>();
+                list.Add(new CombineInstance { mesh = mesh, transform = trs, subMeshIndex = 0 });
+            }
+
+            public void Emit(Transform parent, string name, bool castShadow = false)
+            {
+                int index = 0;
+                foreach (var kv in _byMaterial)
+                {
+                    var combined = new Mesh { indexFormat = IndexFormat.UInt32 };
+                    combined.CombineMeshes(kv.Value.ToArray(), true, true);
+                    combined.RecalculateBounds();
+                    var saved = DuckMeshLibrary.Persist(combined, $"{name}_{index}");
+
+                    var go = new GameObject($"{name}_{kv.Key.name}");
+                    go.transform.SetParent(parent, false);
+                    go.AddComponent<MeshFilter>().sharedMesh = saved;
+                    var mr = go.AddComponent<MeshRenderer>();
+                    mr.sharedMaterial = kv.Key;
+                    mr.shadowCastingMode = castShadow ? ShadowCastingMode.On : ShadowCastingMode.Off;
+                    mr.lightProbeUsage = LightProbeUsage.Off;
+                    mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+                    go.isStatic = true;
+                    index++;
+                }
+            }
+        }
+
         // ------------------------------------------------------------------ lawn
 
         static void BuildLawn(Transform plot, PlotSpec spec)
@@ -105,6 +151,7 @@ namespace DuckMow.EditorTools
                 DuckPrimitives.ChamferBox(new Vector3(1.1f, 0.05f, 0.03f), 0.014f), "PlotFenceRail");
             float postLift = authoredPost != null ? 0f : 0.525f;
 
+            var fence = new Batch();
             float ring = half + 3.2f;
             const float spacing = 2.2f;
             int perSide = Mathf.RoundToInt(ring * 2f / spacing);
@@ -129,20 +176,21 @@ namespace DuckMow.EditorTools
                     // Every post leans a little; a perfectly straight fence reads as CAD.
                     var rot = Quaternion.Euler(Range(-2.5f, 2.5f), yaw + Range(-3f, 3f), Range(-2.5f, 2.5f));
 
-                    Spawn(plot, $"Post_{side}_{i}", post, white,
-                          origin + p + Vector3.up * postLift, rot, false);
+                    fence.Add(post, Matrix4x4.TRS(origin + p + Vector3.up * postLift, rot, Vector3.one), white);
 
                     if (i < perSide && !(side == 1 && Mathf.Abs(t + spacing * 0.5f) < 2.6f))
                     {
                         Vector3 mid = p + (side < 2 ? new Vector3(spacing * 0.5f, 0f, 0f)
                                                     : new Vector3(0f, 0f, spacing * 0.5f));
                         foreach (float railY in new[] { 0.34f, 0.72f })
-                            Spawn(plot, $"Rail_{side}_{i}_{railY:0.00}", rail, white,
-                                  origin + mid + Vector3.up * railY,
-                                  Quaternion.Euler(0f, yaw + Range(-2f, 2f), Range(-1.5f, 1.5f)), false);
+                            fence.Add(rail, Matrix4x4.TRS(origin + mid + Vector3.up * railY,
+                                      Quaternion.Euler(0f, yaw + Range(-2f, 2f), Range(-1.5f, 1.5f)),
+                                      Vector3.one), white);
                     }
                 }
             }
+
+            fence.Emit(plot, $"Fence_{spec.contestant}");
         }
 
         // ------------------------------------------------------------------ contestant
@@ -309,10 +357,12 @@ namespace DuckMow.EditorTools
             Spawn(s, "Canopy", canopy, Mat("M_TentRed"), new Vector3(0f, 2.3f, 0.3f),
                   Quaternion.Euler(0f, 90f, 0f), false);
             var post = DuckMeshLibrary.Persist(DuckPrimitives.ChamferBox(new Vector3(0.07f, 1.15f, 0.07f), 0.02f), "StationPost");
+            var stationPosts = new Batch();
             for (int i = -1; i <= 1; i += 2)
                 for (int k = -1; k <= 1; k += 2)
-                    Spawn(s, $"Post_{i}_{k}", post, Mat("M_WoodDark"),
-                          new Vector3(i * 2.4f, 1.15f, 0.3f + k * 1.0f), Quaternion.identity, false);
+                    stationPosts.Add(post, Matrix4x4.TRS(new Vector3(i * 2.4f, 1.15f, 0.3f + k * 1.0f),
+                                     Quaternion.identity, Vector3.one), Mat("M_WoodDark"));
+            stationPosts.Emit(s, "StationPosts");
         }
 
         static void BuildStand(Transform plot, PlotSpec spec)
@@ -433,16 +483,8 @@ namespace DuckMow.EditorTools
                 DuckPrimitives.Cylinder(Venue.PlazaRadius, Venue.PlazaRadius, 0.06f, 40), "PlazaDisc");
             Spawn(p, "Ground", disc, Mat("M_Dirt"), new Vector3(0f, 0.02f, 0f), Quaternion.identity, false);
 
-            // A ring of bunting posts, so the plaza reads as the centre of the venue from the air.
-            var post = DuckMeshLibrary.Persist(DuckPrimitives.ChamferBox(new Vector3(0.10f, 2.0f, 0.10f), 0.03f), "PlazaPost");
-            for (int i = 0; i < 12; i++)
-            {
-                float a = i / 12f * Mathf.PI * 2f;
-                Spawn(p, $"Post_{i}", post, Mat("M_WoodDark"),
-                      new Vector3(Mathf.Cos(a) * (Venue.PlazaRadius - 1.2f), 2.0f, Mathf.Sin(a) * (Venue.PlazaRadius - 1.2f)),
-                      Quaternion.identity, false);
-            }
-
+            // No ring of posts. They were put here to carry bunting and never got any, so all they
+            // did was stand a dozen bare poles around the one shot the whole tour ends on.
             BuildScoreboard(p);
         }
 
