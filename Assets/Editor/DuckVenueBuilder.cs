@@ -396,11 +396,22 @@ namespace DuckMow.EditorTools
                     // Seats are world space and the stand is rotated, so convert through it.
                     // The tier slab is built from half-extents, so its top surface is y + 0.10.
                     Vector3 local = new Vector3(x + Range(-0.18f, 0.18f), y + 0.10f, z - 0.05f);
+                    // Face this plot's own lawn, worked out from the seat's world position rather
+                    // than guessed from the stand's rotation. The previous version added 180 to the
+                    // stand's yaw, which is only correct if the stand happens to be built facing
+                    // away from its plot — so every rival crowd sat watching the wrong field.
+                    Vector3 world = s.TransformPoint(local);
+                    Vector3 toLawn = new Vector3(spec.centre.x, 0f, spec.centre.y) - world;
+                    toLawn.y = 0f;
+                    float lookYaw = toLawn.sqrMagnitude > 0.01f
+                        ? Mathf.Atan2(toLawn.x, toLawn.z) * Mathf.Rad2Deg
+                        : 0f;
+
                     seats.Add(new SpectatorCrowd.Seat
                     {
-                        position = s.TransformPoint(local),
-                        yaw = s.eulerAngles.y + 180f + Range(-16f, 16f),
-                        scale = Range(0.85f, 1.15f),
+                        position = world,
+                        yaw = lookYaw + Range(-16f, 16f),
+                        scale = Range(1.25f, 1.60f),
                         species = _rng.Next(0, 8),
                         phase = Rand
                     });

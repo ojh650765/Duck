@@ -223,8 +223,17 @@ namespace DuckMow.EditorTools
             {
                 meadow.SetColor("_UncutBase", HexL("#3E8A34"));
                 meadow.SetColor("_UncutTip", HexL("#6FBE4C"));
+                meadow.SetColor("_PatchDark", HexL("#2C6B2A"));
+                meadow.SetColor("_DryTint", HexL("#8FA84A"));
                 meadow.SetFloat("_MottleScale", 0.055f);
-                meadow.SetFloat("_MottleAmount", 0.72f);
+                meadow.SetFloat("_MottleAmount", 0.75f);
+                // ~90 m fields and ~55 m dry ground, so the meadow has areas rather than a wash.
+                meadow.SetFloat("_PatchScale", 0.011f);
+                meadow.SetFloat("_PatchAmount", 0.50f);
+                meadow.SetFloat("_DryAmount", 0.30f);
+                // Metre-scale speckle: the part that stops it looking like paper at eye level.
+                meadow.SetFloat("_GrainScale", 0.8f);
+                meadow.SetFloat("_GrainAmount", 0.13f);
                 meadow.SetFloat("_Wrap", 0.38f);
                 meadow.SetFloat("_OldStripe", 0.055f);
                 meadow.enableInstancing = true;

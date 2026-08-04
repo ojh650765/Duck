@@ -138,7 +138,7 @@ namespace DuckMow
 
             FadeIn(_ambBirds, masterAmbience * 0.5f);
             FadeIn(_ambWind, masterAmbience * 0.7f);
-            FadeIn(_ambCrowd, masterAmbience * 0.6f);
+            FadeIn(_ambCrowd, masterAmbience * crowdMurmur);
         }
 
         void OnDestroy()
@@ -190,6 +190,7 @@ namespace DuckMow
 
         public void Tick(float dt)
         {
+            _clock += dt;
             UpdateEngine(dt);
             UpdateBlade(dt);
             UpdateMower(dt);
@@ -204,11 +205,35 @@ namespace DuckMow
         void UpdateCrowd(float dt)
         {
             if (_ambCrowd == null) return;
+
             _crowdSwell = Mathf.MoveTowards(_crowdSwell, 0f, dt * 0.55f);
-            float baseline = masterAmbience * 0.6f;
+
+            // The murmur is not a constant. A crowd this size is never at one level: it rises and
+            // falls on its own, in slow waves, and a flat loop underneath the game is exactly what
+            // makes a stand full of animals read as wallpaper. Two decorrelated waves keep it from
+            // ever settling into an audible period.
+            float murmur = Mathf.Sin(_clock * 0.21f) * 0.5f + Mathf.Sin(_clock * 0.077f + 1.7f) * 0.5f;
+            murmur = 1f + murmur * 0.28f;
+
+            // Occasional spontaneous ripples of interest — somebody in the stand reacting to the
+            // mowing without anything specific having happened.
+            _murmurTimer -= dt;
+            if (_murmurTimer <= 0f)
+            {
+                _murmurTimer = 7f + (float)_rng.NextDouble() * 11f;
+                if (director != null && director.State == GameState.Mowing)
+                {
+                    PlayOne(cheerSmall, 0.16f + (float)_rng.NextDouble() * 0.10f);
+                    _crowdSwell = Mathf.Max(_crowdSwell, 0.22f);
+                }
+            }
+
+            float baseline = masterAmbience * crowdMurmur;
             _ambCrowd.volume = Mathf.Lerp(_ambCrowd.volume,
-                                          baseline * (1f + _crowdSwell * 1.6f), dt * 4f);
+                                          baseline * murmur * (1f + _crowdSwell * 1.6f), dt * 4f);
         }
+
+        float _murmurTimer = 4f;
 
         // ------------------------------------------------------------------ engine
 
@@ -335,7 +360,7 @@ namespace DuckMow
 
                 case GameState.Reveal:
                     PlayOne(musicReveal, masterMusic * 1.15f);
-                    _ambCrowd.volume = masterAmbience * 0.9f;
+                    _ambCrowd.volume = masterAmbience * crowdMurmur * 1.5f;
                     break;
 
                 case GameState.Judging:
@@ -426,6 +451,10 @@ namespace DuckMow
 
         float _lastCheer;
         float _crowdSwell;
+        float _clock;
+
+        [Tooltip("How loud the crowd murmurs under everything. This is the bed the cheers rise out of.")]
+        [Range(0f, 2f)] public float crowdMurmur = 1.15f;
 
         public void PlayOne(AudioClip clip, float volume)
         {

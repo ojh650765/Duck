@@ -43,6 +43,14 @@ namespace DuckMow
         public float cardRaise = 0.55f;
         public float cardTiltDegrees = 12f;
 
+        [Header("Rest pose")]
+        [Tooltip("Degrees to swing the arms forward or back from the pose the model was authored in. " +
+                 "Negative brings them back toward the body.")]
+        public float armRestSwing = 0f;
+        [Tooltip("Degrees to bring the arms in toward the body from the authored pose. The judges " +
+                 "were modelled with their arms out for silhouette, which reads as holding them up.")]
+        public float armRestDrop = 0f;
+
         [Header("Gestures")]
         [Tooltip("Average seconds between spontaneous gestures.")]
         public float gestureInterval = 3.2f;
@@ -90,6 +98,22 @@ namespace DuckMow
             Capture(card, ref _cardPos0, ref _cardRot0);
             Capture(armL, ref _armLPos0, ref _armLRot0);
             Capture(armR, ref _armRPos0, ref _armRRot0);
+
+            // Fold the rest correction into the captured pose, so every gesture afterwards is
+            // measured from arms that are down rather than from arms that are out.
+            //
+            // The models are authored with the arms held away from the body — deliberately, for
+            // silhouette — but seated at a bench that reads as a judge holding their hands up.
+            // Correcting the captured rest pose rather than the animation means the idle noise and
+            // the applause still work exactly as written; they just start from a resting arm.
+            Vector3 side = transform.right;
+            Vector3 fwd = transform.forward;
+            if (armL != null)
+                _armLRot0 = _armLRot0 * AboutWorldAxis(armL, side, armRestSwing)
+                                      * AboutWorldAxis(armL, fwd, -armRestDrop);
+            if (armR != null)
+                _armRRot0 = _armRRot0 * AboutWorldAxis(armR, side, armRestSwing)
+                                      * AboutWorldAxis(armR, fwd, armRestDrop);
         }
 
         static void Capture(Transform t, ref Vector3 p, ref Quaternion r)
@@ -209,13 +233,24 @@ namespace DuckMow
                 }
             }
 
-            // Arms stay in their idle now that nothing is being held up.
+            // Arms swing about the judge's own sideways axis, not about local X.
+            //
+            // These models come out of the FBX with the importer's axis conversion still on them,
+            // so an arm's local X is not the axis a shoulder actually hinges on — driving Euler(x)
+            // swung the arms outward and upward, which is why they looked like they were being
+            // held up rather than resting. Resolving the world axis through the parent gets the
+            // hinge right whatever space the model arrived in.
+            Vector3 side = transform.right;
             if (armR != null)
-                armR.localRotation = _armRRot0 * Quaternion.Euler(
-                    Noise(_noiseSeedB + 2f, t * 0.7f) * 4f * idleAmount + gArmR, 0f, 0f);
+            {
+                float swing = Noise(_noiseSeedB + 2f, t * 0.7f) * 4f * idleAmount + gArmR;
+                armR.localRotation = _armRRot0 * AboutWorldAxis(armR, side, swing);
+            }
             if (armL != null)
-                armL.localRotation = _armLRot0 * Quaternion.Euler(
-                    Noise(_noiseSeedA + 2f, t * 0.8f) * 4f * idleAmount + react * 14f + gArmL, 0f, 0f);
+            {
+                float swing = Noise(_noiseSeedA + 2f, t * 0.8f) * 4f * idleAmount + react * 8f + gArmL;
+                armL.localRotation = _armLRot0 * AboutWorldAxis(armL, side, swing);
+            }
         }
 
         /// <summary>Signed smooth noise in roughly [-1, 1].</summary>
@@ -271,6 +306,18 @@ namespace DuckMow
             }
         }
 
+        /// <summary>
+        /// A rotation of <paramref name="degrees"/> about a world axis, expressed in the node's own
+        /// parent space. The characters keep the FBX importer's axis conversion, so their local
+        /// axes are not the ones you would expect from looking at the model in Unity.
+        /// </summary>
+        static Quaternion AboutWorldAxis(Transform node, Vector3 worldAxis, float degrees)
+        {
+            if (node == null || node.parent == null) return Quaternion.AngleAxis(degrees, worldAxis);
+            Vector3 local = node.parent.InverseTransformDirection(worldAxis).normalized;
+            return Quaternion.AngleAxis(degrees, local);
+        }
+
         static float DurationOf(Gesture g) => g switch
         {
             Gesture.GlanceAside => 1.4f,
@@ -322,9 +369,11 @@ namespace DuckMow
                     // Both arms clap. The clap rate used to be 11 Hz with the body bouncing on
                     // every beat, which did not read as applause — it read as one judge shaking.
                     // Slower, arms only, with just a hint of body.
+                    // Small. A judge sitting at a bench claps in front of their chest; a
+                    // twenty-eight degree swing reads as a raised salute.
                     float clap = Mathf.Abs(Mathf.Sin(_gestureTimer * 5.0f)) * env;
-                    armL = -28f * clap;
-                    armR = -25f * clap;
+                    armL = -13f * clap;
+                    armR = -11f * clap;
                     lift = clap * 0.015f;
                     bodyPitch = -clap * 1.6f;
                     break;

@@ -19,9 +19,17 @@ Shader "Duck/GrassPlain"
         _UncutBase   ("Base",  Color) = (0.0284, 0.1470, 0.0331, 1)
         _UncutTip    ("Tip",   Color) = (0.0762, 0.2963, 0.0513, 1)
 
+        _PatchDark   ("Patch shade",   Color) = (0.0180, 0.0980, 0.0230, 1)
+        _DryTint     ("Dry grass",     Color) = (0.1720, 0.2280, 0.0620, 1)
+
         [Header(Look)]
         _MottleScale ("Mottle scale",  Float) = 0.06
         _MottleAmount("Mottle amount", Range(0,1)) = 0.7
+        _PatchScale  ("Patch scale",   Float) = 0.011
+        _PatchAmount ("Patch amount",  Range(0,1)) = 0.55
+        _DryAmount   ("Dry patches",   Range(0,1)) = 0.35
+        _GrainScale  ("Grain scale",   Float) = 0.75
+        _GrainAmount ("Grain amount",  Range(0,0.5)) = 0.14
         _Wrap        ("Light wrap",    Range(0,0.9)) = 0.35
         [Tooltip(Faint mown banding so the meadow is not perfectly uniform)]
         _OldStripe   ("Old mowing",    Range(0,0.2)) = 0.05
@@ -51,8 +59,15 @@ Shader "Duck/GrassPlain"
             CBUFFER_START(UnityPerMaterial)
                 float4 _UncutBase;
                 float4 _UncutTip;
+                float4 _PatchDark;
+                float4 _DryTint;
                 float _MottleScale;
                 float _MottleAmount;
+                float _PatchScale;
+                float _PatchAmount;
+                float _DryAmount;
+                float _GrainScale;
+                float _GrainAmount;
                 float _Wrap;
                 float _OldStripe;
             CBUFFER_END
@@ -88,8 +103,15 @@ Shader "Duck/GrassPlain"
             {
                 float2 wxz = IN.positionWS.xz;
 
-                // Same three scales as the lawn: broad patches of richer and poorer grass, medium
-                // clumping, and fine grain. One octave alone reads as noise; three read as a field.
+                // Four scales, because smooth noise on its own is just a colour wobble — it made
+                // the meadow read as a tinted plane rather than as ground. What sells it is
+                // structure at very different sizes:
+                //
+                //   patches  ~90 m   fields of richer and poorer grass, with a soft but real edge
+                //   dry      ~60 m   straw-coloured ground where it has been baked
+                //   mottle   ~18 m   clumping within a field
+                //   grain     ~1 m   the speckle you only notice up close, which is what stops the
+                //                    surface looking like paper at the player's own eye level
                 float m1 = ValueNoise2D(wxz * _MottleScale);
                 float m2 = ValueNoise2D(wxz * (_MottleScale * 4.7) + 31.7);
                 float m3 = ValueNoise2D(wxz * (_MottleScale * 0.28) + 7.3);
@@ -97,6 +119,22 @@ Shader "Duck/GrassPlain"
                 mottle = lerp(0.5, mottle, _MottleAmount);
 
                 half3 albedo = lerp(_UncutBase.rgb, _UncutTip.rgb, mottle);
+
+                // Broad patches. Pushed through smoothstep so they have an edge you can see rather
+                // than fading into one another — a field boundary, not a gradient.
+                float patch = ValueNoise2D(wxz * _PatchScale + 13.1);
+                patch = smoothstep(0.38, 0.72, patch);
+                albedo = lerp(albedo, _PatchDark.rgb, (1.0 - patch) * _PatchAmount);
+
+                // Dry ground, on its own scale and offset so it never lines up with the patches.
+                float dry = ValueNoise2D(wxz * (_PatchScale * 1.6) + 57.4);
+                dry = smoothstep(0.62, 0.86, dry);
+                albedo = lerp(albedo, _DryTint.rgb, dry * _DryAmount);
+
+                // Fine grain. Two octaves an irrational ratio apart so it never tiles visibly.
+                float g = ValueNoise2D(wxz * _GrainScale) * 0.6
+                        + ValueNoise2D(wxz * (_GrainScale * 2.37) + 91.3) * 0.4;
+                albedo *= 1.0 + (g - 0.5) * 2.0 * _GrainAmount;
 
                 // A memory of old mowing, at a much broader pitch than the playfield's, so the
                 // meadow reads as managed land without competing with the picture being cut.

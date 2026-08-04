@@ -701,6 +701,8 @@ MonoBehaviour:
   leanAngle: 5
   cardRaise: 0.55
   cardTiltDegrees: 12
+  armRestSwing: -4
+  armRestDrop: 8
   gestureInterval: 4.8
   gestureIntervalJitter: 2.88
   cardRenderer: {fileID: 5707682017432730144}

@@ -25,11 +25,18 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _MottleAmount: 0.72
+    - _DryAmount: 0.3
+    - _GrainAmount: 0.13
+    - _GrainScale: 0.8
+    - _MottleAmount: 0.75
     - _MottleScale: 0.055
     - _OldStripe: 0.055
+    - _PatchAmount: 0.5
+    - _PatchScale: 0.011
     - _Wrap: 0.38
     m_Colors:
+    - _DryTint: {r: 0.27467737, g: 0.39157256, b: 0.06847818, a: 1}
+    - _PatchDark: {r: 0.025186857, g: 0.14702728, b: 0.023153365, a: 1}
     - _UncutBase: {r: 0.048171822, g: 0.25415218, b: 0.034339808, a: 1}
     - _UncutTip: {r: 0.15896086, g: 0.5149178, b: 0.07227186, a: 1}
   m_BuildTextureStacks: []

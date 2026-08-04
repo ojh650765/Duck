@@ -728,7 +728,9 @@ namespace DuckMow.EditorTools
                     {
                         position = pos,
                         yaw = yaw + Range(-16f, 16f),
-                        scale = Range(0.85f, 1.18f),
+                        // Bigger. At the old scale a spectator was two thirds the height of the
+                        // animals on the field, so a full stand read as a row of pebbles.
+                        scale = Range(1.25f, 1.62f),
                         species = _rng.Next(0, 8),
                         phase = Rand
                     });
@@ -896,7 +898,9 @@ namespace DuckMow.EditorTools
                 if (authoredStake == null)
                     stakeComb.Add(flagMesh, Matrix4x4.TRS(pos + Vector3.up * 1.0f, Quaternion.Euler(180f, Range(0f, 360f), 0f), Vector3.one), Mat("M_TentRed"));
             }
-            stakeComb.Emit(p, "MarkerStakes", true);
+            // The stakes stand on the lawn itself, so they get colliders too — they mark the
+            // judged area and clipping through the corner marker is worse than being stopped by it.
+            stakeComb.Emit(p, "MarkerStakes", true, addCollider: true);
 
             // Hay bales, wheelbarrows and clutter on the apron — lived-in, not scattered.
             var clutter = new Combiner();
@@ -933,7 +937,10 @@ namespace DuckMow.EditorTools
             PlaceProp("Thermos", "Thermos", new Vector3(1.1f, 0.83f, -38.9f), 20f);
             PlaceProp("Sprinkler", "Sprinkler", new Vector3(-34f, 0f, 12f), 0f);
             PlaceProp("Scoreboard", "ScoreboardProp", new Vector3(0f, 0f, FenceRadius + 2.4f), 180f);
-            clutter.Emit(p, "Clutter");
+            // Solid. Hay bales, a wheelbarrow and a trophy plinth that the mower drives straight
+            // through are scenery; ones it can hit are part of the game — bonks feed the style
+            // score, and a bale you have to steer around is a reason to look where you are going.
+            clutter.Emit(p, "Clutter", true, addCollider: true);
 
             // Garden gnomes: knockable, comedic, and the only real obstacle on the lawn.
             var gnomeRoot = new GameObject("Gnomes").transform;

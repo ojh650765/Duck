@@ -330,6 +330,11 @@ namespace DuckMow.EditorTools
                 JudgeTemperament.Severe, JudgeTemperament.Boisterous, JudgeTemperament.Aloof
             };
             float[] gestureGap = { 3.4f, 3.6f, 4.8f };
+            // Mildred, Boris, Priscilla. Boris is the one authored with his arms out to the sides
+            // for a broad-triangle silhouette; seated at a bench that reads as holding them up, so
+            // he gets the most correction.
+            float[] armRestSwing = { -6f, -10f, -4f };
+            float[] armRestDrop = { 12f, 34f, 8f };
 
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(judgesModel);
             PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
@@ -372,6 +377,8 @@ namespace DuckMow.EditorTools
                 jc.idleAmount = idleAmount[i];
                 jc.leanAngle = lean[i];
                 jc.temperament = temperaments[i];
+                jc.armRestSwing = armRestSwing[i];
+                jc.armRestDrop = armRestDrop[i];
                 jc.gestureInterval = gestureGap[i];
                 jc.gestureIntervalJitter = gestureGap[i] * 0.6f;
 
