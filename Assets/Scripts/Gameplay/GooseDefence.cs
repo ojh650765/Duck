@@ -308,6 +308,8 @@ namespace DuckMow
         float _tell;
         /// <summary>1 at contact, decaying. Drives the neck whip and the wings snapping back.</summary>
         float _whip;
+        /// <summary>Metres flown since the last trail mark, so spacing tracks speed.</summary>
+        float _trailRun;
 
         AudioSource _voiceHonk, _voiceLow, _voiceRally;
 
@@ -803,6 +805,7 @@ namespace DuckMow
 
             _gooseState = GooseState.Launched;
             _gooseTimer = 0f;
+            _trailRun = 1.1f;   // first mark on the frame it leaves, not a metre later
             SetGooseHot(true);
 
             // Feel, reused wholesale rather than rebuilt. Bonk was written for gnome impacts and is
@@ -1073,6 +1076,22 @@ namespace DuckMow
                     _gooseVel += Vector3.down * launchGravity * dt;
                     Advance(dt);
                     _gooseTimer += dt;
+                    // The directional trail, and PERFECT ONLY — that is the whole point of it. The goal
+                    // asks for it under "perfect parries should feel dramatically stronger", so putting
+                    // it on every launch would spend the one signal that distinguishes the best hit.
+                    //
+                    // Shed at a fixed distance rather than on a timer, so the spacing reads as SPEED: a
+                    // fast throw lays the same marks further apart, and the trail says how hard it was
+                    // hit as well as where it went.
+                    if (LastStrikeTier == Tier.Perfect)
+                    {
+                        _trailRun += (_goosePos - _goosePrev).magnitude;
+                        if (_trailRun >= 1.1f)
+                        {
+                            _trailRun = 0f;
+                            _fx?.TrailPuff(_goosePos);
+                        }
+                    }
                     // A minimum airtime before it can be called down. Without it, a goose met at ankle
                     // height was already under the landing line on the frame it was struck, so it
                     // "landed" instantly beside the player and got credited to whichever garden was
