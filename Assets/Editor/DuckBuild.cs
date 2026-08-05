@@ -16,7 +16,15 @@ namespace DuckMow.EditorTools
     /// </summary>
     public static class DuckBuild
     {
-        public const string OutputDir = @"C:\Duck\Build\WebGL";
+        /// <summary>
+        /// Where the shipped player is written.
+        ///
+        /// Inside the repository rather than in the ignored Build folder, because this is what
+        /// GitHub Pages publishes — the deploy workflow uploads exactly this directory. It is
+        /// deliberately not called "docs": Pages only serves a branch root or /docs by itself, but
+        /// the Actions deployment used here can publish any path, so the folder can say what it is.
+        /// </summary>
+        public const string OutputDir = @"C:\Duck\Web";
 
         [MenuItem("Duck/6 · Build WebGL", priority = 5)]
         public static void BuildWebGL()

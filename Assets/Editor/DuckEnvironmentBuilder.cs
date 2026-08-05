@@ -95,6 +95,12 @@ namespace DuckMow.EditorTools
             if (existing != null)
             {
                 EditorUtility.CopySerialized(m, existing);
+                // CopySerialized copies the source mesh's NAME across as well, which for a
+                // generated mesh is whatever the primitive was called — "Hill", "SquareRing", or
+                // nothing at all for a combined one. Unity then warns that the main object's name
+                // does not match the file it lives in, once per mesh, on every single rebuild.
+                // Renaming after the copy is the whole fix.
+                existing.name = name;
                 Object.DestroyImmediate(m);
                 EditorUtility.SetDirty(existing);
                 return existing;

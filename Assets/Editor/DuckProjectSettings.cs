@@ -55,13 +55,25 @@ namespace DuckMow.EditorTools
 
             // Brotli is much smaller but needs server support; gzip is the safe default for a
             // build that will be opened straight off disk or from a simple static host.
+            // Gzipped, with the JavaScript decompression fallback below.
+            //
+            // A static host like GitHub Pages cannot add the Content-Encoding header that a
+            // pre-compressed build needs, and serving one without it hangs the loader. The
+            // fallback exists for exactly that case: the loader decompresses in JavaScript
+            // instead. Turning compression off altogether also works and was the first thing
+            // tried, but it took the player from 24 MB to 61 MB — a much worse deal for someone
+            // opening a link than a couple of seconds of decompression.
             PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
             PlayerSettings.WebGL.decompressionFallback = true;
             PlayerSettings.WebGL.dataCaching = true;
             PlayerSettings.WebGL.linkerTarget = WebGLLinkerTarget.Wasm;
             PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.None;
             PlayerSettings.WebGL.memorySize = 512;
-            PlayerSettings.WebGL.template = "APPLICATION:Default";
+            // Our own page rather than Unity's default. The default ships no translation hints,
+            // so a browser set to any language but English puts a translate dialog over the canvas
+            // the moment the page loads, and it routes every runtime warning to a coloured bar
+            // across the game. Both are developer defaults showing through to the player.
+            PlayerSettings.WebGL.template = "PROJECT:DuckMow";
             PlayerSettings.WebGL.powerPreference = WebGLPowerPreference.HighPerformance;
 
             // 60 fps needs vsync off in the player and the frame rate uncapped.

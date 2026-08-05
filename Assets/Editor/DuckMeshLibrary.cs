@@ -58,6 +58,8 @@ namespace DuckMow.EditorTools
                 if (colours != null && colours.Length == mesh.vertexCount) existing.SetColors(colours);
                 existing.SetTriangles(mesh.triangles, 0);
                 existing.RecalculateBounds();
+                // Keep the asset's name matching its filename, or Unity warns on every rebuild.
+                existing.name = name;
                 EditorUtility.SetDirty(existing);
                 Object.DestroyImmediate(mesh);
                 return existing;

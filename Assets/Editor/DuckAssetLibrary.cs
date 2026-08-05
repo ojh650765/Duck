@@ -110,6 +110,8 @@ namespace DuckMow.EditorTools
 
             var mesh = new Mesh { name = saveName, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             mesh.CombineMeshes(combines, true, true);
+            // CombineMeshes clears the name it was given; set it back so it matches the filename.
+            mesh.name = saveName;
             mesh.RecalculateBounds();
 
             EnsureFolder("Assets/Meshes/Authored");

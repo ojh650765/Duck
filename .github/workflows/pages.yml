@@ -1,0 +1,52 @@
+# Publishes the WebGL player to GitHub Pages.
+#
+# Pages on its own can only serve a branch root or /docs. This uses the Actions
+# deployment instead, which can publish any path — so the player lives in Web/,
+# a folder named after what it holds, and nothing has to be shuffled into a
+# directory called "docs" to satisfy the host.
+#
+# The build itself is not run here. Unity needs a licence and a several-gigabyte
+# editor image, and this project builds locally through Duck/6; the workflow's
+# job is only to put the committed output online.
+name: Deploy WebGL to Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['Web/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run should replace a waiting one rather
+# than pile up behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Check the player is actually there
+        run: |
+          test -f Web/index.html || { echo "Web/index.html missing — build with Duck/6 first."; exit 1; }
+          test -d Web/Build || { echo "Web/Build missing — the player did not build."; exit 1; }
+          du -sh Web
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: Web
+      - id: deployment
+        uses: actions/deploy-pages@v4
