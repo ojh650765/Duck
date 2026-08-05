@@ -117,3 +117,14 @@ InitTestScene*.unity*
 /[Cc]aptures/
 # Blender preview renders, likewise regenerated.
 /Art/Blender/previews/
+
+# API keys. Currently just .secrets/typecast.key, read by DuckNarrationBaker to render the
+# cutscene narration. The whole directory rather than the one filename, because the next key
+# somebody adds will be added next to it and will not be added to this file.
+#
+# It is outside Assets/ deliberately: anything under Assets/ is imported, can end up referenced
+# by an asset, and this project's build step publishes Web/ to GitHub Pages.
+/.secrets/
+
+# Python bytecode from the Blender asset scripts. Regenerated on every run.
+/Art/Blender/__pycache__/

@@ -26,7 +26,13 @@ Shader "Duck/GrassBlades"
         _HeightVar   ("Height variation", Range(0, 1)) = 0.45
         _AO          ("Root darkening", Range(0, 1)) = 0.42
         _NormalBias  ("Normal toward up", Range(0, 1)) = 0.55
-        _Wrap        ("Light wrap", Range(0, 0.6)) = 0.32
+        // Blades are yaw-randomised per instance, so at any moment roughly half of the visible
+        // blade area faces away from the sun. At the old 0.32 those faces received a fifth of the
+        // key, and since the field is most of the frame that is what made the whole game read
+        // dark and green: the lawn's red and blue channels were being multiplied away.
+        _Wrap        ("Light wrap", Range(0, 0.6)) = 0.42
+        _AmbientGain ("Ambient gain", Range(0.5, 3)) = 1.05
+        _AmbientFloor("Sky bounce floor", Range(0, 0.4)) = 0.035
 
         _FadeStart ("Height fade start (m)", Float) = 26
         _FadeEnd   ("Height fade end (m)",   Float) = 44
@@ -61,6 +67,7 @@ Shader "Duck/GrassBlades"
                 float4 _UncutBase, _UncutTip, _CutBase, _CutTip, _Translucency;
                 float _CutHeight, _TrackHeight, _CutLayover, _RootJitter, _HeightVar;
                 float _AO, _NormalBias, _Wrap, _FadeStart, _FadeEnd, _ThinStart, _ThinEnd;
+                float _AmbientGain, _AmbientFloor;
             CBUFFER_END
 
             struct Attributes
@@ -191,7 +198,12 @@ Shader "Duck/GrassBlades"
                 half3 trans = _Translucency.rgb * pow(back, 3.0) * IN.heightFrac * 0.55;
 
                 half3 lighting = mainLight.color * wrapped * shadow;
-                half3 ambient = SampleSH(N);
+                // Sky bounce, deliberately cool and deliberately small. The field under the
+                // marquee and inside the tree shadows was falling to a value the eye reads as a
+                // hole in the lawn; a cool floor lifts it without adding more green, which is the
+                // thing there is already too much of.
+                half3 ambient = SampleSH(N) * _AmbientGain
+                                + half3(0.62, 0.76, 1.0) * _AmbientFloor;
 
                 half3 color = IN.color * (lighting + ambient) + trans * mainLight.color * shadow;
                 color = MixFog(color, IN.fogCoord);

@@ -2,7 +2,7 @@
 <!--
   DUCK MOW's page.
 
-  Forked from Unity's default WebGL template for three reasons, all of them about
+  Forked from Unity's default WebGL template for four reasons, all of them about
   what the player sees before and around the game rather than about the game:
 
     1. Chrome offers to translate the page. The default template ships no
@@ -16,6 +16,13 @@
 
     3. A failure to start was an alert() box, which tells a player nothing they
        can act on.
+
+    4. The default template pins the canvas to a fixed pixel size, which is a
+       desktop assumption. On a phone that turns in the player's hands, a fixed
+       canvas is either letterboxed into a corner or spilling off the screen,
+       and it stays wrong until the page is reloaded. Everything under
+       "mobile layout" below exists to make the canvas track the viewport it is
+       actually being shown in.
 -->
 <html lang="en" translate="no">
   <head>
@@ -25,6 +32,24 @@
     <!-- Stop the browser offering to translate a page that is almost entirely a
          canvas. Chrome honours notranslate; the class covers older paths. -->
     <meta name="google" content="notranslate">
+
+    <!-- Static, not injected from script.
+         This used to be created in JavaScript after a user-agent test, which
+         meant the first layout of the page happened at the desktop default of
+         980 CSS px wide and was then re-done at device width — a visible zoom
+         snap on every mobile load. A viewport tag costs a desktop browser
+         nothing, so it belongs in the head where it is read before layout.
+
+         viewport-fit=cover puts the canvas under the notch/home-indicator
+         insets rather than inside a pair of black bars; the on-screen controls
+         are inset from the edges in Unity, so nothing lands under the cutout.
+         maximum-scale + user-scalable stop a double-tap on a control from
+         zooming the page instead of driving the mower. iOS Safari ignores
+         user-scalable by design, which is why fitCanvas() below reads the
+         visual viewport rather than assuming the layout viewport is what the
+         player can see. -->
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 
     <title>{{{ PRODUCT_NAME }}}</title>
     <link rel="shortcut icon" href="TemplateData/favicon.ico">
@@ -46,8 +71,49 @@
         <div id="unity-build-title">{{{ PRODUCT_NAME }}}</div>
       </div>
     </div>
+
+    <!--
+      The portrait gate.
+
+      Duck Mow is a landscape game and cannot be made a portrait game by
+      resizing it: the whole point of the round is the overhead reveal of the
+      picture you mowed, and that shot is framed to put a 34 m field across the
+      screen. A phone held upright has a vertical field of view fixed by the
+      camera and about half the horizontal room, so the reveal crops the
+      picture's left and right off — the payoff the game is built around is the
+      one thing that does not survive the rotation. The driving is second: two
+      thumbs need width, and in portrait they would sit on top of each other.
+
+      So portrait is refused rather than supported, and refused politely. Shown
+      and hidden by a CSS media query rather than by script, because the
+      alternative is reading window dimensions during an orientation change,
+      which is the one moment a browser reliably reports the old ones.
+
+      Visibility is gated on body.duck-touch as well as the media query: a
+      desktop browser window dragged narrower than it is tall is still a
+      desktop, and does not want a "rotate your device" screen.
+    -->
+    <div id="rotate-gate">
+      <div id="rotate-gate-inner">
+        <div id="rotate-gate-icon" aria-hidden="true">
+          <svg viewBox="0 0 100 100" width="100" height="100">
+            <rect x="34" y="14" width="32" height="58" rx="6" ry="6"
+                  fill="none" stroke="currentColor" stroke-width="4"/>
+            <path d="M22 78 A34 34 0 0 0 78 78" fill="none" stroke="currentColor"
+                  stroke-width="4" stroke-linecap="round"/>
+            <path d="M78 78 l-2 -11 l11 4 z" fill="currentColor"/>
+          </svg>
+        </div>
+        <p id="rotate-gate-title">TURN YOUR PHONE SIDEWAYS</p>
+        <p id="rotate-gate-body">Duck Mow is judged on the picture you mow, and
+          the picture only fits on a landscape screen.</p>
+        <button id="rotate-gate-fullscreen" type="button">TRY TO ROTATE FOR ME</button>
+      </div>
+    </div>
+
     <script>
       var canvas = document.querySelector("#unity-canvas");
+      var container = document.querySelector("#unity-container");
 
       // Warnings go to the console, not over the game.
       //
@@ -92,18 +158,160 @@
         showBanner: unityShowBanner,
       };
 
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Mobile: fill the client area with the canvas.
-        var meta = document.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-        document.getElementsByTagName('head')[0].appendChild(meta);
-        document.querySelector("#unity-container").className = "unity-mobile";
+      // ---------------------------------------------------------------- mobile layout
+
+      // Is touch the PRIMARY way this device is pointed at, rather than merely
+      // one of the ways it can be?
+      //
+      // A user-agent test is not enough on its own and is wrong in both
+      // directions: iPadOS Safari reports itself as a Macintosh, so an iPad
+      // fails the string match, while a Windows laptop with a digitiser passes
+      // any touch-capability check and does not want a phone layout. The media
+      // queries are the reliable pair — "coarse" means fingers, "no hover"
+      // means there is no mouse cursor to hover with — and the user-agent test
+      // is kept only as a fallback for browsers that do not implement them.
+      var IS_TOUCH =
+        (window.matchMedia &&
+         matchMedia('(pointer: coarse)').matches &&
+         matchMedia('(hover: none)').matches) ||
+        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      // The backing-store budget, in pixels, for a touch device.
+      //
+      // Unity sizes its drawing buffer at the canvas's CSS size multiplied by
+      // the device pixel ratio, and a modern phone reports 3. A 844x390 CSS
+      // viewport at ratio 3 is 2532x1170 — 2.96 million pixels, nine times the
+      // work of the same canvas at ratio 1, for a fragment shader that draws
+      // grass. It is not a close call: the frame rate goes with it.
+      //
+      // 921,600 is 1280x720. It is chosen because 720p is the resolution this
+      // project's own 60 fps desktop target is comfortable at, so it is the
+      // largest number that can be defended rather than the largest that fits.
+      // On a 844x390 phone it resolves to a ratio of 1.67 (1412x653), which is
+      // sharper than CSS-pixel rendering and well short of native.
+      //
+      // If a real phone test comes back under 60 fps, THIS CONSTANT IS THE
+      // FIRST LEVER, before touching any content: 460,800 (960x480-ish) halves
+      // the fragment cost and still reads. The clamp floor of 0.75 exists
+      // because below that the HUD's outlined text stops being legible, and at
+      // that point a smaller number is not buying playability any more.
+      var MAX_BACKING_PIXELS = 1280 * 720;
+      var DPR_MIN = 0.75, DPR_MAX = 2.0;
+
+      var unityInstance = null;
+
+      // The visible viewport, in CSS pixels.
+      //
+      // window.innerHeight is the wrong number on a phone. It reports the
+      // layout viewport, which includes the strip of screen currently covered
+      // by a collapsing URL bar, so a canvas sized from it is taller than what
+      // the player can see and the bottom of it — where both thumbs live — is
+      // underneath the browser chrome. window.visualViewport is the box that is
+      // actually on screen, and it changes as the chrome slides away.
+      function viewportSize() {
+        var vv = window.visualViewport;
+        if (vv) return { w: Math.round(vv.width), h: Math.round(vv.height) };
+        // documentElement.clientHeight rather than window.innerHeight for the
+        // fallback: it at least excludes classic scrollbars.
+        return {
+          w: Math.round(document.documentElement.clientWidth || window.innerWidth),
+          h: Math.round(document.documentElement.clientHeight || window.innerHeight)
+        };
+      }
+
+      // The device pixel ratio to hand Unity, capped to the budget above.
+      //
+      // Written to Module.devicePixelRatio, which the Unity runtime reads every
+      // time it asks the page how big to make its drawing buffer
+      // (JS_SystemInfo_GetPreferredDevicePixelRatio). Setting it is therefore
+      // enough on its own — the canvas CSS size stays honest and only the
+      // resolution behind it is reduced, so nothing about layout or hit-testing
+      // has to know this happened.
+      function cappedPixelRatio(w, h) {
+        var dpr = window.devicePixelRatio || 1;
+        if (w <= 0 || h <= 0) return dpr;
+        var budget = Math.sqrt(MAX_BACKING_PIXELS / (w * h));
+        return Math.max(DPR_MIN, Math.min(dpr, DPR_MAX, budget));
+      }
+
+      function fitCanvas() {
+        if (!IS_TOUCH) return;
+        var v = viewportSize();
+        if (v.w <= 0 || v.h <= 0) return;
+
+        // Both the container and the canvas, in pixels rather than percentages.
+        // A percentage height resolves against the layout viewport, which is
+        // the number we just went out of our way not to use.
+        container.style.width = v.w + "px";
+        container.style.height = v.h + "px";
+        canvas.style.width = v.w + "px";
+        canvas.style.height = v.h + "px";
+
+        var dpr = cappedPixelRatio(v.w, v.h);
+        config.devicePixelRatio = dpr;                          // before load
+        if (unityInstance) unityInstance.Module.devicePixelRatio = dpr;  // after
+      }
+
+      if (IS_TOUCH) {
+        // Drives both the CSS in style.css and the portrait gate.
+        document.body.classList.add("duck-touch");
+        container.className = "unity-mobile";
         canvas.className = "unity-mobile";
+        fitCanvas();
+
+        // Three listeners, because no one of them fires on every case:
+        //   resize          — desktop-style window changes, and Android rotation
+        //   visualViewport  — URL bar collapsing, and iOS pinch/zoom recovery
+        //   orientationchange — the one that needs the deferred re-read below
+        window.addEventListener("resize", fitCanvas);
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", fitCanvas);
+          window.visualViewport.addEventListener("scroll", fitCanvas);
+        }
+
+        // orientationchange fires BEFORE the browser has applied the new
+        // viewport dimensions, so reading them in the handler gives you the
+        // dimensions you just rotated away from — the canvas ends up sized for
+        // the old orientation and stays that way until something else resizes
+        // it. Re-fitting on the next two frames catches the usual case; the
+        // 350 ms timeout catches iOS Safari, which finishes its rotation
+        // animation before it settles on a height.
+        window.addEventListener("orientationchange", function () {
+          fitCanvas();
+          requestAnimationFrame(function () {
+            fitCanvas();
+            requestAnimationFrame(fitCanvas);
+          });
+          setTimeout(fitCanvas, 350);
+        });
+
+        // The portrait gate's escape hatch.
+        //
+        // screen.orientation.lock only resolves inside fullscreen and only on
+        // Android; iOS Safari implements neither, which is exactly why the gate
+        // is a message the player can act on rather than a spinner waiting for
+        // an API. Both calls are made from inside the click handler because
+        // both require a user gesture, and both failures are swallowed: the
+        // gate is still on screen saying what to do.
+        var gateButton = document.querySelector("#rotate-gate-fullscreen");
+        gateButton.addEventListener("click", function () {
+          var el = document.documentElement;
+          var request = el.requestFullscreen || el.webkitRequestFullscreen;
+          var done = request ? request.call(el) : null;
+          function lock() {
+            if (screen.orientation && screen.orientation.lock) {
+              try { screen.orientation.lock("landscape").catch(function () {}); }
+              catch (e) { /* not supported; the gate's text is the fallback */ }
+            }
+          }
+          if (done && done.then) done.then(lock).catch(lock); else lock();
+        });
       } else {
         canvas.style.width = "{{{ WIDTH }}}px";
         canvas.style.height = "{{{ HEIGHT }}}px";
       }
+
+      // ---------------------------------------------------------------- boot
 
       document.querySelector("#unity-loading-bar").style.display = "block";
 
@@ -112,11 +320,16 @@
       script.onload = () => {
         createUnityInstance(canvas, config, (progress) => {
           document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
-        }).then((unityInstance) => {
+        }).then((instance) => {
+          unityInstance = instance;
           document.querySelector("#unity-loading-bar").style.display = "none";
           document.querySelector("#unity-fullscreen-button").onclick = () => {
             unityInstance.SetFullscreen(1);
           };
+          // Once more now that the instance exists: everything before this
+          // point could only write the ratio into config, and a rotation during
+          // the download would have been recorded there and nowhere else.
+          fitCanvas();
         }).catch((message) => {
           // In the player's language of "something went wrong", not a raw alert.
           unityShowBanner("Duck Mow could not start in this browser. " + message, 'error');

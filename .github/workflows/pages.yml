@@ -8,6 +8,12 @@
 # The build itself is not run here. Unity needs a licence and a several-gigabyte
 # editor image, and this project builds locally through Duck/6; the workflow's
 # job is only to put the committed output online.
+#
+# build.yml is the other route: it runs the same Unity build headlessly and
+# deploys what it produced, but only once a licence secret exists in this
+# repository — see its header. The two share the "pages" concurrency group so
+# they queue behind each other instead of racing. This workflow is the one that
+# has always worked and it does not depend on that one.
 name: Deploy WebGL to Pages
 
 on:

@@ -8,10 +8,25 @@ namespace DuckMow
     /// The in-round HUD and the results screen.
     ///
     /// Everything here fights the same problem: the game is played over a bright, busy, saturated
-    /// lawn, so every element needs its own dark backing or outline or it disappears. Nothing is
-    /// on screen that the player does not need — the timer, how much of the picture is done, the
-    /// boost they earned, and a minimap, because from the chase camera you genuinely cannot tell
-    /// how much of the shape you have filled.
+    /// lawn, so every element needs its own dark backing or outline or it disappears.
+    ///
+    /// What is deliberately NOT here matters more than what is. The round is built on the ground
+    /// guide dissolving a third of the way in and the player finishing from memory, so anything on
+    /// screen that answers "am I in the right place" undoes the whole thing:
+    ///
+    ///   - The corner minimap is gone. It drew the target outline, the cut mask, the spill and the
+    ///     mower's position together, which is the complete answer key.
+    ///   - The "picture filled" percentage is gone. It was worse than the map: it measured cut
+    ///     cells against the hidden target, so the shape could be brute-forced by driving around
+    ///     watching the number climb.
+    ///   - The "MOWN 81 m²" readout that replaced it is gone too, for a different reason: it was
+    ///     unreadable as information. A player cannot tell whether eighty-one square metres is good,
+    ///     so the number confirmed only that the engine was running. It existed to fill the hole the
+    ///     percentage left, which is not a reason for anything to be on a HUD.
+    ///
+    /// What is left is the clock, the shape you were asked for as a static card, the boost gauge, and
+    /// whether the one aerial check is still in hand. Anything proposed for this screen has to beat
+    /// that list rather than merely fit beside it.
     /// </summary>
     [DefaultExecutionOrder(30)]
     public class HUD : MonoBehaviour
@@ -28,14 +43,25 @@ namespace DuckMow
         public TextMeshProUGUI timerText;
         public Image timerRing;
         public Image boostFill;
-        public TextMeshProUGUI coverageText;
-        public Image coverageFill;
-        public RawImage minimap;
+        [Tooltip("The picture asked for, drawn as ink on paper. Static: no position, no progress.")]
+        public RawImage shapeCard;
+
+        [Header("Aerial check")]
+        [Tooltip("Lit while the one-per-round lift is still available, spent once it is used.")]
+        public Image aerialToken;
+        public TextMeshProUGUI aerialHint;
+        public Color aerialReady = new Color(1f, 0.86f, 0.44f);
+        public Color aerialSpent = new Color(0.42f, 0.38f, 0.32f);
 
         [Header("Announcements")]
         public CanvasGroup bannerGroup;
         public TextMeshProUGUI bannerTitle;
         public TextMeshProUGUI bannerSubtitle;
+        [Tooltip("What this round is worth, on a plate under the ribbon. Empty on every banner but " +
+                 "the briefing, and it leaves when the banner does.")]
+        public TextMeshProUGUI bannerGoal;
+        [Tooltip("Hides the goal plate on the banners that have no goal line to carry.")]
+        public CanvasGroup bannerGoalGroup;
         public TextMeshProUGUI countdownText;
 
         [Header("Results")]
@@ -66,32 +92,41 @@ namespace DuckMow
         public TextMeshProUGUI outroPlacing;
         public TextMeshProUGUI outroPrompt;
 
+        // There is deliberately NO championship standing card here, and no round counter anywhere on
+        // this HUD. There was one — a corner panel carrying "ROUND 2 OF 3", the points table and the
+        // placing needed to take the title — and it was cut after a playthrough: it read as chrome
+        // rather than as a goal, and the player looking at it still had to ask what the format was.
+        //
+        // The championship says its piece in exactly two places, both of them transient and both of
+        // them beats the player is already reading: the goal plate on the briefing banner, which
+        // leaves when the banner does, and the ceremony card below. Nothing about it is ever on screen
+        // while the player is mowing.
+
+        [Header("Ceremony")]
+        public CanvasGroup ceremonyGroup;
+        public TextMeshProUGUI ceremonyTitle;
+        public TextMeshProUGUI ceremonySubtitle;
+        public TextMeshProUGUI ceremonyPrompt;
+        [Tooltip("Shown only to a champion. A rosette on a card that says you came third is a joke " +
+                 "at the player's expense.")]
+        public Image ceremonyRosette;
+
         [Header("Feel")]
         public Color timerNormal = new Color(1f, 0.97f, 0.88f);
         public Color timerLow = new Color(1f, 0.42f, 0.32f);
         public float lowTimePulseSpeed = 4.5f;
 
-        Material _minimapMaterial;
         float _clock;
         float _bannerTimer;
         float _shownTotal;
-        static readonly int IdMowerUV = Shader.PropertyToID("_MowerUV");
 
         void Awake()
         {
-            if (minimap != null && minimap.material != null)
-            {
-                // Instance the material so editing it at runtime does not dirty the asset.
-                _minimapMaterial = new Material(minimap.material);
-                minimap.material = _minimapMaterial;
-            }
+            // The shape card needs no material instancing and no per-frame work: it reads the
+            // target distance field straight from the shader globals and never changes during a
+            // round. That is the entire point of it — it is a printed reference, not a display.
             SetGroup(resultsGroup, 0f);
             SetGroup(bannerGroup, 0f);
-        }
-
-        void OnDestroy()
-        {
-            if (_minimapMaterial != null) Destroy(_minimapMaterial);
         }
 
         void Start()
@@ -101,6 +136,7 @@ namespace DuckMow
                 director.OnStateChanged += HandleState;
                 director.OnCountdownTick += HandleCountdown;
                 director.OnContestantRevealed += ShowContestant;
+                director.OnGuideLost += HandleGuideLost;
             }
             if (judges != null)
             {
@@ -124,7 +160,8 @@ namespace DuckMow
             UpdateCountdown(dt);
             UpdateTourCard(dt);
             UpdateOutro(dt);
-            UpdateMinimap();
+            UpdateAerialToken(dt);
+            UpdateCeremonyCard(dt);
         }
 
         // ------------------------------------------------------------------ round HUD
@@ -133,7 +170,10 @@ namespace DuckMow
         {
             if (director == null) return;
 
-            bool showRound = director.State == GameState.Countdown ||
+            // The shape card is up through the preview as well, so the player learns from the first
+            // round that the card is the thing that stays when the ground guide does not.
+            bool showRound = director.State == GameState.Preview ||
+                             director.State == GameState.Countdown ||
                              director.State == GameState.Mowing ||
                              director.State == GameState.Klaxon;
             if (roundGroup != null)
@@ -154,39 +194,44 @@ namespace DuckMow
 
             if (boostFill != null && mower != null)
                 boostFill.fillAmount = Mathf.Lerp(boostFill.fillAmount, mower.BoostFuel, dt * 8f);
-
-            // Coverage is the number that actually tells you how you are doing.
-            float coverage = ComputeCoverage();
-            if (coverageFill != null)
-                coverageFill.fillAmount = Mathf.Lerp(coverageFill.fillAmount, coverage, dt * 5f);
-            if (coverageText != null)
-                coverageText.text = $"{Mathf.RoundToInt(coverage * 100f)}%";
         }
 
-        float ComputeCoverage()
-        {
-            if (cutMask == null || target == null || target.Inside == null || target.InsideCount == 0) return 0f;
+        // The per-frame area count that fed the old "MOWN 81 m²" readout has gone with it. It sampled
+        // every seventh cell of the cut mask on every frame of every round to produce a figure nobody
+        // could act on; leaving it behind would have been a calculation running for no reader.
 
-            // Sampled rather than exhaustive: 65k cells every frame is not worth it for a
-            // progress bar, and every 7th cell is statistically identical at this resolution.
-            var cut = cutMask.Cut;
-            var inside = target.Inside;
-            int hit = 0, total = 0;
-            for (int i = 0; i < cut.Length; i += 7)
+        /// <summary>
+        /// The one-per-round aerial check, shown as a token that is either in hand or spent.
+        ///
+        /// Shown as an object rather than a number because there is only ever one of them: "1"
+        /// reads as a counter the player expects to refill, a single token reads as something you
+        /// are holding and will lose.
+        /// </summary>
+        void UpdateAerialToken(float dt)
+        {
+            if (director == null) return;
+
+            bool inRound = director.State == GameState.Mowing;
+            bool available = director.AerialChecksRemaining > 0;
+
+            if (aerialToken != null)
             {
-                if (!inside[i]) continue;
-                total++;
-                if (cut[i] >= 128) hit++;
-            }
-            return total > 0 ? (float)hit / total : 0f;
-        }
+                Color want = available ? aerialReady : aerialSpent;
+                want.a = inRound ? 1f : 0f;
+                aerialToken.color = Color.Lerp(aerialToken.color, want, dt * 6f);
 
-        void UpdateMinimap()
-        {
-            if (_minimapMaterial == null || mower == null) return;
-            Vector2 uv = Field.WorldToUV(mower.transform.position);
-            Vector3 fwd = mower.transform.forward;
-            _minimapMaterial.SetVector(IdMowerUV, new Vector4(uv.x, uv.y, fwd.x, fwd.z));
+                // A slow pulse while it is still in hand and the guide has gone, which is exactly
+                // the moment the player has forgotten they still have it.
+                float urge = (available && director.GuideVisibility <= 0.01f) ? 1f : 0f;
+                float pulse = urge * (Mathf.Sin(_clock * 3.2f) * 0.5f + 0.5f) * 0.12f;
+                aerialToken.transform.localScale = Vector3.one * (1f + pulse);
+            }
+
+            if (aerialHint != null)
+            {
+                aerialHint.text = available ? "[F]  LOOK" : "USED";
+                aerialHint.alpha = Mathf.MoveTowards(aerialHint.alpha, inRound ? 1f : 0f, dt * 4f);
+            }
         }
 
         // ------------------------------------------------------------------ banner
@@ -197,12 +242,31 @@ namespace DuckMow
             _bannerTimer -= dt;
             float want = _bannerTimer > 0f ? 1f : 0f;
             bannerGroup.alpha = Mathf.MoveTowards(bannerGroup.alpha, want, dt * 3.5f);
+
+            // The goal plate rides inside the banner group, so this only has to decide whether it has
+            // anything to say. Nested alphas multiply: an empty goal is invisible even while the
+            // banner around it is at full strength.
+            if (bannerGoalGroup != null)
+            {
+                bool haveGoal = bannerGoal != null && !string.IsNullOrEmpty(bannerGoal.text);
+                bannerGoalGroup.alpha = Mathf.MoveTowards(bannerGoalGroup.alpha, haveGoal ? 1f : 0f,
+                                                          dt * 3.5f);
+            }
         }
 
-        void ShowBanner(string title, string subtitle, float seconds)
+        /// <summary>
+        /// Put an announcement on screen for a few seconds.
+        ///
+        /// <paramref name="goal"/> is the extra plate under the ribbon. It defaults to empty, which
+        /// means every existing caller clears it without having to know it exists — and that is the
+        /// mechanism that keeps the championship's goal line to the one beat it belongs on rather than
+        /// letting it leak onto "STUDY IT", "TIME!" and the guide-lost banner.
+        /// </summary>
+        void ShowBanner(string title, string subtitle, float seconds, string goal = "")
         {
             if (bannerTitle != null) bannerTitle.text = title;
             if (bannerSubtitle != null) bannerSubtitle.text = subtitle;
+            if (bannerGoal != null) bannerGoal.text = goal ?? "";
             _bannerTimer = seconds;
         }
 
@@ -239,8 +303,23 @@ namespace DuckMow
             {
                 case GameState.Briefing:
                     ClearResults();
-                    ShowBanner("TODAY'S SUBJECT", target != null
-                        ? TargetShapes.DisplayName(target.Shape) : "", 3.2f);
+                    // The subject on the ribbon, and what the round is worth on the plate beneath it.
+                    //
+                    // The label stays "TODAY'S SUBJECT" rather than the round number: a counter in the
+                    // headline is the presentation that was cut. What the championship needs to say is
+                    // not which round this is, it is what this round has to deliver — and that goes
+                    // below, once, at the moment the player is deciding how hard to push.
+                    ShowBanner("TODAY'S SUBJECT",
+                               target != null ? TargetShapes.DisplayName(target.Shape) : "",
+                               3.6f, BriefingGoal());
+                    break;
+
+                case GameState.Preview:
+                    // Name the bargain out loud, once, the first time it matters. A player who
+                    // works out only at second 20 that the outline was going to vanish has already
+                    // lost the round, and will read it as the game cheating rather than as a rule
+                    // they were told.
+                    ShowBanner("STUDY IT", "THE LINES WILL FADE", 3.6f);
                     break;
 
                 case GameState.Klaxon:
@@ -266,23 +345,151 @@ namespace DuckMow
                     // a column of the player's marks over the top of somebody else's artwork is
                     // both a distraction and a misattribution.
                     SetGroup(resultsGroup, 0f);
+                    // Nobody has been posted yet on this tour; the card stays down until the first
+                    // plot is actually reached.
+                    _tourCardShown = false;
                     break;
 
                 case GameState.Scoreboard:
                     SetGroup(resultsGroup, 0f);
+                    // Retire the card rather than only hiding it. Hiding alone is what produced the
+                    // double blink — see UpdateTourCard.
+                    _tourCardShown = false;
                     SetGroup(tourGroup, 0f);
                     // The prompt itself is held back until the board has settled — see UpdateOutro.
                     if (outroGroup != null) outroGroup.alpha = 0f;
                     if (outroPrompt != null)
-                        outroPrompt.text = "[R]  SAME PICTURE AGAIN          [N]  NEW PICTURE";
+                        // Nothing to offer on the last board: the ceremony takes over by itself, and
+                        // a prompt here would invite the player to skip their own prize-giving.
+                        //
+                        // Worded as pictures rather than rounds. R does reset the running points —
+                        // it has to, because they are already banked by the time this board is up —
+                        // but saying so would put the structure back on screen, and "START OVER" is
+                        // true either way.
+                        outroPrompt.text = Champ != null && Champ.IsComplete
+                            ? ""
+                            : "[SPACE]  NEXT PICTURE     [R]  START OVER     [ESC]  MENU";
+                    break;
+
+                case GameState.Ceremony:
+                    SetGroup(resultsGroup, 0f);
+                    FillCeremonyCard();
                     break;
 
                 case GameState.Verdict:
                     SetGroup(resultsGroup, 1f);
                     if (retryHint != null)
-                        retryHint.text = "[R]  RETRY SAME PICTURE        [N]  NEW PICTURE";
+                    {
+                        // With neighbours to visit the round is not over, so the only thing on offer
+                        // is pressing on. Advertising a retry here used to be an invitation to throw
+                        // the round away before it had been added to the championship.
+                        bool tourAhead = director != null && director.tournament != null &&
+                                         director.tournament.rivals.Length > 0;
+                        retryHint.text = tourAhead
+                            ? "[SPACE]  SEE THE VENUE     [ESC]  MENU"
+                            : "[R]  RETRY SAME PICTURE     [N]  NEW PICTURE     [ESC]  MENU";
+                    }
                     break;
             }
+        }
+
+        /// <summary>The points table, or null in a scene assembled without a tournament.</summary>
+        Championship Champ => director != null && director.tournament != null
+            ? director.tournament.Championship : null;
+
+        static readonly Color Gold = new Color(1f, 0.85f, 0.45f);
+        static readonly Color Cream = new Color(0.97f, 0.94f, 0.86f);
+
+        /// <summary>
+        /// What this round is worth, for the plate under the briefing ribbon.
+        ///
+        /// On the first round the scoring rule comes with it, on a second line, because that is the
+        /// only round on which the player does not already know it — and being told once that there
+        /// are three rounds and what a win is worth is the difference between a championship and a
+        /// sequence of unexplained lawns. On the last round the line is a computed guarantee; see
+        /// <see cref="Championship.GoalLine"/>.
+        /// </summary>
+        string BriefingGoal()
+        {
+            var c = Champ;
+            if (c == null) return "";
+            string line = c.GoalLine();
+            if (string.IsNullOrEmpty(line)) return "";
+            return c.HasResults ? line : $"{line}\n{Championship.PointsRule()}";
+        }
+
+        // ------------------------------------------------------------------ ceremony
+
+        /// <summary>
+        /// The closing title card, and the only place in the whole game that says a championship was
+        /// happening at all.
+        ///
+        /// It states the outcome and nothing that was never shown. It used to print the winning point
+        /// total, which stopped making sense the moment the standings card was cut: a number the
+        /// player has never once seen totted up is not evidence, it is trivia. Who took it and where
+        /// the player came are both things three rounds of play have already made felt.
+        ///
+        /// A defeat is written out as plainly as a win, because the one thing a losing player must not
+        /// be left with is a screen that simply stops.
+        /// </summary>
+        void FillCeremonyCard()
+        {
+            var c = Champ;
+            if (c == null) return;
+
+            bool won = c.PlayerIsChampion;
+
+            if (ceremonyTitle != null)
+            {
+                ceremonyTitle.text = won ? "CHAMPION" : "CHAMPIONSHIP OVER";
+                ceremonyTitle.color = won ? Gold : Cream;
+            }
+
+            if (ceremonySubtitle != null)
+            {
+                var lead = c.Leader;
+                ceremonySubtitle.text = won
+                    ? "COUNTY GARDENER OF THE YEAR"
+                    : $"{lead.name} THE {lead.species.ToUpperInvariant()} TAKES THE COUNTY · " +
+                      $"YOU FINISHED {Championship.Ordinal(c.PlayerPlace)}";
+            }
+
+            if (ceremonyRosette != null)
+            {
+                bool have = won && rosetteByRank != null && rosetteByRank.Length > 0 &&
+                            rosetteByRank[0] != null;
+                if (have) ceremonyRosette.sprite = rosetteByRank[0];
+                ceremonyRosette.enabled = have;
+            }
+
+            if (ceremonyPrompt != null) ceremonyPrompt.text = "[SPACE]  PLAY AGAIN";
+        }
+
+        void UpdateCeremonyCard(float dt)
+        {
+            if (ceremonyGroup == null || director == null) return;
+
+            var ceremony = director.Ceremony;
+            bool show = director.State == GameState.Ceremony && ceremony != null && ceremony.CardUp;
+            ceremonyGroup.alpha = Mathf.MoveTowards(ceremonyGroup.alpha, show ? 1f : 0f, dt * 2.2f);
+
+            // The prompt trails the card. Offering the exit in the same frame as the title tells the
+            // player the sequence is something to get past.
+            if (ceremonyPrompt != null)
+                ceremonyPrompt.alpha = Mathf.MoveTowards(ceremonyPrompt.alpha,
+                    show && ceremony.PromptUp ? 1f : 0f, dt * 2.2f);
+        }
+
+        /// <summary>
+        /// The moment the outline finishes dissolving. Called once per round.
+        ///
+        /// This gets a banner because it is the round's turning point and it happens somewhere in
+        /// the middle of open lawn with no other punctuation — without it, players reported the
+        /// guide "glitching out" rather than reading it as a beat they were meant to feel.
+        /// </summary>
+        void HandleGuideLost()
+        {
+            ShowBanner("FROM MEMORY", "THE CHALK IS GONE", 2.2f);
         }
 
         /// <summary>
@@ -304,18 +511,31 @@ namespace DuckMow
                 tourPortrait.texture = tex;
                 tourPortrait.enabled = tex != null;
             }
-            SetGroup(tourGroup, 1f);
-            _tourCardTimer = 3.4f;
+            _tourCardShown = true;
         }
 
-        float _tourCardTimer;
+        bool _tourCardShown;
 
+        /// <summary>
+        /// The contestant card is visible for as long as the tour is running, and not one moment
+        /// longer.
+        ///
+        /// It used to be driven by a 3.4 s stopwatch, which was wrong at both ends. Between plots,
+        /// a three-second hold plus a two-second flight to the next lawn outlasted the timer, so
+        /// the card died in mid-air and came back — a blink between every contestant. And at the
+        /// end of the tour it fought the Scoreboard state: HandleState snapped the group to zero
+        /// while the timer still had time left on it, and this method faded it straight back up
+        /// again on the very next frame before finally letting it go. That is the double blink on
+        /// the last contestant.
+        ///
+        /// Tying it to the state instead means there is exactly one authority for whether the card
+        /// is up, which is the same rule every other group on this HUD follows.
+        /// </summary>
         void UpdateTourCard(float dt)
         {
             if (tourGroup == null) return;
-            if (_tourCardTimer > 0f) _tourCardTimer -= dt;
-            float want = _tourCardTimer > 0f ? 1f : 0f;
-            tourGroup.alpha = Mathf.MoveTowards(tourGroup.alpha, want, dt * 3.2f);
+            bool show = _tourCardShown && director != null && director.State == GameState.VenueTour;
+            tourGroup.alpha = Mathf.MoveTowards(tourGroup.alpha, show ? 1f : 0f, dt * 3.2f);
         }
 
         /// <summary>
@@ -341,14 +561,18 @@ namespace DuckMow
                 var t = director.tournament;
                 if (t != null)
                 {
+                    // This board shows one picture's result, and the line under it says only that.
+                    //
+                    // It used to read "YOU WON THE CHAMPIONSHIP" off a single round's placing, which
+                    // was a lie every time it appeared. The fix for that briefly went too far the
+                    // other way — "YOU WON ROUND 1 · +5 POINTS" — which put a round counter and a
+                    // running tally back on screen, and both are gone by request.
                     int place = t.PlayerPlace;
                     int of = Mathf.Max(t.Standings.Count, 1);
-                    string ordinal = place switch { 1 => "1st", 2 => "2nd", 3 => "3rd", _ => place + "th" };
                     outroPlacing.text = place == 1
-                        ? $"YOU WON THE CHAMPIONSHIP"
-                        : $"YOU PLACED {ordinal} OF {of}";
-                    outroPlacing.color = place == 1 ? new Color(1f, 0.85f, 0.45f)
-                                                    : new Color(0.97f, 0.94f, 0.86f);
+                        ? "YOU WON THIS ONE"
+                        : $"{Championship.Ordinal(place)} OF {of} THIS TIME";
+                    outroPlacing.color = place == 1 ? Gold : Cream;
                 }
             }
 

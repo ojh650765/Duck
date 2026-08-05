@@ -167,11 +167,21 @@ namespace DuckMow
             float eyeL = Circle(p - new Vector2(-0.32f, 0.30f), 0.155f);
             float eyeR = Circle(p - new Vector2(0.32f, 0.30f), 0.155f);
 
-            // Mouth: an arc carved as the difference of two offset circles, clipped below.
+            // Mouth: an arc carved as the difference of two offset circles, clipped to the lower
+            // half so only the smile survives and not the whole ring.
             float outer = Circle(p - new Vector2(0f, 0.06f), 0.60f);
             float inner = Circle(p - new Vector2(0f, 0.06f), 0.44f);
             float band = Mathf.Max(outer, -inner);
-            float lower = -(p.y + 0.10f);              // keep only the lower half
+
+            // The sign here was inverted, and it is the reason the eyes and the mouth ran together.
+            //
+            // Inside is negative, so the half-plane that KEEPS the lower half has to be negative
+            // below the cut: p.y + 0.10. Written as -(p.y + 0.10) it kept the upper half instead,
+            // which left the top of the ring in place — an arc reaching y = 0.66, straight through
+            // eyes that sit between y = 0.145 and y = 0.455. They were never touching by accident;
+            // they were one connected hole, so the face had a slot across it rather than an
+            // expression, and the mown result could not read as a smile at any size.
+            float lower = p.y + 0.10f;
             float mouth = Mathf.Max(band, lower);
 
             float d = face;

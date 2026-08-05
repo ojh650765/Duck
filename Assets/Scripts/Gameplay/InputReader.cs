@@ -34,7 +34,11 @@ namespace DuckMow
         public bool HornPressed { get; private set; }
         public bool RetryPressed { get; private set; }
         public bool NextPressed { get; private set; }
+        /// <summary>Escape. The way back to the front page — see GameDirector.BackToMenu.</summary>
+        public bool MenuPressed { get; private set; }
         public bool AnyConfirmPressed { get; private set; }
+        /// <summary>The one-per-round lift. F rather than Tab, which the browser steals for focus.</summary>
+        public bool AerialPressed { get; private set; }
 
         /// <summary>Set false during countdown, klaxon and results so the mower ignores input.</summary>
         public bool DrivingEnabled { get; set; } = true;
@@ -69,7 +73,8 @@ namespace DuckMow
 
             float steerRaw = 0f, throttleRaw = 0f;
             bool handbrake = false, boost = false, boostDown = false;
-            bool horn = false, retry = false, next = false, confirm = false;
+            bool horn = false, retry = false, next = false, confirm = false, aerial = false;
+            bool menu = false;
 
             if (kb != null)
             {
@@ -84,7 +89,9 @@ namespace DuckMow
                 horn = kb.eKey.wasPressedThisFrame || kb.qKey.wasPressedThisFrame;
                 retry = kb.rKey.wasPressedThisFrame;
                 next = kb.nKey.wasPressedThisFrame;
+                menu = kb.escapeKey.wasPressedThisFrame;
                 confirm = kb.enterKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame;
+                aerial = kb.fKey.wasPressedThisFrame;
             }
 
             if (pad != null)
@@ -101,7 +108,19 @@ namespace DuckMow
                 horn |= pad.buttonWest.wasPressedThisFrame;
                 retry |= pad.buttonNorth.wasPressedThisFrame;
                 confirm |= pad.buttonSouth.wasPressedThisFrame || pad.startButton.wasPressedThisFrame;
+                aerial |= pad.leftShoulder.wasPressedThisFrame;
             }
+
+            // Button edges pushed in from the on-screen controls, folded in alongside the devices.
+            //
+            // SetOverride carries the four HELD inputs and is enough for steering and throttle, but
+            // horn, aerial and confirm are wasPressedThisFrame EDGES — a held value cannot express
+            // "went down this frame", so a touch build had no way to honk, look, or advance past the
+            // results card. That last one is not a missing nicety: a phone player reached the end of
+            // a round and could not leave it.
+            horn |= _pHorn; aerial |= _pAerial; confirm |= _pConfirm;
+            retry |= _pRetry; menu |= _pMenu;
+            _pHorn = _pAerial = _pConfirm = _pRetry = _pMenu = false;
 
             _rawSteer = Mathf.Clamp(steerRaw, -1f, 1f);
             _rawThrottle = Mathf.Clamp(throttleRaw, -1f, 1f);
@@ -126,8 +145,30 @@ namespace DuckMow
             HornPressed = horn;
             RetryPressed = retry;
             NextPressed = next;
+            MenuPressed = menu;
             AnyConfirmPressed = confirm;
+            // Read before the DrivingEnabled gate above would matter — the lift is not a driving
+            // input, and it is deliberately still available in the moment the guide dissolves.
+            AerialPressed = aerial;
         }
+
+        /// <summary>
+        /// One-frame button edges from a source that is not a device — the on-screen controls.
+        ///
+        /// ORed rather than assigned, so a pulse raised before this component ticks cannot be erased
+        /// by a second caller in the same frame. Consumed and cleared inside Tick, which is what
+        /// keeps a pulse exactly one frame long however often it is pushed.
+        ///
+        /// Retry and menu are in the signature although nothing sends them yet: a phone build wants a
+        /// retry affordance next, and widening this method a second time for the same reason is worse
+        /// than two parameters that are wired early.
+        /// </summary>
+        public void PulseButtons(bool horn, bool aerial, bool confirm, bool retry, bool menu)
+        {
+            _pHorn |= horn; _pAerial |= aerial; _pConfirm |= confirm;
+            _pRetry |= retry; _pMenu |= menu;
+        }
+        bool _pHorn, _pAerial, _pConfirm, _pRetry, _pMenu;
 
         public void ResetSmoothing()
         {

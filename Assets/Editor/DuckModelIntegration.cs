@@ -124,10 +124,20 @@ namespace DuckMow.EditorTools
             return null;
         }
 
+        /// <summary>
+        /// Paint every renderer under a model, skinned ones included.
+        ///
+        /// This walked MeshRenderer only, which was correct while every authored asset was a
+        /// static mesh and silently wrong the moment the judges became skinned characters:
+        /// SkinnedMeshRenderer does not derive from MeshRenderer — they are siblings under
+        /// Renderer — so the judges kept the importer's default material and rendered as blank
+        /// white. Nothing logged, because nothing failed.
+        /// </summary>
         static void ApplyMaterial(GameObject root, Material mat, bool castShadows = true)
         {
-            foreach (var r in root.GetComponentsInChildren<MeshRenderer>(true))
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
             {
+                if (!(r is MeshRenderer || r is SkinnedMeshRenderer)) continue;
                 var mats = new Material[Mathf.Max(1, r.sharedMaterials.Length)];
                 for (int i = 0; i < mats.Length; i++) mats[i] = mat;
                 r.sharedMaterials = mats;
@@ -313,81 +323,81 @@ namespace DuckMow.EditorTools
 
         // ------------------------------------------------------------------ judges
 
+        /// <summary>
+        /// One prefab per judge, from that judge's own skinned model.
+        ///
+        /// This used to unpack a single Judges.fbx and pull three transform hierarchies out of it,
+        /// wiring Body / Head / Arm_L / Arm_R to a component that animated them with noise. The
+        /// judges are now skinned to a nine-bone rig with hand-keyed clips, and they arrive one
+        /// file each — because Blender's exporter writes every take onto every armature in a file,
+        /// which turned twelve clips into thirty-six with two thirds of them being one judge's
+        /// performance on another's skeleton.
+        /// </summary>
         public static void BuildJudgePrefabs()
         {
-            var judgesModel = LoadModel("Judges.fbx");
-            if (judgesModel == null) return;
-
             EnsureFolder($"{PrefabDir}/Judges");
             var mat = AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/M_Judges.mat");
 
-            string[] names = { "Mildred", "Boris", "Priscilla" };
+            string[] names = DuckJudgeRig.Names;
             float[] idleSpeed = { 1.0f, 1.15f, 0.55f };
-            float[] idleAmount = { 1.0f, 1.05f, 0.5f };
-            float[] lean = { 10f, 12f, 5f };
             var temperaments = new[]
             {
                 JudgeTemperament.Severe, JudgeTemperament.Boisterous, JudgeTemperament.Aloof
             };
-            float[] gestureGap = { 3.4f, 3.6f, 4.8f };
-            // Mildred, Boris, Priscilla. Boris is the one authored with his arms out to the sides
-            // for a broad-triangle silhouette; seated at a bench that reads as holding them up, so
-            // he gets the most correction.
-            float[] armRestSwing = { -6f, -10f, -4f };
-            float[] armRestDrop = { 12f, 34f, 8f };
-
-            var instance = (GameObject)PrefabUtility.InstantiatePrefab(judgesModel);
-            PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
-
-            // Judges.fbx puts the conversion rotation on each judge's own root rather than on the
-            // file root, so read it from the first one we find.
-            Quaternion rootRotation = Quaternion.identity;
-            var probe = FindDeep(instance.transform, "Mildred_Root") ?? FindDeep(instance.transform, "Boris_Root");
-            if (probe != null) rootRotation = probe.localRotation;
-            else rootRotation = instance.transform.localRotation;
 
             for (int i = 0; i < names.Length; i++)
             {
-                var found = FindDeep(instance.transform, $"{names[i]}_Root");
-                if (found == null)
+                string judge = names[i];
+
+                // Import settings first: an FBX that lands with animationType None imports no
+                // clips at all, and the controller below would then be built against nothing.
+                DuckJudgeRig.ConfigureImport(judge);
+                var controller = DuckJudgeRig.BuildController(judge);
+
+                var model = AssetDatabase.LoadAssetAtPath<GameObject>(DuckJudgeRig.ModelPath(judge));
+                if (model == null)
                 {
-                    Debug.LogWarning($"[Duck] Judge root not found: {names[i]}_Root");
+                    Debug.LogWarning($"[Duck] Judge model missing: {DuckJudgeRig.ModelPath(judge)}");
                     continue;
                 }
 
-                var go = new GameObject($"Judge_{names[i]}");
-                found.SetParent(go.transform, false);
-                found.localPosition = Vector3.zero;
-                // Keep the FBX root's axis-conversion rotation. Resetting it to identity leaves
-                // the model in Blender's Z-up space, which is why the judges were face down.
-                found.localRotation = rootRotation;
+                var instance = (GameObject)PrefabUtility.InstantiatePrefab(model);
+                PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely,
+                                                   InteractionMode.AutomatedAction);
+
+                var go = new GameObject($"Judge_{judge}");
+                instance.transform.SetParent(go.transform, false);
+                instance.transform.localPosition = Vector3.zero;
                 ApplyMaterial(go, mat);
 
+                var animator = go.GetComponentInChildren<Animator>();
+                if (animator == null) animator = instance.AddComponent<Animator>();
+                if (controller != null) animator.runtimeAnimatorController = controller;
+                animator.applyRootMotion = false;
+                animator.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
+
                 var jc = go.AddComponent<JudgeCharacter>();
-                jc.body = FindDeep(found, $"{names[i]}_Body");
-                jc.head = FindDeep(found, $"{names[i]}_Head");
-                jc.armL = FindDeep(found, $"{names[i]}_Arm_L");
-                jc.armR = FindDeep(found, $"{names[i]}_Arm_R");
-                jc.card = BuildDeskCard(FindDeep(found, $"{names[i]}_Card"), go.transform,
+                jc.animator = animator;
+                // The Head BONE, not the old head mesh. Its origin is the pivot the head geometry
+                // was built around, which is what makes the look-at safe to apply on top.
+                jc.head = FindDeep(go.transform, "Head");
+                jc.card = BuildDeskCard(FindDeep(go.transform, $"{judge}_Card"), go.transform,
                                         out var cardRend, out var cardText, out var cardVis);
                 jc.cardRenderer = cardRend;
                 jc.cardNumber = cardText;
                 jc.cardVisual = cardVis;
                 jc.idleSpeed = idleSpeed[i];
-                jc.idleAmount = idleAmount[i];
-                jc.leanAngle = lean[i];
                 jc.temperament = temperaments[i];
-                jc.armRestSwing = armRestSwing[i];
-                jc.armRestDrop = armRestDrop[i];
-                jc.gestureInterval = gestureGap[i];
-                jc.gestureIntervalJitter = gestureGap[i] * 0.6f;
 
-                PrefabUtility.SaveAsPrefabAsset(go, $"{PrefabDir}/Judges/Judge_{names[i]}.prefab");
+                if (jc.head == null)
+                    Debug.LogWarning($"[Duck] {judge}: Head bone not found; the judge will not " +
+                                     "track the mower.");
+
+                PrefabUtility.SaveAsPrefabAsset(go, $"{PrefabDir}/Judges/Judge_{judge}.prefab");
                 Object.DestroyImmediate(go);
             }
 
-            Object.DestroyImmediate(instance);
-            Debug.Log("[Duck] Judge prefabs written.");
+            Debug.Log("[Duck] Judge prefabs written from the skinned rigs.");
         }
 
         /// <summary>
@@ -473,13 +483,17 @@ namespace DuckMow.EditorTools
 
         static Material Mat(string name) => AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{name}.mat");
 
-        /// <summary>Where the scorecard stands, relative to the judge root.</summary>
         /// <summary>
         /// Where the scorecard stands, relative to the judge root. Offset to one side: dead centre
         /// put a 40 cm plate directly across the judge's face at exactly the moment the close-up
         /// exists to show their reaction.
+        ///
+        /// The y is not free. It has to land the hinge on the bench top, and it is measured from the
+        /// judge root, so it is only correct for one seat height: DuckSceneBuilder seats the judges
+        /// at y = 0.68 and the bench top is at 0.83, which leaves 0.15. Raising the judges without
+        /// bringing this down stands the cards in mid-air above the desk.
         /// </summary>
-        public static readonly Vector3 DeskCardPosition = new Vector3(0.30f, 0.34f, 0.54f);
+        public static readonly Vector3 DeskCardPosition = new Vector3(0.30f, 0.15f, 0.54f);
         const float DeskCardWidth = 0.32f;
         const float DeskCardHeight = 0.36f;
         const float DeskCardNumberHeight = 0.18f;

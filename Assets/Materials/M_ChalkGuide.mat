@@ -26,6 +26,11 @@ Material:
     m_Ints: []
     m_Floats:
     - _AnalysisAmount: 0
+    - _AnchorAmount: 1
+    - _AnchorArm: 2.6
+    - _AnchorWidth: 0.26
+    - _Dissolve: 0
+    - _DissolveEdge: 0.55
     - _GhostAmount: 0
     - _LineAlpha: 0.6
     - _LineWidth: 0.34
@@ -33,6 +38,7 @@ Material:
     - _ScuffFade: 0.75
     - _SweepPhase: 1.2
     m_Colors:
+    - _AnchorColor: {r: 0.96999997, g: 0.93, b: 0.8, a: 1}
     - _ChalkColor: {r: 0.9301109, g: 0.8962694, b: 0.77582234, a: 1}
     - _GhostFill: {r: 1, g: 0.95, b: 0.54999995, a: 1}
     - _MissColor: {r: 0.85, g: 0.24999997, b: 0.21999997, a: 1}

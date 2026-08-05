@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: M_WoodWarm
-  m_Shader: {fileID: 4800000, guid: 5ed2f05fb4e956f439e3bf4b694d0edb, type: 3}
+  m_Shader: {fileID: 4800000, guid: 33d760ed7801e41469336adac3a43a84, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -26,20 +26,40 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _AmbientFloor: 0.16
+    - _AmbientGain: 1.35
     - _Cull: 2
     - _Cutoff: 0.5
+    - _DetailFadeRange: 26
+    - _DetailFadeStart: 18
+    - _GrainAmount: 0.34
+    - _GrainScale: 22
+    - _GrainStretch: 0.06
+    - _KnotAmount: 0.28
+    - _KnotScale: 1.8
+    - _KnotThreshold: 0.8
     - _Metallic: 0
     - _OcclusionBoost: 1
+    - _PlankOffset: 0.5
+    - _PlankVary: 0.06
+    - _PlankWidth: 0.26
     - _RimPower: 4
     - _RimStrength: 0.18
-    - _Smoothness: 0.18
+    - _SeamDepth: 0.55
+    - _SeamWidth: 0.008
+    - _Smoothness: 0.3
+    - _ToneVary: 0.07
     - _VertexColorAmount: 1
     - _VertexColorSRGB: 0
-    - _Wrap: 0.65
+    - _WarpAmount: 0.02
+    - _WarpFreq: 4
+    - _Wrap: 0.38
     m_Colors:
-    - _BaseColor: {r: 0.32314324, g: 0.14702728, b: 0.052860655, a: 1}
+    - _BaseColor: {r: 0.3967553, g: 0.18447499, b: 0.049706563, a: 1}
+    - _GrainColor: {r: 0.19461781, g: 0.07818743, b: 0.020288562, a: 1}
+    - _GrainDir: {r: 1, g: 0, b: 0, a: 0}
     - _InstanceColor: {r: 1, g: 1, b: 1, a: 1}
     - _RimColor: {r: 1, g: 0.8962694, b: 0.68668544, a: 1}
-    - _ShadowTint: {r: 0.26225072, g: 0.39157256, b: 0.6724432, a: 1}
+    - _ShadowTint: {r: 0.111932434, g: 0.1980693, b: 0.4341537, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

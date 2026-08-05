@@ -26,6 +26,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _AmbientFloor: 0.16
+    - _AmbientGain: 1.35
     - _Cull: 2
     - _Cutoff: 0.5
     - _Metallic: 0
@@ -35,11 +37,11 @@ Material:
     - _Smoothness: 0.1
     - _VertexColorAmount: 1
     - _VertexColorSRGB: 0
-    - _Wrap: 0.65
+    - _Wrap: 0.38
     m_Colors:
     - _BaseColor: {r: 0.48514998, g: 0.32314324, b: 0.14702728, a: 1}
     - _InstanceColor: {r: 1, g: 1, b: 1, a: 1}
     - _RimColor: {r: 1, g: 0.8962694, b: 0.68668544, a: 1}
-    - _ShadowTint: {r: 0.26225072, g: 0.39157256, b: 0.6724432, a: 1}
+    - _ShadowTint: {r: 0.111932434, g: 0.1980693, b: 0.4341537, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

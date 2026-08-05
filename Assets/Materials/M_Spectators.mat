@@ -27,6 +27,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _AmbientFloor: 0.16
+    - _AmbientGain: 1.35
     - _Cull: 2
     - _Cutoff: 0.5
     - _Metallic: 0

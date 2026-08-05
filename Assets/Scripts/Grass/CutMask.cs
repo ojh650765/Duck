@@ -186,7 +186,25 @@ namespace DuckMow
         /// <summary>Uploads this frame's accumulated swaths to the mask render texture.</summary>
         public void Flush()
         {
-            if (!_dirty || _verts.Count == 0) return;
+            if (!_dirty || _verts == null || _verts.Count == 0) return;
+
+            // The mesh and the command buffer are rebuilt if they have gone missing, because they
+            // can, and _dirty cannot tell you that they have.
+            //
+            // A recompile while the editor is in play mode reloads the domain. Unity restores a
+            // component's simple state across that and drops the rest: _dirty comes back true and
+            // _verts comes back populated, while _cb — a CommandBuffer, not serializable — comes
+            // back null. Flush then ran on a half-restored component and threw on every frame for
+            // the remainder of the session. It cannot happen in a player, which never reloads a
+            // domain, but it hides real exceptions during exactly the edit-and-play loop this
+            // project is developed in.
+            if (_mesh == null)
+            {
+                _mesh = new Mesh { name = "CutStampMesh", indexFormat = UnityEngine.Rendering.IndexFormat.UInt16 };
+                _mesh.MarkDynamic();
+                _mesh.subMeshCount = 2;
+            }
+            if (_cb == null) _cb = new CommandBuffer { name = "CutMask.Stamp" };
 
             _mesh.Clear();
             _mesh.SetVertices(_verts);

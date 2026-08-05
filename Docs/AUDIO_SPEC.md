@@ -4,6 +4,11 @@
 no libraries, no AI providers. Sources live in `Art/Python/audio/`, renders in
 `Assets/Audio/<Category>/`.
 
+> **One exception, added later: the cutscene narration.** The 13 spoken lines in
+> `Assets/Audio/Narration/` are **not** synthesised here — they come from the
+> Typecast TTS API. Nothing else in the game does, and nothing at runtime talks
+> to a provider. See **§8**.
+
 **Format:** 16-bit PCM WAV, 44 100 Hz. Mono for SFX, stereo for music, the crowd
 bed and ambience. Every clip is peak-normalised to **−1.5 dBFS**; nothing clips.
 
@@ -570,3 +575,85 @@ sit at the 38.2 Hz crossover:
   energy difference at the idle↔mid crossover is 8.9 dB (in 160–320 Hz) and at
   mid↔high 11.6 dB (in 640–1.3 kHz). That difference *is* the "engine opens up"
   effect; a ±6 % RPM crossfade band spreads it over roughly 275 RPM.
+
+---
+
+## 8. Narration/ — the one clip set not synthesised here
+
+The opening cutscene's 13 narration lines are spoken aloud. They are rendered by
+**Typecast** (`api.typecast.ai`), not by `Art/Python/audio/`, and that is a real
+exception to the rule at the top of this document rather than an oversight. The
+reason is simply that nothing in `dsp.py` synthesises English speech, and the
+band those lines sit in is the only thing telling the opening story.
+
+Everything else about the exception is bounded:
+
+* **Nothing at runtime talks to a provider.** The bake happens once in the
+  editor, the result is 13 WAVs in `Assets/Audio/Narration/`, and the build
+  contains audio files like any other. **No API key exists in the game**, which
+  is the only defensible arrangement for a WebGL build.
+* **The lines are not authored twice.** `DuckNarrationBaker` reads them out of
+  `DuckCutsceneBuilder`'s panel table, so the voice cannot say something the
+  narration band does not show.
+* **Reproducible, like the rest.** Fixed `seed` per line, so re-baking an
+  unchanged line returns the same reading.
+
+### How to re-render
+
+```
+Duck/Diagnose · List Typecast voices             # pick a voice_id
+Duck/5 · Bake cutscene narration (Typecast)      # skips lines already on disk
+Duck/5 · Re-bake cutscene narration (overwrite)  # after changing voice or tempo
+Duck/3 · Rebuild opening cutscene (open scene)   # re-times the page around them
+```
+
+**The key is not in this repository and must not be.** Either set
+`TYPECAST_API_KEY` in the environment, or put the key on its own line in
+`.secrets/typecast.key` (git-ignored — `/.secrets/` in `.gitignore`).
+
+The knobs are consts at the top of `Assets/Editor/DuckNarrationBaker.cs`:
+`VoiceId`, `Model` (`ssfm-v30`), `Tempo` (0.94), `TargetLufs` (−16). Note that
+`TargetLufs` is *not* the −1.5 dBFS peak normalisation the other 63 clips use —
+speech wants a loudness target, not a peak target, and 13 separate API calls
+would otherwise land at 13 slightly different levels. The one runtime knob is
+`ComicSequence.narrationVolume` (0.85), which moves all 13 together.
+
+### Timing — why this changes the cutscene's length
+
+A written line has no duration, so the sequence used to split a panel's hold
+evenly between its lines. A *spoken* line does, so it cannot. `Duck/3` now
+measures each imported clip and writes a per-line hold into `ComicPanel`:
+
+```
+hold = leadIn? + leadOut? + max(clip.length + 0.45, chars/17, 1.5)
+panel.duration = max(authored duration, Σ holds)
+```
+
+Durations only ever grow, never shrink, so no beat anyone tuned gets shortened.
+`Duck/3` logs the page's total panel time before and after. With no clips
+present the holds are left empty and the even split applies — i.e. the page
+behaves exactly as it did before there was a voice.
+
+### Import settings and cost
+
+| setting | value | why |
+|---|---|---|
+| load type | Compressed In Memory | 13 × ~3 s of PCM would be ~3.5 MB resident for a one-off |
+| compression | Vorbis q 0.5 (default), **AAC** (WebGL override) | AAC is WebGL's only format; spelled out so the Inspector matches the build |
+| force to mono | yes | one narrator, centre, every device |
+| preload | yes | a line must not hitch on the frame it starts |
+| streaming | **never** | WebGL has no file handles to stream from |
+
+Roughly **3.5 MB** of source WAV, **≈0.4 MB** in the build, **≈0.4 MB** resident.
+Against the 27.6 MB / ≈2.6 MB the other 63 clips already cost, this is noise.
+
+### Licensing — read before shipping
+
+Typecast's usage policy: generated audio may be used commercially **during the
+subscription period**, and after it expires *previously downloaded audio may
+continue to be used* but nothing new may be rendered. Redistributing the audio
+**as isolated files or as a sound library** is prohibited — embedding it in the
+game is the intended use, shipping the WAVs as a downloadable pack is not. The
+free plan requires attribution; paid plans include a commercial licence.
+**Confirm the account's plan before shipping**, and note the clips are checked
+into this repository as project assets.

@@ -64,6 +64,15 @@ namespace DuckMow
         public float minCuttingSpeed = 0.35f;
         public float trackWidth = 0.20f;
 
+        [Header("Impacts")]
+        [Tooltip("Seconds the drive is cut after a solid hit. Long enough to feel, short enough " +
+                 "that it never reads as the controls having stopped working.")]
+        public float staggerDuration = 0.30f;
+        [Tooltip("Fraction of forward speed kept through a solid hit.")]
+        [Range(0f, 1f)] public float staggerSpeedKeep = 0.18f;
+        [Tooltip("Metres per second of shove away from whatever was hit.")]
+        public float staggerRebound = 1.8f;
+
         [Header("Body")]
         public float gravityScale = 2.1f;
         public float maxAirborneTime = 1.5f;
@@ -82,6 +91,18 @@ namespace DuckMow
         public float CutLoad { get; private set; }
         public float SmoothedCutLoad { get; private set; }
         public bool BladeEngaged { get; private set; }
+
+        /// <summary>
+        /// Deck up: the machine drives but cuts nothing.
+        ///
+        /// For the beats where the player is driving for a reason other than mowing. Distinct from
+        /// <see cref="CutEngine"/>, which stops the engine and is recomputed by the next physics step
+        /// anyway — this is a standing instruction that survives until it is lifted. Without it a
+        /// player driving after the klaxon spins a blade, throws clippings and runs the shredding
+        /// audio layer while doing no work, which reads as the machine being broken.
+        /// </summary>
+        public bool BladeLocked { get; set; }
+
         public float EngineRpm01 { get; private set; }
         public Vector3 DeckWorldPosition => transform.TransformPoint(deckOffset);
         public float LastImpactStrength { get; private set; }
@@ -98,6 +119,7 @@ namespace DuckMow
         bool _deckHistoryValid;
         float _airborneTimer;
         float _yawRate;
+        float _staggerTimer;
         readonly RaycastHit[] _hitBuffer = new RaycastHit[4];
         Vector3 _spawnPos;
         Quaternion _spawnRot;
@@ -152,6 +174,7 @@ namespace DuckMow
             IsBoosting = false;
             IsDrifting = false;
             _airborneTimer = 0f;
+            _staggerTimer = 0f;
         }
 
         /// <summary>
@@ -212,9 +235,15 @@ namespace DuckMow
 
             HandleBoost(wantBoost, throttle, dt);
 
+            _staggerTimer = Mathf.Max(0f, _staggerTimer - dt);
+
             if (IsGrounded)
             {
-                ApplyDrive(throttle, dt);
+                // Grip and steering stay live through a stagger — only the engine is out. Freezing
+                // all three turned a bonk into a third of a second of dead controls, which reads as
+                // a hitch in the game rather than as a hit, and the machine slid on unaffected
+                // because nothing was scrubbing the lateral velocity either.
+                if (_staggerTimer <= 0f) ApplyDrive(throttle, dt);
                 ApplyGrip(handbrake, right, lateral, dt);
                 ApplySteering(steer, handbrake, dt);
             }
@@ -390,7 +419,7 @@ namespace DuckMow
             Vector3 trackL = rear - halfAxle;
             Vector3 trackR = rear + halfAxle;
 
-            BladeEngaged = Mathf.Abs(ForwardSpeed) > minCuttingSpeed && IsGrounded;
+            BladeEngaged = !BladeLocked && Mathf.Abs(ForwardSpeed) > minCuttingSpeed && IsGrounded;
 
             if (!_deckHistoryValid)
             {
@@ -431,10 +460,57 @@ namespace DuckMow
 
         void OnCollisionEnter(Collision c)
         {
+            // Props that stage their own hit call Bonk directly and must not also be reported
+            // here, or the same collision counts twice toward the bonk tally and fires two camera
+            // shakes on the same frame.
+            if (c.collider.GetComponentInParent<Gnome>() != null) return;
+
             float impulse = c.impulse.magnitude / Mathf.Max(_rb.mass, 1f);
             if (impulse < 0.35f) return;
             LastImpactStrength = Mathf.Clamp01(impulse / 6f);
             OnImpact?.Invoke(LastImpactStrength, c.GetContact(0).point);
+        }
+
+        /// <summary>
+        /// Take a solid hit from a prop: shed speed, get shoved back, and lose the drive for a beat.
+        ///
+        /// Explicit rather than left to the solver, because the solver could not be relied on. A
+        /// gnome wakes from kinematic to dynamic inside its own collision callback, and a body that
+        /// turns dynamic mid-contact absorbs the exchange instead of resisting it — so depending on
+        /// where in the step the two callbacks landed, the mower either got stopped or drove
+        /// straight through as though nothing was there. That is the "sometimes it doesn't stop"
+        /// report, and no amount of tuning masses or materials fixes it, because the contact the
+        /// tuning would apply to has already been dissolved.
+        ///
+        /// So the reaction is applied here, from the prop's own callback, and cannot be skipped.
+        /// </summary>
+        public void Bonk(Vector3 impactPoint, float strength)
+        {
+            strength = Mathf.Clamp01(strength);
+            _staggerTimer = Mathf.Max(_staggerTimer, staggerDuration * (0.6f + strength * 0.7f));
+
+            Vector3 vel = _rb.linearVelocity;
+            Vector3 fwd = transform.forward;
+
+            // Scrub the component of travel along the machine's own heading. Scaling the whole
+            // velocity instead would leave a fast sideways drift running, which reads as sliding
+            // past the gnome rather than hitting it.
+            vel -= fwd * (Vector3.Dot(vel, fwd) * (1f - staggerSpeedKeep));
+
+            Vector3 away = transform.position - impactPoint;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1e-4f) away = -fwd;
+            vel += away.normalized * (staggerRebound * (0.7f + strength));
+
+            _rb.linearVelocity = vel;
+
+            // A twist as well, so a glancing blow knocks the machine off line. Without it a bonk
+            // only costs time, and the interesting cost is the scar it leaves across the picture.
+            float spin = (UnityEngine.Random.value < 0.5f ? -1f : 1f) * (1.1f + strength * 2.0f);
+            _rb.AddTorque(Vector3.up * spin, ForceMode.VelocityChange);
+
+            LastImpactStrength = strength;
+            OnImpact?.Invoke(strength, impactPoint);
         }
 
         /// <summary>Called by the game director so the mower coasts to a stop when time runs out.</summary>

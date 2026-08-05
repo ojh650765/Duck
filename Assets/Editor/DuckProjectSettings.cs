@@ -22,6 +22,16 @@ namespace DuckMow.EditorTools
             PlayerSettings.runInBackground = true;
 
             PlayerSettings.colorSpace = ColorSpace.Linear;
+
+            // Landscape, and this setting DOES NOT ENFORCE IT ON THE WEB.
+            //
+            // defaultInterfaceOrientation is read by the iOS and Android players, which own the
+            // window they run in. A WebGL build does not: the browser decides the shape of the
+            // canvas, and there is no player setting that can refuse a rotation. Left set because
+            // it is still the truth about the game's intended orientation, and because a future
+            // native target would want it — but the thing that actually keeps a phone player in
+            // landscape is the portrait gate in Assets/WebGLTemplates/DuckMow/index.html. If
+            // orientation ever misbehaves, that file is where the behaviour is, not this line.
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
 
             // Fixed 60 Hz simulation: the mower's handling is tuned in fixed steps and must not
@@ -40,6 +50,9 @@ namespace DuckMow.EditorTools
 
             ConfigureWebGL();
             ConfigurePhysics();
+            // Which scene the game opens on is a project setting like any other, and it is one that
+            // a Build Settings window, a merge or a scene rebuild can quietly undo.
+            DuckMenuBuilder.RegisterBuildScenes();
 
             AssetDatabase.SaveAssets();
             Debug.Log("[Duck] Project settings configured.");

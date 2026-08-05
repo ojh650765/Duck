@@ -253,6 +253,344 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
+        /// Every pair of props that visibly grow through each other, plus anything hanging in the
+        /// air or buried under the ground.
+        ///
+        /// Written because three separate playthroughs reported intersecting dressing and each one
+        /// was then chased by reading the placement code and doing the arithmetic by hand. That
+        /// works — the marquee floating 1.1 m over its own posts was found that way — but it only
+        /// ever finds the collision you happened to look for, and the venue has a few hundred props
+        /// in it. This measures all of them.
+        ///
+        /// Two things it has to get right or it lies:
+        ///
+        /// TRANSFORMS ARE MEANINGLESS. Almost every venue prop is emitted by the environment
+        /// builder's Combiner: one combined mesh per material, left at the origin, with world-space
+        /// vertices baked in. So transform.position is (0,0,0) for the fence, the bunting, the
+        /// hedges and the hay, and only renderer/mesh BOUNDS say where anything is.
+        ///
+        /// GAMEOBJECT BOUNDS ARE TOO COARSE. The same fact means one GameObject's bounds span every
+        /// instance of that material at once — the fence's bounds are the whole 80 m ring — so
+        /// comparing two combined meshes to each other answers nothing. Every mesh is therefore
+        /// split back into its individual props first, by flood-filling triangles across shared
+        /// vertices: the Combiner never welds its instances together, so one connected component is
+        /// one placed prop. A 1 mm weld tolerance is deliberate — props that INTERPENETRATE do not
+        /// share vertices, so they stay separate pieces and remain comparable, while a flat-shaded
+        /// box's duplicated corners collapse as they should.
+        ///
+        /// Bounds overlap is not the same as visible intersection, so the report is filtered:
+        ///
+        ///   - the smallest of the three axis overlaps must exceed <see cref="OverlapTolerance"/>.
+        ///     Legitimate joinery TOUCHES: a post's top is exactly the canopy's base, a rail meets
+        ///     a post, a scallop hangs off an eave. Those measure at or near zero and drop out.
+        ///   - the overlap must also swallow at least 15% of the smaller piece's bounds. This is
+        ///     what separates a leg mounted 0.6 m into a signboard from a hay bale standing inside
+        ///     a hedge.
+        ///   - pieces of the SAME renderer are never compared. Every combined mesh is one authored
+        ///     assembly whose parts are meant to touch — a fence's posts and rails, a stack's own
+        ///     bales, a tree's trunk and canopy — and reporting those buries everything else.
+        ///     Pairs within one assembly but from different renderers are still reported, tagged
+        ///     [same assembly], because that is where the hay-versus-marquee kind of fault lives.
+        ///   - ground surfaces (the surround, lawns, aprons, paths, chalk, the pond) are skipped
+        ///     entirely: everything on the map legitimately overlaps the ground.
+        ///   - characters and moving parts are skipped by name. A seated judge intersects the bench
+        ///     it is sitting on, and the windmill's wheel is mounted through its cap.
+        ///
+        /// The floating check does not use a whitelist of things allowed to be off the ground.
+        /// Instead a piece is only reported if NOTHING is underneath it — no other piece within
+        /// 1.5 m horizontally reaching up to within 0.3 m of its base. That is what makes the
+        /// original marquee bug a finding rather than a judgement call: posts topping out at 3.3
+        /// under a canopy starting at 4.4 is a 1.1 m gap with nothing in it. Bunting is the one
+        /// genuine exception — it hangs in mid-span by design — so it is named.
+        /// </summary>
+        [MenuItem("Duck/Diagnose · Audit prop overlaps (open scene)", priority = 54)]
+        public static void AuditPropOverlaps()
+        {
+            var sb = new StringBuilder("[Duck] PROP OVERLAP AUDIT\n");
+
+            var pieces = CollectPieces(sb);
+            if (pieces.Count == 0)
+            {
+                Debug.Log(sb.Append("  No props found — open Main and build the world first.").ToString());
+                return;
+            }
+
+            // Sorted by minimum x so the pair sweep can stop early instead of testing n².
+            pieces.Sort((a, b) => a.bounds.min.x.CompareTo(b.bounds.min.x));
+
+            int hits = 0, sameAssembly = 0;
+            var lines = new List<string>();
+            var supported = new bool[pieces.Count];
+
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                var a = pieces[i];
+                for (int j = i + 1; j < pieces.Count; j++)
+                {
+                    var b = pieces[j];
+                    // Sorted on min.x: once a candidate starts beyond our right edge, so does
+                    // everything after it. The 1.5 m slack is the support test's reach — a flag hangs
+                    // off the side of its pole and a scallop off the edge of its eave, so a supporter
+                    // does not have to overlap in x to be what a thing is resting on.
+                    if (b.bounds.min.x > a.bounds.max.x + 1.5f) break;
+
+                    if (Supports(a.bounds, b.bounds)) supported[j] = true;
+                    if (Supports(b.bounds, a.bounds)) supported[i] = true;
+
+                    if (a.renderer == b.renderer) continue;
+                    if (Excused(a.owner, b.owner)) continue;
+
+                    Vector3 pen = Penetration(a.bounds, b.bounds);
+                    if (pen.x <= 0f || pen.y <= 0f || pen.z <= 0f) continue;
+
+                    float depth = Mathf.Min(pen.x, Mathf.Min(pen.y, pen.z));
+                    if (depth < OverlapTolerance) continue;
+
+                    float shared = pen.x * pen.y * pen.z;
+                    float smaller = Mathf.Min(Volume(a.bounds), Volume(b.bounds));
+                    if (smaller < 1e-5f || shared < smaller * 0.15f) continue;
+
+                    bool same = a.assembly == b.assembly;
+                    if (same) sameAssembly++;
+                    hits++;
+                    Vector3 c = a.bounds.center;
+                    lines.Add($"    {(same ? "[same assembly] " : "")}{a.owner} x {b.owner}: " +
+                              $"{depth:0.00} m deep ({pen.x:0.00} x {pen.y:0.00} x {pen.z:0.00}), " +
+                              $"{Mathf.Min(1f, shared / smaller) * 100f:0}% of the smaller piece, " +
+                              $"near ({c.x:0.0}, {c.z:0.0})");
+                }
+            }
+
+            // ---- off the ground, either way ----
+            //
+            // Reported FIRST, ahead of the intersections, because it is the fault this venue actually
+            // had: almost every prop was positioned at a hand-typed y, and where an authored FBX later
+            // replaced a procedural primitive nobody re-measured the pivot, so the two branches of the
+            // same placement disagreed about where the object's bottom was. Floating and sinking are
+            // also far cheaper to judge from a log than an intersection is — a number either is or is
+            // not zero.
+            sb.AppendLine("  --- off the ground ---");
+            int buried = 0, floating = 0;
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                var p = pieces[i];
+                // Only where the ground is known to be dead level. Past the venue's flat radius the
+                // surround rolls by several metres, so "y = 0" is not the ground out there and the
+                // hills and the far planting would all report as floating or buried.
+                Vector3 c = p.bounds.center;
+                if (Mathf.Max(Mathf.Abs(c.x), Mathf.Abs(c.z)) > 150f) continue;
+
+                if (p.bounds.max.y < -0.05f)
+                {
+                    buried++;
+                    sb.AppendLine($"    BURIED {p.owner}: top at y={p.bounds.max.y:0.00} " +
+                                  $"near ({c.x:0.0}, {c.z:0.0})");
+                }
+                else if (p.bounds.min.y > 0.25f && !supported[i] && !Aloft(p.owner))
+                {
+                    floating++;
+                    sb.AppendLine($"    FLOATING {p.owner}: base at y={p.bounds.min.y:0.00} with " +
+                                  $"nothing under it, near ({c.x:0.0}, {c.z:0.0})");
+                }
+            }
+            if (buried == 0 && floating == 0)
+                sb.AppendLine("    Everything stands on the ground or on something else.");
+
+            // ---- intersections ----
+            // Longest penetration first: that is the order they need fixing in.
+            lines.Sort((x, y) => y.CompareTo(x));
+            if (lines.Count > 120)
+            {
+                sb.AppendLine($"  {lines.Count} intersecting pairs; listing the first 120.");
+                lines.RemoveRange(120, lines.Count - 120);
+            }
+            sb.AppendLine($"  --- intersecting pairs ({hits}, of which {sameAssembly} inside one assembly) ---");
+            foreach (string l in lines) sb.AppendLine(l);
+            if (hits == 0) sb.AppendLine("    Nothing interpenetrates by more than the tolerance.");
+
+            sb.AppendLine($"  {pieces.Count} props measured. tolerance={OverlapTolerance:0.00} m, " +
+                          $"intersections={hits}, buried={buried}, floating={floating}");
+            Debug.Log(sb.ToString());
+        }
+
+        /// <summary>
+        /// How deep two props have to grow into each other before it is a fault and not joinery.
+        /// A rail meeting a post, a canopy sitting on its posts and a valance hanging off an eave
+        /// all measure within a couple of centimetres of zero.
+        /// </summary>
+        const float OverlapTolerance = 0.25f;
+
+        struct PropPiece
+        {
+            public string owner;        // reported name, e.g. "JudgeBackdrop_M_ApronProp#7"
+            public string assembly;     // the parent object, so pieces of one structure can be tagged
+            public MeshRenderer renderer;
+            public Bounds bounds;
+        }
+
+        /// <summary>Ground-like surfaces. Everything on the map overlaps these by design.</summary>
+        static readonly string[] NotAProp =
+        {
+            "Surround", "Ground", "Lawn", "Apron", "Chalk", "Path", "Lane", "Blade", "Grass",
+            "Hill_", "PlazaDisc", "Plaza_", "Basin", "Water", "PondBank", "Guide", "Stamp", "Cut",
+        };
+
+        /// <summary>
+        /// Pairs that are supposed to interpenetrate. An empty second name means "with anything".
+        /// Every entry is a real assembly detail, not a way of quietening a finding:
+        /// characters sit on furniture, text quads sit proud of the boards they label, inlays are
+        /// laid into panels, and the windmill's wheel is mounted through the cap.
+        /// </summary>
+        static readonly (string a, string b)[] OverlapExcused =
+        {
+            ("Sails", ""), ("Windmill", ""),
+            ("Judge", ""), ("Mower", ""), ("Rival", ""), ("Duck", ""), ("Spectator", ""),
+            ("Gnome", ""), ("Hat", "Body"),
+            ("Title", ""), ("Name", ""), ("Card", ""), ("Text", ""),
+            ("Inlay", ""), ("Bunting", ""), ("Pennant", ""),
+        };
+
+        /// <summary>Things that hang, so having nothing underneath them is correct.</summary>
+        static bool Aloft(string name)
+            => name.Contains("Bunting") || name.Contains("Pennant") || name.Contains("Title")
+            || name.Contains("Name") || name.Contains("Card") || name.Contains("Text");
+
+        static bool Excused(string a, string b)
+        {
+            foreach (var (x, y) in OverlapExcused)
+            {
+                if (y.Length == 0) { if (a.Contains(x) || b.Contains(x)) return true; }
+                else if ((a.Contains(x) && b.Contains(y)) || (b.Contains(x) && a.Contains(y))) return true;
+            }
+            return false;
+        }
+
+        static Vector3 Penetration(Bounds a, Bounds b) => new Vector3(
+            Mathf.Min(a.max.x, b.max.x) - Mathf.Max(a.min.x, b.min.x),
+            Mathf.Min(a.max.y, b.max.y) - Mathf.Max(a.min.y, b.min.y),
+            Mathf.Min(a.max.z, b.max.z) - Mathf.Max(a.min.z, b.min.z));
+
+        static float Volume(Bounds b)
+            // Clamped: a flag, a banner or a bunting pennant is millimetres thick, and a zero on one
+            // axis would make every one of them "100% swallowed" by whatever it is near.
+            => Mathf.Max(b.size.x, 0.05f) * Mathf.Max(b.size.y, 0.05f) * Mathf.Max(b.size.z, 0.05f);
+
+        /// <summary>
+        /// True if <paramref name="under"/> is plausibly what <paramref name="thing"/> is standing
+        /// or hanging on: close enough horizontally, and reaching up to at least its base.
+        /// </summary>
+        static bool Supports(Bounds under, Bounds thing)
+        {
+            if (under.max.y < thing.min.y - 0.3f) return false;      // too short to be holding it up
+            if (under.min.y > thing.min.y + 0.6f) return false;      // starts above us, so it is not below us
+            return under.max.x > thing.min.x - 1.5f && under.min.x < thing.max.x + 1.5f
+                && under.max.z > thing.min.z - 1.5f && under.min.z < thing.max.z + 1.5f;
+        }
+
+        /// <summary>
+        /// Every prop in the scene as its own bounding box, combined meshes split back into the
+        /// individual props that were baked into them.
+        /// </summary>
+        static List<PropPiece> CollectPieces(StringBuilder sb)
+        {
+            var pieces = new List<PropPiece>();
+            int skipped = 0, splitMeshes = 0;
+
+            foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Include,
+                                                                     FindObjectsSortMode.None))
+            {
+                var mf = mr.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) continue;
+
+                bool ground = false;
+                foreach (string n in NotAProp)
+                    if (mr.name.Contains(n)) { ground = true; break; }
+                if (ground) { skipped++; continue; }
+
+                var mesh = mf.sharedMesh;
+                // 200k triangles is a combined blade or grass layer, not dressing. Splitting one
+                // costs seconds and reports nothing useful.
+                if (mesh.triangles.Length > 600000)
+                {
+                    skipped++;
+                    sb.AppendLine($"  (skipped {mr.name}: {mesh.triangles.Length / 3} triangles)");
+                    continue;
+                }
+
+                var clusters = MeshClusters(mesh, mr.localToWorldMatrix);
+                if (clusters.Count > 1) splitMeshes++;
+                string assembly = mr.transform.parent != null ? mr.transform.parent.name : mr.name;
+
+                for (int i = 0; i < clusters.Count; i++)
+                {
+                    pieces.Add(new PropPiece
+                    {
+                        owner = clusters.Count > 1 ? $"{mr.name}#{i}" : mr.name,
+                        assembly = assembly,
+                        renderer = mr,
+                        bounds = clusters[i]
+                    });
+                }
+            }
+
+            sb.AppendLine($"  {pieces.Count} props from {splitMeshes} combined meshes; " +
+                          $"{skipped} ground or oversized meshes skipped.");
+            return pieces;
+        }
+
+        /// <summary>
+        /// One bounding box per connected run of triangles, in world space.
+        ///
+        /// The Combiner bakes many props into one mesh and never welds them together, so a
+        /// connected component is exactly one placed prop. Welding at 1 mm is the point: props that
+        /// merely interpenetrate share no vertices and stay separate, so they can still be compared,
+        /// while a flat-shaded box's duplicated corners collapse into one point as they should.
+        /// </summary>
+        static List<Bounds> MeshClusters(Mesh mesh, Matrix4x4 toWorld)
+        {
+            var result = new List<Bounds>();
+            var verts = mesh.vertices;
+            var tris = mesh.triangles;
+            if (tris.Length == 0 || verts.Length == 0) return result;
+
+            var weld = new Dictionary<Vector3Int, int>(verts.Length);
+            var remap = new int[verts.Length];
+            const float q = 1000f;   // 1 mm buckets
+            for (int i = 0; i < verts.Length; i++)
+            {
+                var key = new Vector3Int(Mathf.RoundToInt(verts[i].x * q),
+                                         Mathf.RoundToInt(verts[i].y * q),
+                                         Mathf.RoundToInt(verts[i].z * q));
+                if (!weld.TryGetValue(key, out int idx)) { idx = weld.Count; weld[key] = idx; }
+                remap[i] = idx;
+            }
+
+            var parent = new int[weld.Count];
+            for (int i = 0; i < parent.Length; i++) parent[i] = i;
+            int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+            void Union(int x, int y) { int rx = Find(x), ry = Find(y); if (rx != ry) parent[rx] = ry; }
+
+            for (int t = 0; t < tris.Length; t += 3)
+            {
+                int a = remap[tris[t]], b = remap[tris[t + 1]], c = remap[tris[t + 2]];
+                Union(a, b);
+                Union(b, c);
+            }
+
+            var boxes = new Dictionary<int, Bounds>();
+            for (int i = 0; i < verts.Length; i++)
+            {
+                int root = Find(remap[i]);
+                Vector3 w = toWorld.MultiplyPoint3x4(verts[i]);
+                if (boxes.TryGetValue(root, out var box)) { box.Encapsulate(w); boxes[root] = box; }
+                else boxes[root] = new Bounds(w, Vector3.zero);
+            }
+
+            foreach (var kv in boxes) result.Add(kv.Value);
+            return result;
+        }
+
+        /// <summary>
         /// Check every picture's start pose is genuinely inside it, with room to move.
         ///
         /// This is the sort of thing that looks fine on the one shape you happen to test and is

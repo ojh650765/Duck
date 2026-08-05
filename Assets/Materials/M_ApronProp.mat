@@ -26,20 +26,22 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaClip: 0
+    - _AmbientFloor: 0.16
+    - _AmbientGain: 1.35
     - _Cull: 2
     - _Cutoff: 0.5
     - _Metallic: 0
     - _OcclusionBoost: 1
     - _RimPower: 4
-    - _RimStrength: 0
-    - _Smoothness: 0.1
+    - _RimStrength: 0.2
+    - _Smoothness: 0.22
     - _VertexColorAmount: 1
     - _VertexColorSRGB: 0
     - _Wrap: 0.42
     m_Colors:
-    - _BaseColor: {r: 0.07618539, g: 0.34191445, b: 0.027320892, a: 1}
+    - _BaseColor: {r: 0.5840785, g: 0.37123778, b: 0.1221388, a: 1}
     - _InstanceColor: {r: 1, g: 1, b: 1, a: 1}
-    - _RimColor: {r: 1, g: 0.8962694, b: 0.68668544, a: 1}
-    - _ShadowTint: {r: 0.26225072, g: 0.39157256, b: 0.6724432, a: 1}
+    - _RimColor: {r: 1, g: 0.8148467, b: 0.45641106, a: 1}
+    - _ShadowTint: {r: 0.111932434, g: 0.1980693, b: 0.4341537, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

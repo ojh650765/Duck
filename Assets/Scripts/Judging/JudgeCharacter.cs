@@ -5,23 +5,36 @@ namespace DuckMow
     public enum JudgeTemperament { Severe, Boisterous, Aloof }
 
     /// <summary>
-    /// Procedural performance for one judge. The Blender characters ship as a transform hierarchy
-    /// rather than a skinned rig, so everything they do is generated here.
+    /// One judge's performance, played from authored animation.
     ///
-    /// The important part is that they are never still and never doing the same thing twice.
-    /// A character holding one pose with a sine wave on it reads as a broken animation, so this
-    /// layers three things: a continuous idle built from decorrelated noise, a stream of short
-    /// gestures fired on a random schedule, and a temperament that decides which gestures they
-    /// pick and how hard they play them. Mildred chews and glares, Boris bounces and applauds,
-    /// Priscilla holds unnervingly still and then snaps her head round.
+    /// This used to generate everything at runtime: two octaves of Perlin noise per axis for the
+    /// idle, plus a gesture picked off a random schedule, applied to four separate meshes. It was
+    /// never still and never repeated, and that was exactly the problem — noise has no
+    /// anticipation, no accent and no settle, so the judges read as drifting rather than as
+    /// behaving. A curve that deliberately holds for a beat and then snaps is the whole substance
+    /// of a performance, and it is the one thing noise cannot produce at any amplitude.
+    ///
+    /// They are now skinned to a nine-bone rig with four hand-keyed clips each, blended by an
+    /// animator. What survives from the old version, deliberately:
+    ///
+    ///   - The CARD. It is a prop on the desk, not part of the character, and it is animated here
+    ///     rather than in a clip. A card held in an animated hand inherits every tremor of the
+    ///     performance, which read as the judge's hands shaking; standing it on the bench lets the
+    ///     character be as lively as it likes while the number stays rock steady.
+    ///   - The LOOK-AT. Applied after the animator has written its pose, so the head tracks the
+    ///     mower on top of whatever it is playing. This is a constraint, not procedural animation
+    ///     — and it rotates the head bone about the pivot the geometry was built around, which is
+    ///     the one operation that provably cannot break the neck joint.
+    ///
+    /// The public surface is unchanged, because JudgePanel and the capture harness drive it.
     /// </summary>
     public class JudgeCharacter : MonoBehaviour
     {
         [Header("Rig")]
-        public Transform body;
+        public Animator animator;
+        [Tooltip("The Head bone. Its origin sits on the pivot the head geometry was built around.")]
         public Transform head;
-        public Transform armL;
-        public Transform armR;
+        [Tooltip("The scorecard prop standing on the bench. Not part of the skinned character.")]
         public Transform card;
 
         [Header("Scorecard on the desk")]
@@ -34,93 +47,63 @@ namespace DuckMow
 
         [Header("Personality")]
         public JudgeTemperament temperament = JudgeTemperament.Severe;
-        [Tooltip("Overall speed of the idle. Fast reads as fussy, slow as aloof.")]
+        [Tooltip("Playback rate of this judge's idle. Fast reads as fussy, slow as aloof.")]
         public float idleSpeed = 1f;
-        [Tooltip("Overall size of the idle motion.")]
-        public float idleAmount = 1f;
-        [Tooltip("How far this judge leans in when studying the picture, in degrees.")]
-        public float leanAngle = 9f;
-        public float cardRaise = 0.55f;
-        public float cardTiltDegrees = 12f;
 
-        [Header("Rest pose")]
-        [Tooltip("Degrees to swing the arms forward or back from the pose the model was authored in. " +
-                 "Negative brings them back toward the body.")]
-        public float armRestSwing = 0f;
-        [Tooltip("Degrees to bring the arms in toward the body from the authored pose. The judges " +
-                 "were modelled with their arms out for silhouette, which reads as holding them up.")]
-        public float armRestDrop = 0f;
-
-        [Header("Gestures")]
-        [Tooltip("Average seconds between spontaneous gestures.")]
-        public float gestureInterval = 3.2f;
-        public float gestureIntervalJitter = 1.8f;
-
-        [Header("Card")]
-        public MeshRenderer cardRenderer;
-        public TMPro.TextMeshPro cardNumber;
-        [Tooltip("Everything drawn on the card — plate, face and number — hidden as one.")]
-        public GameObject cardVisual;
+        [Header("Look")]
+        [Tooltip("How far the head turns to follow the mower, in degrees.")]
+        public float lookYawLimit = 46f;
+        public float lookPitchLimit = 22f;
+        [Tooltip("How quickly the head catches up. Low is watchful, high is twitchy.")]
+        public float lookLag = 5f;
+        [Tooltip("Scales the look off as the judge leans in to study the picture instead.")]
+        [Range(0f, 1f)] public float lookFadeOnAttention = 1f;
 
         /// <summary>0 = settled back, 1 = leaning in and studying the picture.</summary>
         public float Attention { get; set; }
         /// <summary>0 = card down, 1 = card fully raised.</summary>
         public float CardUp { get; set; }
-        /// <summary>Positive = pleased bounce, negative = disapproving shake.</summary>
+        /// <summary>
+        /// Positive = pleased, negative = disapproving. Set by <see cref="Punch"/>, and cleared
+        /// directly by the panel when it resets — hence a public setter rather than a private one.
+        /// </summary>
         public float Reaction { get; set; }
         /// <summary>Something for them to look at — usually the mower.</summary>
         public Transform lookTarget;
 
-        enum Gesture { None, GlanceAside, LookAtField, ShiftWeight, Chew, Applaud, SlowBlink, Preen }
+        [Header("Card contents")]
+        public MeshRenderer cardRenderer;
+        public TMPro.TextMeshPro cardNumber;
+        [Tooltip("Everything drawn on the card — plate, face and number — hidden as one.")]
+        public GameObject cardVisual;
 
-        Vector3 _bodyPos0, _headPos0, _cardPos0, _armLPos0, _armRPos0;
-        Quaternion _bodyRot0, _headRot0, _cardRot0, _armLRot0, _armRRot0;
+        static readonly int IdAttention = Animator.StringToHash("Attention");
+        static readonly int IdApplaud = Animator.StringToHash("Applaud");
+        static readonly int IdShake = Animator.StringToHash("Shake");
 
-        float _clock, _phase, _reactionTimer;
+        Vector3 _cardPos0;
+        Quaternion _cardRot0;
         float _cardLandTimer = 99f;
         bool _cardWasUp;
-        float _gestureTimer, _gestureDuration, _gestureNext;
-        Gesture _gesture = Gesture.None;
-        float _noiseSeedA, _noiseSeedB, _noiseSeedC;
-        System.Random _rng;
+        float _smoothAttention;
+        float _lookYaw, _lookPitch;
 
         void Awake()
         {
-            _phase = Random.value * 10f;
-            _noiseSeedA = Random.value * 100f;
-            _noiseSeedB = Random.value * 100f;
-            _noiseSeedC = Random.value * 100f;
-            _rng = new System.Random(Random.Range(0, int.MaxValue));
-            _gestureNext = 1f + (float)_rng.NextDouble() * gestureInterval;
+            if (animator == null) animator = GetComponentInChildren<Animator>();
+            if (animator != null)
+            {
+                animator.speed = Mathf.Max(0.05f, idleSpeed);
+                // Offset every judge into its own part of the loop, or three animals on one bench
+                // breathe in perfect unison and the whole panel reads as one puppet.
+                animator.Play(0, 0, Random.value);
+            }
 
-            Capture(body, ref _bodyPos0, ref _bodyRot0);
-            Capture(head, ref _headPos0, ref _headRot0);
-            Capture(card, ref _cardPos0, ref _cardRot0);
-            Capture(armL, ref _armLPos0, ref _armLRot0);
-            Capture(armR, ref _armRPos0, ref _armRRot0);
-
-            // Fold the rest correction into the captured pose, so every gesture afterwards is
-            // measured from arms that are down rather than from arms that are out.
-            //
-            // The models are authored with the arms held away from the body — deliberately, for
-            // silhouette — but seated at a bench that reads as a judge holding their hands up.
-            // Correcting the captured rest pose rather than the animation means the idle noise and
-            // the applause still work exactly as written; they just start from a resting arm.
-            Vector3 side = transform.right;
-            Vector3 fwd = transform.forward;
-            if (armL != null)
-                _armLRot0 = _armLRot0 * AboutWorldAxis(armL, side, armRestSwing)
-                                      * AboutWorldAxis(armL, fwd, -armRestDrop);
-            if (armR != null)
-                _armRRot0 = _armRRot0 * AboutWorldAxis(armR, side, armRestSwing)
-                                      * AboutWorldAxis(armR, fwd, armRestDrop);
-        }
-
-        static void Capture(Transform t, ref Vector3 p, ref Quaternion r)
-        {
-            if (t == null) return;
-            p = t.localPosition;
-            r = t.localRotation;
+            if (card != null)
+            {
+                _cardPos0 = card.localPosition;
+                _cardRot0 = card.localRotation;
+            }
         }
 
         public void SetCardNumber(int value)
@@ -128,12 +111,12 @@ namespace DuckMow
             if (cardNumber != null) cardNumber.text = value.ToString();
         }
 
+        /// <summary>React to a mark. Positive applauds, negative is a disapproving head shake.</summary>
         public void Punch(float amount)
         {
             Reaction = amount;
-            _reactionTimer = 0f;
-            // A big reaction interrupts whatever they were doing.
-            StartGesture(amount > 0.4f ? Gesture.Applaud : Gesture.GlanceAside, 1.1f);
+            if (animator == null) return;
+            animator.SetTrigger(amount > 0.4f ? IdApplaud : IdShake);
         }
 
         void LateUpdate()
@@ -144,251 +127,84 @@ namespace DuckMow
 
         public void Tick(float dt)
         {
-            _clock += dt;
-            _reactionTimer += dt;
+            // Attention is smoothed here rather than in the transition, so the panel can snap it
+            // to zero on reset without the judge visibly whipping upright.
+            _smoothAttention = Mathf.MoveTowards(_smoothAttention, Mathf.Clamp01(Attention), dt * 2.2f);
+            if (animator != null) animator.SetFloat(IdAttention, _smoothAttention);
 
-            // Start the ring the instant the card reaches upright.
+            UpdateCard(dt);
+            ApplyLook(dt);
+        }
+
+        /// <summary>
+        /// The card lies face-down on the bench and tips up to stand, rather than being held.
+        /// It overshoots and rings down so it arrives with a knock instead of easing into place.
+        /// </summary>
+        void UpdateCard(float dt)
+        {
+            if (card == null) return;
+
             bool up = CardUp >= 1f;
             if (up && !_cardWasUp) _cardLandTimer = 0f;
             else if (up) _cardLandTimer += dt;
             _cardWasUp = up;
-            float t = _clock * idleSpeed + _phase;
 
-            UpdateGestureSchedule(dt);
+            float raise = Mathf.SmoothStep(0f, 1f, CardUp);
+            float settle = up
+                ? Mathf.Exp(-_cardLandTimer * 6.5f) * Mathf.Cos(_cardLandTimer * cardSlamRing) * cardOvershoot
+                : 0f;
 
-            // Damped spring reaction, so a good score gives several diminishing bounces.
-            float react = Reaction * Mathf.Exp(-_reactionTimer * 4.6f) * Mathf.Cos(_reactionTimer * 9f) * 0.55f;
+            card.localPosition = _cardPos0;
+            card.localRotation = _cardRot0 * Quaternion.Euler(Mathf.Lerp(cardFlatAngle, 0f, raise) + settle, 0f, 0f);
 
-            // Two decorrelated noise channels per axis. Sine alone reads as machinery; noise of
-            // two different frequencies reads as a living thing shifting its weight.
-            float swayX = Noise(_noiseSeedA, t * 0.23f) * 2.4f + Noise(_noiseSeedA + 5f, t * 0.9f) * 0.9f;
-            float swayZ = Noise(_noiseSeedB, t * 0.19f) * 2.0f + Noise(_noiseSeedB + 5f, t * 0.7f) * 0.8f;
-            float headYaw = Noise(_noiseSeedC, t * 0.17f) * 9f;
-            float headPitch = Noise(_noiseSeedC + 3f, t * 0.31f) * 4f;
+            // Hide the plate and the number together. Toggling only the renderer used to leave the
+            // number floating above an empty bench before the card came up.
+            bool show = raise > 0.01f;
+            if (cardVisual != null)
+            {
+                if (cardVisual.activeSelf != show) cardVisual.SetActive(show);
+            }
+            else if (cardRenderer != null && cardRenderer.enabled != show)
+            {
+                cardRenderer.enabled = show;
+            }
+        }
 
-            GestureOffsets(out float gBodyPitch, out float gBodyRoll, out float gHeadYaw,
-                           out float gHeadPitch, out float gLift, out float gArmL, out float gArmR);
+        /// <summary>
+        /// Turn the head toward the mower, on top of whatever the animator is playing.
+        ///
+        /// Runs in LateUpdate after the animator has written the pose, which is the only place a
+        /// bone override survives. It fades out as the judge leans in, because a judge studying
+        /// the lawn in front of them should not also be tracking a machine over their shoulder.
+        /// </summary>
+        void ApplyLook(float dt)
+        {
+            if (head == null) return;
 
-            // Looking at the mower overrides the idle head drift while it is on the field.
-            float lookYaw = 0f, lookPitch = 0f;
-            if (lookTarget != null && head != null && Attention < 0.5f)
+            float wantYaw = 0f, wantPitch = 0f;
+            if (lookTarget != null)
             {
                 Vector3 to = lookTarget.position - head.position;
                 if (to.sqrMagnitude > 0.5f)
                 {
                     Vector3 local = transform.InverseTransformDirection(to.normalized);
-                    lookYaw = Mathf.Clamp(Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg, -55f, 55f) * 0.55f;
-                    lookPitch = Mathf.Clamp(-Mathf.Asin(Mathf.Clamp(local.y, -1f, 1f)) * Mathf.Rad2Deg, -25f, 25f) * 0.5f;
+                    wantYaw = Mathf.Clamp(Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg, -lookYawLimit, lookYawLimit);
+                    wantPitch = Mathf.Clamp(-Mathf.Asin(Mathf.Clamp(local.y, -1f, 1f)) * Mathf.Rad2Deg,
+                                            -lookPitchLimit, lookPitchLimit);
                 }
             }
 
-            if (body != null)
-            {
-                float breathe = (Mathf.Sin(t * 1.45f) * 0.5f + Noise(_noiseSeedA + 11f, t * 0.6f)) * 0.016f * idleAmount;
-                body.localPosition = _bodyPos0 + new Vector3(0f, breathe + react * 0.09f + gLift, 0f);
-                body.localRotation = _bodyRot0 * Quaternion.Euler(
-                    leanAngle * Attention + gBodyPitch,
-                    swayX * 0.5f * idleAmount,
-                    swayZ * idleAmount + gBodyRoll);
-            }
+            float fade = 1f - _smoothAttention * lookFadeOnAttention;
+            float k = 1f - Mathf.Exp(-lookLag * Mathf.Max(dt, 1e-4f));
+            _lookYaw = Mathf.Lerp(_lookYaw, wantYaw * fade, k);
+            _lookPitch = Mathf.Lerp(_lookPitch, wantPitch * fade, k);
 
-            if (head != null)
-            {
-                head.localPosition = _headPos0 + new Vector3(0f, react * 0.05f, 0f);
-                head.localRotation = _headRot0 * Quaternion.Euler(
-                    headPitch * idleAmount + leanAngle * 0.6f * Attention + react * 9f + gHeadPitch + lookPitch,
-                    (headYaw * idleAmount) * (1f - Attention) + gHeadYaw + lookYaw,
-                    react * 4f + swayZ * 0.4f);
-            }
-
-            if (card != null)
-            {
-                // The card lies face-down on the bench and tips up to stand, rather than being
-                // held. A held card inherits every tremor of the character's idle, which read as
-                // the judge shaking; standing it on the desk makes the number rock solid and the
-                // moment it lands far more emphatic.
-                float raise = Mathf.SmoothStep(0f, 1f, CardUp);
-
-                // Overshoot and ring down, so it arrives with a knock instead of easing in.
-                float settle = 0f;
-                if (CardUp > 0.001f && CardUp < 1f)
-                    settle = 0f;
-                else if (CardUp >= 1f)
-                    settle = Mathf.Exp(-_cardLandTimer * 6.5f) * Mathf.Cos(_cardLandTimer * cardSlamRing) * cardOvershoot;
-
-                float angle = Mathf.Lerp(cardFlatAngle, 0f, raise) + settle;
-                card.localPosition = _cardPos0;
-                card.localRotation = _cardRot0 * Quaternion.Euler(angle, 0f, 0f);
-
-                // Hide the plate and the number together. Toggling only the renderer used to leave
-                // the number floating above an empty bench before the card came up.
-                bool show = raise > 0.01f;
-                if (cardVisual != null)
-                {
-                    if (cardVisual.activeSelf != show) cardVisual.SetActive(show);
-                }
-                else if (cardRenderer != null && cardRenderer.enabled != show)
-                {
-                    cardRenderer.enabled = show;
-                }
-            }
-
-            // Arms swing about the judge's own sideways axis, not about local X.
-            //
-            // These models come out of the FBX with the importer's axis conversion still on them,
-            // so an arm's local X is not the axis a shoulder actually hinges on — driving Euler(x)
-            // swung the arms outward and upward, which is why they looked like they were being
-            // held up rather than resting. Resolving the world axis through the parent gets the
-            // hinge right whatever space the model arrived in.
-            Vector3 side = transform.right;
-            if (armR != null)
-            {
-                float swing = Noise(_noiseSeedB + 2f, t * 0.7f) * 4f * idleAmount + gArmR;
-                armR.localRotation = _armRRot0 * AboutWorldAxis(armR, side, swing);
-            }
-            if (armL != null)
-            {
-                float swing = Noise(_noiseSeedA + 2f, t * 0.8f) * 4f * idleAmount + react * 8f + gArmL;
-                armL.localRotation = _armLRot0 * AboutWorldAxis(armL, side, swing);
-            }
-        }
-
-        /// <summary>Signed smooth noise in roughly [-1, 1].</summary>
-        static float Noise(float seed, float t) => Mathf.PerlinNoise(seed, t) * 2f - 1f;
-
-        // ------------------------------------------------------------------ gestures
-
-        void UpdateGestureSchedule(float dt)
-        {
-            if (_gesture != Gesture.None)
-            {
-                _gestureTimer += dt;
-                if (_gestureTimer >= _gestureDuration) _gesture = Gesture.None;
-                return;
-            }
-
-            _gestureNext -= dt;
-            if (_gestureNext > 0f) return;
-
-            _gestureNext = gestureInterval + (float)_rng.NextDouble() * gestureIntervalJitter;
-            StartGesture(PickGesture(), 0f);
-        }
-
-        void StartGesture(Gesture g, float durationOverride)
-        {
-            _gesture = g;
-            _gestureTimer = 0f;
-            _gestureDuration = durationOverride > 0f ? durationOverride : DurationOf(g);
-        }
-
-        Gesture PickGesture()
-        {
-            double roll = _rng.NextDouble();
-            switch (temperament)
-            {
-                case JudgeTemperament.Boisterous:
-                    if (roll < 0.34) return Gesture.Applaud;
-                    if (roll < 0.60) return Gesture.ShiftWeight;
-                    if (roll < 0.82) return Gesture.LookAtField;
-                    return Gesture.GlanceAside;
-
-                case JudgeTemperament.Aloof:
-                    if (roll < 0.45) return Gesture.SlowBlink;
-                    if (roll < 0.70) return Gesture.Preen;
-                    if (roll < 0.88) return Gesture.LookAtField;
-                    return Gesture.GlanceAside;
-
-                default: // Severe
-                    if (roll < 0.38) return Gesture.Chew;
-                    if (roll < 0.62) return Gesture.GlanceAside;
-                    if (roll < 0.84) return Gesture.LookAtField;
-                    return Gesture.ShiftWeight;
-            }
-        }
-
-        /// <summary>
-        /// A rotation of <paramref name="degrees"/> about a world axis, expressed in the node's own
-        /// parent space. The characters keep the FBX importer's axis conversion, so their local
-        /// axes are not the ones you would expect from looking at the model in Unity.
-        /// </summary>
-        static Quaternion AboutWorldAxis(Transform node, Vector3 worldAxis, float degrees)
-        {
-            if (node == null || node.parent == null) return Quaternion.AngleAxis(degrees, worldAxis);
-            Vector3 local = node.parent.InverseTransformDirection(worldAxis).normalized;
-            return Quaternion.AngleAxis(degrees, local);
-        }
-
-        static float DurationOf(Gesture g) => g switch
-        {
-            Gesture.GlanceAside => 1.4f,
-            Gesture.LookAtField => 2.1f,
-            Gesture.ShiftWeight => 1.6f,
-            Gesture.Chew => 1.9f,
-            Gesture.Applaud => 1.5f,
-            Gesture.SlowBlink => 1.2f,
-            Gesture.Preen => 2.4f,
-            _ => 1f
-        };
-
-        void GestureOffsets(out float bodyPitch, out float bodyRoll, out float headYaw,
-                            out float headPitch, out float lift, out float armL, out float armR)
-        {
-            bodyPitch = bodyRoll = headYaw = headPitch = lift = armL = armR = 0f;
-            if (_gesture == Gesture.None) return;
-
-            // Ease in and out so nothing snaps at the boundaries of a gesture.
-            float u = Mathf.Clamp01(_gestureTimer / Mathf.Max(_gestureDuration, 1e-3f));
-            float env = Mathf.Sin(u * Mathf.PI);
-
-            switch (_gesture)
-            {
-                case Gesture.GlanceAside:
-                    // A look at the judge next to them, with a little disapproving tilt.
-                    headYaw = env * 26f;
-                    headPitch = env * -4f;
-                    break;
-
-                case Gesture.LookAtField:
-                    headYaw = env * -14f;
-                    headPitch = env * 12f;
-                    bodyPitch = env * 4f;
-                    break;
-
-                case Gesture.ShiftWeight:
-                    bodyRoll = Mathf.Sin(u * Mathf.PI * 1.0f) * 4.5f;
-                    lift = env * 0.02f;
-                    break;
-
-                case Gesture.Chew:
-                    // Small fast jaw-ish nod on top of a slow lean; reads as chewing from 6 m.
-                    headPitch = env * 3f + Mathf.Sin(_gestureTimer * 17f) * 2.6f * env;
-                    headYaw = Mathf.Sin(_gestureTimer * 5f) * 2f * env;
-                    break;
-
-                case Gesture.Applaud:
-                    // Both arms clap. The clap rate used to be 11 Hz with the body bouncing on
-                    // every beat, which did not read as applause — it read as one judge shaking.
-                    // Slower, arms only, with just a hint of body.
-                    // Small. A judge sitting at a bench claps in front of their chest; a
-                    // twenty-eight degree swing reads as a raised salute.
-                    float clap = Mathf.Abs(Mathf.Sin(_gestureTimer * 5.0f)) * env;
-                    armL = -13f * clap;
-                    armR = -11f * clap;
-                    lift = clap * 0.015f;
-                    bodyPitch = -clap * 1.6f;
-                    break;
-
-                case Gesture.SlowBlink:
-                    // No blink geometry, so it is played as a slow deliberate head dip.
-                    headPitch = env * 7f;
-                    break;
-
-                case Gesture.Preen:
-                    headYaw = Mathf.Sin(u * Mathf.PI * 2f) * 30f;
-                    headPitch = env * 16f;
-                    armL = -env * 12f;
-                    break;
-            }
+            // About the judge's own axes, not the bone's. The rig comes through the FBX importer's
+            // axis conversion, so a bone's local X is not the axis a neck actually pitches on —
+            // driving Euler(x) directly is what used to roll their heads sideways.
+            head.rotation = Quaternion.AngleAxis(_lookYaw, transform.up)
+                          * Quaternion.AngleAxis(_lookPitch, transform.right)
+                          * head.rotation;
         }
     }
 }

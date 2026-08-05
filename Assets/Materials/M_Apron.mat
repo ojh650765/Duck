@@ -25,7 +25,9 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _DryAmount: 0.3
+    - _AmbientFloor: 0.1
+    - _AmbientGain: 1.35
+    - _DryAmount: 0.38
     - _GrainAmount: 0.13
     - _GrainScale: 0.8
     - _MottleAmount: 0.75
@@ -35,9 +37,9 @@ Material:
     - _PatchScale: 0.011
     - _Wrap: 0.38
     m_Colors:
-    - _DryTint: {r: 0.27467737, g: 0.39157256, b: 0.06847818, a: 1}
-    - _PatchDark: {r: 0.025186857, g: 0.14702728, b: 0.023153365, a: 1}
-    - _UncutBase: {r: 0.048171822, g: 0.25415218, b: 0.034339808, a: 1}
-    - _UncutTip: {r: 0.15896086, g: 0.5149178, b: 0.07227186, a: 1}
+    - _DryTint: {r: 0.3467041, g: 0.46207705, b: 0.084376216, a: 1}
+    - _PatchDark: {r: 0.036889445, g: 0.17788841, b: 0.028426038, a: 1}
+    - _UncutBase: {r: 0.048171822, g: 0.25415218, b: 0.029556833, a: 1}
+    - _UncutTip: {r: 0.15292616, g: 0.48514998, b: 0.05951124, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

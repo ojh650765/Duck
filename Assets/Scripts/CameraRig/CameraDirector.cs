@@ -2,7 +2,20 @@ using UnityEngine;
 
 namespace DuckMow
 {
-    public enum CameraMode { Chase, Briefing, Reveal, Judges, Verdict, VenueTour, Scoreboard }
+    public enum CameraMode
+    {
+        Chase, Briefing, Reveal, Judges, Verdict, VenueTour, Scoreboard,
+        /// <summary>High over the whole venue while the picture is studied, before the count-in.</summary>
+        VenuePreview,
+        /// <summary>The one-per-round lift, so the player can see what they have actually cut.</summary>
+        Aerial,
+        /// <summary>
+        /// A push in on the trophy by the judges' bench, for the championship ceremony. Appended at
+        /// the end rather than filed next to Verdict where it belongs in the running order, because
+        /// the shot list is referenced by value by the capture tools.
+        /// </summary>
+        Trophy
+    }
 
     /// <summary>
     /// The single camera. Every shot in the game is a mode on this rig, and mode changes are
@@ -69,12 +82,54 @@ namespace DuckMow
         [Header("Verdict portrait")]
         [Tooltip("How far in front of the mower the verdict camera sits.")]
         public float verdictDistance = 4.3f;
-        public float verdictHeight = 1.32f;
+        [Tooltip("Camera height ABOVE the aim point, which is already 0.86 m up the machine. " +
+                 "Small values put the lens near the duck's own eye line.")]
+        // Dropped from 1.32.
+        //
+        // At 1.32 the lens sat 2.18 m up and looked down at the duck, which is the angle you shoot
+        // a small object on a table from — it made the closing portrait read as an inventory
+        // screenshot rather than as a character who has just been judged. Near eye level the duck
+        // gets the sky behind it and holds the frame.
+        //
+        // Not lower than this: the uncut blade layer stands about half a metre off the lawn and
+        // the mower parks on open grass, so a lens under roughly 1.2 m world height starts taking
+        // grass across the bottom of the shot and eventually sits inside it.
+        public float verdictHeight = 0.55f;
         [Tooltip("Yaw around the mower, so we see the duck three-quarter rather than head on.")]
         public float verdictYaw = 34f;
         [Tooltip("Push the subject to screen right, leaving the left clear for the scores.")]
         public float verdictScreenOffset = 1.15f;
         public float verdictFov = 32f;
+
+        // ------------------------------------------------------------------ defence framing
+        //
+        // Deliberately NOT a camera mode. The defence phase has to read as a continuation of driving
+        // the same mower, and a mode of its own would have given it its own framing, its own blend
+        // and its own feel — which is exactly the detached-minigame camera the phase must not have.
+        // So it is a set of modifiers layered onto Chase: the boom lengthens, the lens widens, the
+        // aim is BIASED toward the goose without ever being handed to it, and a hit punches the
+        // lens. Turn the subject off and Chase is bit-for-bit what it was.
+
+        [Header("Defence framing")]
+        [Tooltip("Metres the boom lengthens at full rally energy, so an escalating rally has more " +
+                 "room in frame without the shot changing character.")]
+        public float defencePullBack = 2.6f;
+        [Tooltip("Metres the camera rises at full rally energy.")]
+        public float defenceLift = 1.1f;
+        [Tooltip("Degrees the lens widens at full rally energy.")]
+        public float defenceFovWiden = 7f;
+        [Tooltip("How far the aim point is allowed to slide from the mower toward the goose, 0..1. " +
+                 "Bounded on purpose: past about a third the player stops being able to steer by " +
+                 "what is on screen, which is taking control away rather than helping them aim.")]
+        [Range(0f, 0.6f)] public float defenceAimBias = 0.32f;
+        [Tooltip("Extra bias while the goose is close, where the player actually needs to see it.")]
+        public float defenceAimNearDistance = 9f;
+        [Tooltip("Metres the camera dollies in on a hit punch, and how much the lens narrows with it.")]
+        public float punchDolly = 1.5f;
+        public float punchFov = 9f;
+        [Tooltip("How fast a punch decays. High: a punch has to be over before the player's next " +
+                 "input, or it reads as the camera being broken rather than as an impact.")]
+        public float punchDecay = 7f;
 
         [Header("Briefing / Verdict")]
         public Vector3 briefingPosition = new Vector3(0f, 4.2f, -47f);
@@ -129,6 +184,9 @@ namespace DuckMow
                 case CameraMode.Judges: ComputeJudges(out p, out r, out f); break;
                 case CameraMode.Verdict: ComputeVerdict(out p, out r, out f); break;
                 case CameraMode.Briefing: ComputeBriefing(out p, out r, out f); break;
+                case CameraMode.VenuePreview: ComputeVenuePreview(out p, out r, out f); break;
+                case CameraMode.Aerial: ComputeAerial(out p, out r, out f); break;
+                case CameraMode.Trophy: ComputeTrophy(out p, out r, out f); break;
                 default: ComputeChase(out p, out r, out f); break;
             }
             _smoothPos = p; _smoothRot = r; _smoothFov = f;
@@ -145,9 +203,31 @@ namespace DuckMow
             _blendFromFov = _cam.fieldOfView;
             _blendDuration = Mathf.Max(0.001f, blendDuration);
             _blend = 0f;
+            // When this shot started, for the shots that dolly rather than settle. Taken from the
+            // rig's own clock so it survives the scripted stepping the capture tools drive.
+            _modeEnteredAt = _clock;
         }
 
+        float _modeEnteredAt;
+
         public void AddShake(float amount) => _shake = Mathf.Min(1.6f, _shake + amount);
+
+        /// <summary>
+        /// Tell the rig its subject has just been moved rather than driven there.
+        ///
+        /// Only the mower-following shots care, and they care a lot: the round starts by putting
+        /// the machine back on its mark, and if the camera is on it at that instant — the verdict
+        /// portrait, or a chase left over from the intro — the subject vanishes out of frame and
+        /// the rig lurches after it across the field. That is the "teleport" the player sees, and
+        /// it was fixed once at the Briefing transition, which only covered one of the several
+        /// routes into a new round. Handling it here covers all of them, including the ones added
+        /// later by whoever reads this.
+        /// </summary>
+        public void NotifyTargetTeleported()
+        {
+            if (Mode != CameraMode.Chase && Mode != CameraMode.Verdict) return;
+            SnapToCurrent();
+        }
 
         public void SnapToChase()
         {
@@ -192,6 +272,9 @@ namespace DuckMow
                 case CameraMode.Judges: ComputeJudges(out wantPos, out wantRot, out wantFov); break;
                 case CameraMode.Verdict: ComputeVerdict(out wantPos, out wantRot, out wantFov); break;
                 case CameraMode.Briefing: ComputeBriefing(out wantPos, out wantRot, out wantFov); break;
+                case CameraMode.VenuePreview: ComputeVenuePreview(out wantPos, out wantRot, out wantFov); break;
+                case CameraMode.Aerial: ComputeAerial(out wantPos, out wantRot, out wantFov); break;
+                case CameraMode.Trophy: ComputeTrophy(out wantPos, out wantRot, out wantFov); break;
                 default: ComputeChase(out wantPos, out wantRot, out wantFov); break;
             }
 
@@ -206,6 +289,11 @@ namespace DuckMow
             }
 
             _shake = Mathf.Max(0f, _shake - _shakeDecay * dt);
+            // Decayed on SCALED time, deliberately. A hit stop drops the timescale to near zero, so
+            // the punch and the shake hold for the duration of the freeze and release as the world
+            // starts moving again — which is the whole effect. Decaying on unscaled time would spend
+            // the punch during the frames nothing else is moving.
+            _punch = Mathf.Max(0f, _punch - punchDecay * dt);
             Vector3 shakeOffset = Vector3.zero;
             if (_shake > 0.001f)
             {
@@ -255,6 +343,15 @@ namespace DuckMow
             float dist = Mathf.Lerp(chaseDistance, chaseDistanceAtSpeed, speedFrac);
             float height = Mathf.Lerp(chaseHeight, chaseHeightAtSpeed, speedFrac);
 
+            // A rally winds the shot up: further back, a little higher, a little wider. All three
+            // ride the same energy value so the escalation reads as one gesture rather than as three
+            // settings drifting apart.
+            if (_defenceSubject != null)
+            {
+                dist += defencePullBack * _defenceEnergy;
+                height += defenceLift * _defenceEnergy;
+            }
+
             Vector3 pivot = target.position;
             Vector3 desired = pivot - heading * dist + Vector3.up * height;
 
@@ -264,6 +361,20 @@ namespace DuckMow
             _smoothPos = Vector3.Lerp(_smoothPos, desired, 1f - Mathf.Exp(-dt / Mathf.Max(positionLag, 1e-3f)));
 
             Vector3 lookTarget = pivot + Vector3.up * lookHeight + flatVel * lookAhead;
+
+            // Bias the aim toward the goose, and only toward it. The mower stays the subject of the
+            // shot — this slides the aim point a bounded fraction of the way, weighted up while the
+            // bird is close enough to matter. Framing the goose outright was the obvious version and
+            // it is wrong: the player steers by what is centred, so handing the centre to something
+            // else is taking the controls away at the exact moment they need them.
+            if (_defenceSubject != null)
+            {
+                Vector3 toGoose = _defenceSubject.position - lookTarget;
+                float near = 1f - Mathf.Clamp01(toGoose.magnitude / Mathf.Max(defenceAimNearDistance, 0.1f));
+                float bias = defenceAimBias * (0.45f + 0.55f * near) * _defenceBiasScale;
+                lookTarget += toGoose * bias;
+            }
+
             Vector3 toTarget = lookTarget - _smoothPos;
             if (toTarget.sqrMagnitude < 1e-4f) toTarget = heading;
 
@@ -281,9 +392,20 @@ namespace DuckMow
 
             float wantFov = Mathf.Lerp(fovBase, fovAtSpeed, speedFrac);
             if (mower != null && mower.IsBoosting) wantFov += fovBoostKick;
+            if (_defenceSubject != null) wantFov += defenceFovWiden * _defenceEnergy;
             _smoothFov = Mathf.Lerp(_smoothFov, wantFov, 1f - Mathf.Exp(-fovLag * dt));
 
             pos = _smoothPos; rot = _smoothRot; fov = _smoothFov;
+
+            // The punch is applied to the OUTPUT and never written back into the smoothed state, so
+            // it is crisp and self-cancelling. Feeding it through positionLag and fovLag instead
+            // smeared a 140 ms impact into half a second of drift, which reads as the camera sagging
+            // rather than as a hit.
+            if (_punch > 0.001f)
+            {
+                pos += rot * Vector3.forward * (punchDolly * _punch);
+                fov -= punchFov * _punch;
+            }
         }
 
         Vector3 ResolveCollision(Vector3 from, Vector3 to)
@@ -324,6 +446,46 @@ namespace DuckMow
         /// is a scoreboard; three close-ups with a beat between them is a performance.
         /// </summary>
         public void SetJudgeFocus(Transform judge) => _judgeFocus = judge;
+
+        /// <summary>
+        /// Give the chase camera something to make room for, without giving it something to follow.
+        ///
+        /// <paramref name="energy01"/> is how far into a rally the phase is: it lengthens the boom,
+        /// lifts a little and widens the lens, so a long rally visibly winds up while remaining the
+        /// same shot. Pass null to put Chase back exactly as it was.
+        /// </summary>
+        /// <param name="biasScale">
+        /// Scales <see cref="defenceAimBias"/> for this subject. Exists because the phase has two
+        /// kinds of subject with different claims on the frame: a goose in flight is the thing being
+        /// timed and wants the full bias, while the opponent's plot across the way only needs to be
+        /// KEPT IN SHOT between exchanges. Giving the far plot the full bias pitched the camera so far
+        /// up the field that the duck sat on the bottom edge of frame.
+        /// </param>
+        public void SetDefenceSubject(Transform subject, float energy01, float biasScale = 1f)
+        {
+            _defenceSubject = subject;
+            _defenceEnergy = Mathf.Clamp01(energy01);
+            _defenceBiasScale = Mathf.Clamp(biasScale, 0f, 2f);
+        }
+
+        public void ClearDefenceSubject()
+        {
+            _defenceSubject = null;
+            _defenceEnergy = 0f;
+            _punch = 0f;
+        }
+
+        /// <summary>
+        /// A short dolly-in and lens narrow, for an impact. Separate from <see cref="AddShake"/>:
+        /// shake says "something rattled the camera", a punch says "that connected". Stacking them
+        /// on the same hit is what makes a parry land.
+        /// </summary>
+        public void AddPunch(float amount) => _punch = Mathf.Min(1.4f, _punch + amount);
+
+        Transform _defenceSubject;
+        float _defenceEnergy;
+        float _defenceBiasScale = 1f;
+        float _punch;
 
         Transform _judgeFocus;
 
@@ -502,6 +664,98 @@ namespace DuckMow
             pos = briefingPosition;
             rot = Quaternion.LookRotation((briefingLookAt - briefingPosition).normalized, Vector3.up);
             fov = briefingFov;
+            _smoothPos = pos; _smoothRot = rot; _smoothFov = fov;
+        }
+
+        // ------------------------------------------------------------------ the memory beat
+
+        [Header("Venue preview (the study beat)")]
+        [Tooltip("Height over the venue for the pre-round study shot. Must fit all four plots.")]
+        public float previewHeight = 186f;
+        [Tooltip("How far south of the venue centre the preview sits, so the shot has some rake.")]
+        public float previewBack = 46f;
+        public float previewFov = 46f;
+        [Tooltip("Degrees per second the preview orbits, so the study beat is not a still frame.")]
+        public float previewDrift = 2.2f;
+
+        [Header("Aerial check")]
+        [Tooltip("Height of the one-per-round lift over the player's own lawn.")]
+        public float aerialHeight = 74f;
+        public float aerialBack = 16f;
+        public float aerialFov = 46f;
+
+        /// <summary>
+        /// The whole championship ground from above, which is the only time it is ever seen as one
+        /// thing. Derived from <see cref="Venue"/> rather than hand-placed, so adding a fifth plot
+        /// reframes the shot instead of cropping it.
+        /// </summary>
+        void ComputeVenuePreview(out Vector3 pos, out Quaternion rot, out float fov)
+        {
+            Vector2 lo = Venue.Plots[0].centre, hi = lo;
+            foreach (var p in Venue.Plots)
+            {
+                lo = Vector2.Min(lo, p.centre - Vector2.one * p.Half);
+                hi = Vector2.Max(hi, p.centre + Vector2.one * p.Half);
+            }
+            Vector2 c = (lo + hi) * 0.5f;
+            Vector3 centre = new Vector3(c.x, 0f, c.y);
+
+            // A slow orbit rather than a locked overhead. Four seconds on a static top-down frame
+            // reads as a loading screen; a drifting one reads as a helicopter shot and gives the
+            // picture a moment of parallax to be read against.
+            float ang = _clock * previewDrift * Mathf.Deg2Rad;
+            Vector3 offset = new Vector3(Mathf.Sin(ang) * previewBack, previewHeight,
+                                         -Mathf.Cos(ang) * previewBack);
+            pos = centre + offset;
+            rot = Quaternion.LookRotation((centre - pos).normalized, Vector3.up);
+            fov = previewFov;
+            _smoothPos = pos; _smoothRot = rot; _smoothFov = fov;
+        }
+
+        /// <summary>
+        /// Straight up over the player's own lawn. Centred on the field rather than on the mower,
+        /// because the point of the lift is to see the whole of what you have drawn — and the mower
+        /// is in shot anyway, which is what tells you where you are standing in it.
+        /// </summary>
+        void ComputeAerial(out Vector3 pos, out Quaternion rot, out float fov)
+        {
+            Vector3 centre = Vector3.zero;
+            pos = centre + new Vector3(0f, aerialHeight, -aerialBack);
+            rot = Quaternion.LookRotation((centre - pos).normalized, Vector3.up);
+            fov = aerialFov;
+            _smoothPos = pos; _smoothRot = rot; _smoothFov = fov;
+        }
+
+        // ------------------------------------------------------------------ the ceremony
+
+        [Header("Trophy (the championship ceremony)")]
+        [Tooltip("Centre of the trophy on its plinth. Matches where the environment builder stands it.")]
+        public Vector3 trophySubject = new Vector3(-6.2f, 1.22f, -37.5f);
+        [Tooltip("Where the shot starts, relative to the trophy. Positive z is the lawn side, so the " +
+                 "judges' bench sits behind the prize rather than out of frame.")]
+        public Vector3 trophyOffset = new Vector3(0.72f, 0.44f, 2.55f);
+        [Tooltip("Metres the shot closes over the beat. A prize is dollied in on, never held static.")]
+        public float trophyPushIn = 0.8f;
+        public float trophyPushSeconds = 3.6f;
+        public float trophyFov = 27f;
+
+        /// <summary>
+        /// The trophy, close, with the panel behind it.
+        ///
+        /// Framed off the prop's authored position rather than off a transform found in the scene:
+        /// the trophy is baked into a combined clutter mesh, so there is nothing in the hierarchy to
+        /// point a camera at. Both numbers therefore have to agree with DuckEnvironmentBuilder, and
+        /// that is the one thing to check if this shot ever comes back looking at bare grass.
+        /// </summary>
+        void ComputeTrophy(out Vector3 pos, out Quaternion rot, out float fov)
+        {
+            float t = Mathf.Clamp01((_clock - _modeEnteredAt) / Mathf.Max(trophyPushSeconds, 0.01f));
+            Vector3 offset = trophyOffset;
+            offset.z = Mathf.Max(0.6f, offset.z - trophyPushIn * SmoothStep(t));
+
+            pos = trophySubject + offset;
+            rot = Quaternion.LookRotation((trophySubject - pos).normalized, Vector3.up);
+            fov = trophyFov;
             _smoothPos = pos; _smoothRot = rot; _smoothFov = fov;
         }
     }

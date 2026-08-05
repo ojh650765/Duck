@@ -36,6 +36,7 @@ namespace DuckMow.EditorTools
             venue.SetParent(worldRoot, false);
 
             var rivals = new System.Collections.Generic.List<RivalContestant>();
+            var bladePlots = new List<RivalBlades.Plot>();
 
             for (int i = 0; i < Venue.Plots.Length; i++)
             {
@@ -50,7 +51,16 @@ namespace DuckMow.EditorTools
                 {
                     BuildLawn(plot, spec);
                     BuildApronAndHedge(plot, spec);
-                    rivals.Add(BuildContestant(plot, spec));
+                    var contestant = BuildContestant(plot, spec);
+                    rivals.Add(contestant);
+
+                    bladePlots.Add(new RivalBlades.Plot
+                    {
+                        contestant = spec.contestant,
+                        centre = spec.centre,
+                        size = spec.size,
+                        owner = contestant
+                    });
                 }
 
                 BuildStation(plot, spec);
@@ -59,6 +69,7 @@ namespace DuckMow.EditorTools
                 BuildPathSpur(plot, spec);
             }
 
+            BuildBladeLayer(venue, bladePlots);
             BuildPlaza(venue);
 
             return rivals.ToArray();
@@ -120,12 +131,102 @@ namespace DuckMow.EditorTools
                            new Vector3(spec.centre.x, 0.005f, spec.centre.y), Quaternion.identity, false);
             go.layer = LayerMask.NameToLayer("Ground");
 
-            // No collider and no blade layer. Nothing ever drives on a rival's lawn, and the blade
-            // geometry costs more than everything else in the venue put together — at ninety-six
-            // metres the ground shader alone is indistinguishable.
+            // Still no collider: nothing physical ever visits a rival's lawn, so the mower's
+            // suspension rays have nothing to look for here. The blades are a separate layer built
+            // once for the whole venue — see BuildBladeLayer.
             var lawn = go.AddComponent<RivalLawn>();
             lawn.plotCentre = spec.centre;
             lawn.plotSize = spec.size;
+
+            BuildChalk(plot, spec);
+        }
+
+        /// <summary>
+        /// Real grass on the rivals' lawns.
+        ///
+        /// Three plots of ground shader and nothing standing up was the single loudest unfinished
+        /// thing in the venue: the tour drops to sixty metres over each plot in turn, and the cut
+        /// straight from the player's grass to a neighbour's painted quad said "these three are set
+        /// dressing" about the contestants the whole round is a comparison against.
+        ///
+        /// Every number is copied off the player's own GrassField rather than tuned here. That is
+        /// the point: the two layers bake the same patch, thin at the same distance, swap LOD at the
+        /// same distance and are culled at the same distance, so no camera can find a range at which
+        /// one lawn has grass and another does not. It is also what keeps the cost honest — the
+        /// player's field and a rival's are never both in range of the same camera.
+        /// </summary>
+        static void BuildBladeLayer(Transform venue, List<RivalBlades.Plot> bladePlots)
+        {
+            if (bladePlots.Count == 0) return;
+
+            var bladeMat = Mat("M_GrassBlades");
+            if (bladeMat == null)
+            {
+                Debug.LogWarning("[Duck] M_GrassBlades missing; rival lawns will have no blade layer.");
+                return;
+            }
+
+            var go = new GameObject("BladeLayer");
+            go.transform.SetParent(venue, false);
+            var blades = go.AddComponent<RivalBlades>();
+            blades.plots = bladePlots.ToArray();
+            blades.bladeMaterial = bladeMat;
+
+            var player = Object.FindFirstObjectByType<GrassField>();
+            if (player == null)
+            {
+                Debug.LogWarning("[Duck] No GrassField in the scene; the rival blade layer keeps its " +
+                                 "defaults and may not match the player's lawn.");
+            }
+            else
+            {
+                // Chunk size, not chunk count: a rival plot is 48 m against the player's 64, so
+                // copying chunksPerSide would have baked a 6 m patch and quietly given the rivals
+                // denser, shorter-tiled grass than the lawn they are being judged beside.
+                blades.chunkSize = Field.Size / Mathf.Max(1, player.chunksPerSide);
+                blades.density = player.density0;
+                blades.bladeHeight = player.bladeHeight;
+                blades.bladeWidth = player.bladeWidth;
+                blades.bladeCurve = player.bladeCurve;
+                blades.lod0Distance = player.lod0Distance;
+                blades.lod1Distance = player.lod1Distance;
+                blades.lodInterval = player.lodInterval;
+            }
+
+        }
+
+        /// <summary>
+        /// The picture, chalked on a rival's lawn exactly as it is on the player's.
+        ///
+        /// The study beat looks down on all four plots at once, and until this existed only one of
+        /// them had an outline on it. Three neighbours mowing from a blank lawn does not read as
+        /// "they are working from memory too" — it reads as the player being the only one handed a
+        /// handicap, which is the one impression the round cannot afford.
+        ///
+        /// The quad uses the SHARED chalk material, not a copy. The director animates that single
+        /// material's line alpha, dissolve and anchors every frame, so sharing it is what makes
+        /// every plot in the venue lose its guide on the same frame the player does.
+        /// </summary>
+        static void BuildChalk(Transform plot, PlotSpec spec)
+        {
+            var chalk = Mat("M_ChalkGuide");
+            if (chalk == null)
+            {
+                Debug.LogWarning("[Duck] M_ChalkGuide missing; rival plots will have no outline.");
+                return;
+            }
+
+            // Subdivided for the same reason the lawn is: the shader works in world space and the
+            // fog term interpolates across the surface, not over four corners.
+            var mesh = DuckMeshLibrary.Quad(spec.size, spec.size, 16);
+            // Above the lawn (0.005) and below anything standing on it.
+            var go = Spawn(plot, "Chalk", mesh, chalk,
+                           new Vector3(spec.centre.x, 0.02f, spec.centre.y), Quaternion.identity, false);
+
+            var rc = go.AddComponent<RivalChalk>();
+            rc.plotCentre = spec.centre;
+            rc.plotSize = spec.size;
+            rc.shapeRadius = spec.Half * 0.80f;   // the same figure RivalContestant mows to
         }
 
         static void BuildApronAndHedge(Transform plot, PlotSpec spec)
@@ -209,6 +310,11 @@ namespace DuckMow.EditorTools
             rc.shapeRadius = spec.Half * 0.80f;
             rc.skill = spec.skill;
             rc.flair = spec.flair;
+            rc.pace = spec.pace;
+            rc.precision = spec.precision;
+            rc.strategy = spec.strategy;
+            rc.memoryStyle = spec.memoryStyle;
+            rc.memoryError = spec.memoryError;
             rc.stampShader = Shader.Find("Duck/CutStamp");
 
             // The real mower, in this contestant's colours.
@@ -251,6 +357,7 @@ namespace DuckMow.EditorTools
                       DuckModelIntegration.DuckSeatOffset, Quaternion.identity, true);
             }
 
+            rc.obstacles = BuildPlotOrnaments(plot, spec);
             rc.mowerVisual = visual;
             // No separate blade spinner: the authored mower is one combined mesh, and a spinning
             // deck is not readable at any distance a rival is ever seen from.
@@ -300,6 +407,80 @@ namespace DuckMow.EditorTools
             return m;
         }
 
+        /// <summary>
+        /// Garden gnomes on a rival's lawn, and the transforms the contestant knocks them over by.
+        ///
+        /// The player's field has had knockable gnomes since the first build and the rivals' lawns
+        /// had nothing at all, so the one hazard in the game applied only to the contestant being
+        /// asked to dodge it. Beyond fairness that was costing the tour its best evidence: a flat
+        /// gnome and a swerve through the middle of an outline says "this is why HORACE lost" far
+        /// more plainly than a lower number on the board does.
+        ///
+        /// No rigidbody and no collider. Nothing physical ever visits a rival plot — the contestant
+        /// is a route follower with no body — so these are props that RivalContestant tips over on
+        /// a proximity test. Giving them physics would add three dozen sleeping rigidbodies to a
+        /// WebGL build for an interaction that can never happen.
+        ///
+        /// Placement is on a ring biased away from the plot centre, because a gnome dead in the
+        /// middle of a small picture is unavoidable rather than avoidable, and the point is that a
+        /// careless line costs you and a careful one does not.
+        /// </summary>
+        static Transform[] BuildPlotOrnaments(Transform plot, PlotSpec spec)
+        {
+            var root = new GameObject("Ornaments").transform;
+            root.SetParent(plot, false);
+
+            var authored = DuckAssetLibrary.GetCombined("Props.fbx", "Gnome", "Gnome");
+            var mesh = authored ?? DuckMeshLibrary.Persist(
+                DuckPrimitives.Cylinder(0.20f, 0.06f, 0.44f, 10, 0.03f), "GnomeBody");
+            var mat = authored != null ? Mat("M_PropsAuthored") : Mat("M_TentCream");
+
+            const int count = 4;
+            var list = new List<Transform>(count);
+            float half = spec.Half;
+
+            // Same height as the player's gnomes, derived rather than typed.
+            //
+            // These were left at scale 1 — 0.485 m — while the player's were doubled to 1.2 m, so
+            // the venue had two sizes of the same ornament and the small ones read as obstacles that
+            // do nothing. They also carried the old hardcoded `y = 0.22` with a compensating
+            // `down * 0.22` on the visual, which is the two-numbers-for-one-shape pattern that put
+            // props underground and in mid-air everywhere else in this venue.
+            //
+            // Worth being clear about what these are: they are the RIVALS' obstacles, fed to
+            // RivalContestant.CheckObstacles so a rival swerves and loses time. They deliberately
+            // have no collider, because the player never drives on a rival's plot — so matching the
+            // size is about the venue reading as one place, not about player collision.
+            const float targetHeight = 1.2f;
+            float meshHeight = Mathf.Max(mesh.bounds.size.y, 0.01f);
+            float scale = targetHeight / meshHeight;
+            float bottom = mesh.bounds.min.y * scale;   // the model's own base, after scaling
+
+            for (int i = 0; i < count; i++)
+            {
+                // Spread round the plot with a jittered angle so four plots do not share a pattern.
+                float ang = (i / (float)count + Range(-0.10f, 0.10f)) * Mathf.PI * 2f;
+                float radius = Range(half * 0.42f, half * 0.78f);
+                // The plots are flat at y = 0, so the ground is 0 here and the only offset that
+                // matters is the model's own base.
+                Vector3 p = new Vector3(spec.centre.x + Mathf.Cos(ang) * radius, 0f,
+                                        spec.centre.y + Mathf.Sin(ang) * radius);
+
+                var go = new GameObject($"Gnome_{i}");
+                go.transform.SetParent(root, false);
+                go.transform.SetPositionAndRotation(p, Quaternion.Euler(0f, Range(0f, 360f), 0f));
+
+                var body = Spawn(go.transform, "Body", mesh, mat, p - Vector3.up * bottom,
+                                 go.transform.rotation, true);
+                if (body != null) body.transform.localScale = Vector3.one * scale;
+
+
+                list.Add(go.transform);
+            }
+
+            return list.ToArray();
+        }
+
         // ------------------------------------------------------------------ station & stand
 
         static void BuildStation(Transform plot, PlotSpec spec)
@@ -321,8 +502,8 @@ namespace DuckMow.EditorTools
 
             Spawn(s, "Top", top, wood, new Vector3(0f, 0.80f, 0.30f), Quaternion.identity, false);
             Spawn(s, "Front", front, wood, new Vector3(0f, 0.42f, 0.86f), Quaternion.identity, false);
-            Spawn(s, "LegL", leg, woodDark, new Vector3(-2.1f, 0.42f, 0.1f), Quaternion.identity, false);
-            Spawn(s, "LegR", leg, woodDark, new Vector3(2.1f, 0.42f, 0.1f), Quaternion.identity, false);
+            Spawn(s, "LegL", leg, Mat("M_WoodPost"), new Vector3(-2.1f, 0.42f, 0.1f), Quaternion.identity, false);
+            Spawn(s, "LegR", leg, Mat("M_WoodPost"), new Vector3(2.1f, 0.42f, 0.1f), Quaternion.identity, false);
 
             // Three seated judges, authored. Different species from the player's panel so the
             // venue does not look like the same three animals cloned across four stations.
@@ -450,7 +631,13 @@ namespace DuckMow.EditorTools
             var textGO = new GameObject("Name");
             textGO.transform.SetParent(b, false);
             textGO.transform.localPosition = new Vector3(0f, 2.3f, -0.09f);
-            textGO.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            // Identity, NOT the 180 that the desk cards and the plaza board use.
+            //
+            // TMP reads correctly from the -Z side of its own transform, so the turn is only
+            // needed when the text sits on a surface's +Z face. This one does not: it is mounted
+            // 9 cm proud of the panel's BACK face, at local -Z, facing the plaza. Turning it as
+            // well flipped it twice and the contestant's name came out mirrored on every plot.
+            textGO.transform.localRotation = Quaternion.identity;
             var tm = textGO.AddComponent<TMPro.TextMeshPro>();
             tm.text = spec.contestant;
             tm.fontSize = 5.2f;
@@ -469,7 +656,21 @@ namespace DuckMow.EditorTools
             float len = dir.magnitude;
             if (len < 1f) return;
 
-            float start = spec.Half + 8f;
+            // Where the path may START: outside the PLOT, which is a square, not a circle.
+            //
+            // This was `spec.Half + 8f`, treating the plot as if its edge were Half away in every
+            // direction. It is not: the spur runs diagonally toward the plaza, and an axis-aligned
+            // square of half-extent h reaches h*sqrt(2) at 45 degrees — 45.25 m for the player's
+            // 32 m half-plot. So a start of 40 began five metres INSIDE the competition ground, and
+            // the grass grew straight through the path lying under it.
+            //
+            // h / max(|dx|, |dz|) is the exact distance from centre to edge along a unit direction,
+            // for any direction, so this cannot be wrong again for a differently-placed plot. The
+            // 4 m on top keeps the path clear of the blade layer's own edge fade as well as the
+            // ground quad.
+            Vector3 n = dir.normalized;
+            float exit = spec.Half / Mathf.Max(Mathf.Max(Mathf.Abs(n.x), Mathf.Abs(n.z)), 1e-4f);
+            float start = exit + 4f;
             float end = Venue.PlazaRadius;
             float span = len - start - end;
             if (span <= 2f) return;
@@ -478,7 +679,7 @@ namespace DuckMow.EditorTools
                 DuckPrimitives.ChamferBox(new Vector3(2.1f, 0.02f, span * 0.5f), 0.3f),
                 $"Path_{spec.contestant}");
             Vector3 mid = from + dir.normalized * (start + span * 0.5f);
-            Spawn(plot, "Path", mesh, Mat("M_Dirt"), new Vector3(mid.x, 0.014f, mid.z),
+            Spawn(plot, "Path", mesh, Mat("M_Earth"), new Vector3(mid.x, 0.014f, mid.z),
                   Quaternion.LookRotation(dir.normalized, Vector3.up), false);
         }
 
@@ -492,7 +693,7 @@ namespace DuckMow.EditorTools
 
             var disc = DuckMeshLibrary.Persist(
                 DuckPrimitives.Cylinder(Venue.PlazaRadius, Venue.PlazaRadius, 0.06f, 40), "PlazaDisc");
-            Spawn(p, "Ground", disc, Mat("M_Dirt"), new Vector3(0f, 0.02f, 0f), Quaternion.identity, false);
+            Spawn(p, "Ground", disc, Mat("M_Earth"), new Vector3(0f, 0.02f, 0f), Quaternion.identity, false);
 
             // No ring of posts. They were put here to carry bunting and never got any, so all they
             // did was stand a dozen bare poles around the one shot the whole tour ends on.
@@ -531,8 +732,8 @@ namespace DuckMow.EditorTools
             const float inlayH = 3.25f;                  // inlay spans 3.15 .. 9.65
 
             var legMesh = DuckMeshLibrary.Persist(DuckPrimitives.ChamferBox(new Vector3(0.22f, 2.4f, 0.22f), 0.06f), "BoardLeg");
-            Spawn(b, "LegL", legMesh, Mat("M_WoodDark"), new Vector3(-4.4f, 2.4f, 0f), Quaternion.identity, true);
-            Spawn(b, "LegR", legMesh, Mat("M_WoodDark"), new Vector3(4.4f, 2.4f, 0f), Quaternion.identity, true);
+            Spawn(b, "LegL", legMesh, Mat("M_WoodPost"), new Vector3(-4.4f, 2.4f, 0f), Quaternion.identity, true);
+            Spawn(b, "LegR", legMesh, Mat("M_WoodPost"), new Vector3(4.4f, 2.4f, 0f), Quaternion.identity, true);
 
             var faceMesh = DuckMeshLibrary.Persist(DuckPrimitives.ChamferBox(new Vector3(5.2f, faceH, 0.22f), 0.14f), "BoardFace");
             Spawn(b, "Face", faceMesh, Mat("M_WoodDark"), new Vector3(0f, faceY, 0f), Quaternion.identity, true);
@@ -541,7 +742,13 @@ namespace DuckMow.EditorTools
             Spawn(b, "Inlay", inlay, Mat("M_WoodWarm"), new Vector3(0f, faceY, 0.26f), Quaternion.identity, false);
 
             var crest = DuckMeshLibrary.Persist(DuckPrimitives.Prism(5.4f, 1.1f, 0.4f), "BoardCrest");
-            Spawn(b, "Crest", crest, Mat("M_TentRed"), new Vector3(0f, 10.2f, 0f), Quaternion.Euler(0f, 90f, 0f), true);
+            // No Y rotation, and this is the third time the same primitive convention has bitten.
+            //
+            // Prism(width, height, depth) builds its ridge along Z with the width across X, so a
+            // 90-degree turn about Y swaps those: a 5.4 m wide, 0.4 m deep crest became 0.4 m wide
+            // and 5.4 m deep, standing edge-on across a board face that is 10.4 m wide. The turn was
+            // presumably added to point the ridge along the board and it does the opposite.
+            Spawn(b, "Crest", crest, Mat("M_TentRed"), new Vector3(0f, 10f, 0f), Quaternion.identity, true);
 
             var board = b.gameObject.AddComponent<Scoreboard>();
 
@@ -549,7 +756,7 @@ namespace DuckMow.EditorTools
             titleGO.transform.SetParent(b, false);
             titleGO.transform.localPosition = new Vector3(0f, 9.15f, 0.38f);
             titleGO.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
-            board.title = MakeText(titleGO, "LAWN ART CHAMPIONSHIP", 3.6f, new Color(1f, 0.94f, 0.78f), 9.4f);
+            board.title = MakeText(titleGO, "GARDENER OF THE YEAR - LAWN ART", 3.6f, new Color(1f, 0.94f, 0.78f), 9.4f);
 
             board.rows = new ScoreboardRow[4];
             const float rowTop = 8.25f, rowStep = 1.28f;

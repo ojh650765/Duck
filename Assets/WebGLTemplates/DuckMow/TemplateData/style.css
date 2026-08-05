@@ -14,3 +14,98 @@ body { padding: 0; margin: 0 }
 #unity-build-title { float: right; margin-right: 10px; line-height: 38px; font-family: arial; font-size: 18px }
 #unity-fullscreen-button { cursor:pointer; float: right; width: 38px; height: 38px; background: url('fullscreen-button.png') no-repeat center }
 #unity-warning { position: absolute; left: 50%; top: 5%; transform: translate(-50%); background: white; padding: 10px; display: none }
+
+/* ------------------------------------------------------------------ touch devices
+   Everything below is scoped to body.duck-touch, which index.html sets only
+   when touch is the primary pointer. A desktop page is left exactly as it was.  */
+
+/* The page must not scroll, at all, ever.
+   A drag that starts on the canvas is ambiguous to a mobile browser: it can be
+   a gesture for the page or an event for the element. Left ambiguous, iOS
+   Safari resolves it as a scroll, rubber-bands the whole document, and CANCELS
+   the touch — which the game sees as the player's thumb vanishing off the
+   steering stick mid-corner. touch-action: none on the canvas is what removes
+   the ambiguity; the overflow and overscroll rules stop the elastic bounce
+   that the address bar's own show/hide gesture would otherwise cause.          */
+body.duck-touch,
+body.duck-touch #unity-container {
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #1b1a14;
+}
+body.duck-touch #unity-container.unity-mobile { left: 0; top: 0; transform: none }
+body.duck-touch #unity-canvas {
+  touch-action: none;
+  /* No grey flash when a thumb lands on a control, no text-selection loupe
+     when a thumb rests on one, and no callout menu on a long press. All three
+     are browser affordances for reading a document, and this is not one.      */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  display: block;
+}
+
+/* ------------------------------------------------------------------ portrait gate
+   Hidden outright unless the device is touch-primary AND the viewport is taller
+   than it is wide. See the long comment on #rotate-gate in index.html for why
+   portrait is refused rather than supported.                                   */
+#rotate-gate { display: none }
+
+@media (orientation: portrait) {
+  body.duck-touch #rotate-gate {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    /* Above the canvas and above the Unity loading bar, so the gate is the
+       first thing a portrait player sees rather than something that appears
+       after a 24 MB download has finished.                                    */
+    z-index: 10;
+    align-items: center;
+    justify-content: center;
+    padding: 8vh 8vw;
+    /* Respect the notch: without this the icon can sit under a camera cutout
+       on a phone held upright, because index.html asks for viewport-fit=cover. */
+    padding-top: max(8vh, env(safe-area-inset-top));
+    padding-bottom: max(8vh, env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    background: #2b2a20;
+    color: #f8f0db;
+    /* The same family stack the county-fair UI reads as, so the gate does not
+       look like a browser error page bolted onto a hand-painted game.         */
+    font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
+    text-align: center;
+  }
+}
+
+#rotate-gate-inner { max-width: 30rem }
+#rotate-gate-icon { color: #ffd973; margin-bottom: 1.2rem }
+#rotate-gate-title {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.25rem, 6vw, 1.9rem);
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  color: #ffd973;
+}
+#rotate-gate-body {
+  margin: 0 0 1.75rem;
+  font-size: clamp(0.9rem, 4vw, 1.05rem);
+  line-height: 1.5;
+  color: #ded6c0;
+}
+#rotate-gate-fullscreen {
+  font: inherit;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  color: #29201a;
+  background: #f8f0db;
+  border: 3px solid #b03a34;
+  border-radius: 0.6rem;
+  /* 48 px minimum in both directions: below that a thumb misses it, and the
+     one thing this button must not do is need a second attempt.              */
+  min-height: 48px;
+  padding: 0.7rem 1.4rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#rotate-gate-fullscreen:active { background: #ded6c0 }

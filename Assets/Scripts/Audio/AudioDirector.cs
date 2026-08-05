@@ -366,6 +366,15 @@ namespace DuckMow
                 case GameState.Judging:
                     SwapMusic(musicJudgingBed, masterMusic * 0.8f);
                     break;
+
+                case GameState.Ceremony:
+                    // Drop the judging bed. It is still looping at this point — nothing has cleared
+                    // it since the panel deliberated — and a title announced over the music that
+                    // accompanies a scorecard being filled in sounds like a formality rather than a
+                    // result. The crowd and the ceremony's own fanfare are the sound of this beat.
+                    SwapMusic(null, 0f);
+                    _ambCrowd.volume = masterAmbience * crowdMurmur * 1.8f;
+                    break;
             }
             _lastState = s;
         }
@@ -482,5 +491,16 @@ namespace DuckMow
         }
 
         public void PlayHorn() => PlayOne(horn, 0.7f);
+
+        /// <summary>
+        /// The championship result. Louder than the per-round fanfare in <see cref="HandleVerdict"/>
+        /// and routed through the second one-shot source, so it can ring under the applause the
+        /// ceremony fires at the same instant instead of cutting it off.
+        /// </summary>
+        public void PlayFanfare(bool triumphant)
+        {
+            PlayOneB(triumphant ? fanfareGood : fanfareBad, masterMusic * 1.4f);
+            if (triumphant) PlayOne(quackProud, 0.8f);
+        }
     }
 }

@@ -9,8 +9,25 @@ namespace DuckMow
     {
         public string name;
         public string species;
-        public float total;        // out of 30
-        public string rank;        // S..D
+        /// <summary>
+        /// The picture's marks, out of 30 — and still out of 30, deliberately.
+        ///
+        /// The defence award is kept OUT of this and carried separately, even though the championship
+        /// counts their sum. Six places print this as "N / 30" — the scoreboard row, the tour card, the
+        /// results panel, the simulator's log — and folding the award in here would have made every one
+        /// of them state a denominator the number can exceed. A visible "+N" belongs BESIDE those, not
+        /// silently inside them.
+        /// </summary>
+        public float total;
+        /// <summary>
+        /// The bench's verdict on the goose defence, roughly -3..+8. Zero for every rival — they never
+        /// face the geese, so the defence is the player's own opportunity and their own risk. Counted by
+        /// the championship and by the round's placing; see <see cref="RoundScore"/>.
+        /// </summary>
+        public int defenceAward;
+        /// <summary>The round score that actually decides anything: the picture plus the defence.</summary>
+        public float RoundScore => total + defenceAward;
+        public string rank;        // S..D, on the picture alone
         public bool isPlayer;
         public Vector2 plotCentre;
         public Color livery;
@@ -36,9 +53,42 @@ namespace DuckMow
         public string playerSpecies = "duck";
         public Color playerLivery = new Color(0.78f, 0.24f, 0.20f);
 
+        [Header("Championship")]
+        [Tooltip("Rounds in a championship. Three is the shortest arc in which a bad round can " +
+                 "still be answered, and short enough that a browser session reaches the end of one.")]
+        public int roundsPerChampionship = 3;
+
+        /// <summary>
+        /// The points table the rounds add up to. Not serialized and not a component: it is created
+        /// and seeded here so that a scene built before it existed still comes up with a working
+        /// championship instead of a null reference.
+        /// </summary>
+        public Championship Championship => _championship;
+        readonly Championship _championship = new Championship();
+
+        /// <summary>
+        /// True once this round's standings have been added to the championship.
+        ///
+        /// The guard is not paranoia. The director drives states, the capture tools force them, and
+        /// a round banked twice awards its points twice — which is invisible on the round board and
+        /// only shows up as a championship the player cannot account for.
+        /// </summary>
+        bool _banked;
+
         [Header("Variety")]
-        [Tooltip("Rivals mow different pictures from the player, so the venue does not look like a photocopier.")]
-        public bool rivalsGetOwnShapes = true;
+        [Tooltip("Rivals mow different pictures from the player. Off by default — see below.")]
+        // Off, and it matters.
+        //
+        // This was on so the venue would not look like a photocopier, which was the right call when
+        // the guide stayed on the ground all round. It is the wrong call now: the round turns on
+        // everybody losing the same picture at the same moment, and the tour's payoff is watching
+        // three neighbours misremember the outline you were also working from. If each rival is
+        // drawing something else you cannot tell a mistake from a different brief — HORACE's lopsided
+        // star just reads as HORACE's star, and the one shot that is supposed to say "they struggled
+        // too" says nothing at all.
+        //
+        // The variety has to come from how they fail instead. See RivalContestant's memory profile.
+        public bool rivalsGetOwnShapes = false;
 
         /// <summary>Fired for anything a neighbour does that the player might notice.</summary>
         public event Action<RivalEvent> OnRivalEvent;
@@ -62,15 +112,59 @@ namespace DuckMow
                 var captured = r;
                 captured.OnEvent += e => OnRivalEvent?.Invoke(e);
             }
+            ResetChampionship();
         }
 
         void OnDestroy() { if (Instance == this) Instance = null; }
 
-        /// <summary>Everyone starts at the klaxon. The player's shape comes in; rivals draw their own.</summary>
-        public void BeginRound(ShapeId playerShape)
+        /// <summary>
+        /// Wipe the points and put the same four contestants back on the table at nought.
+        ///
+        /// Seeded in roster order — player first — because the briefing card shows this table before
+        /// a single round has been mown, and the player is entitled to see who they are up against.
+        /// </summary>
+        public void ResetChampionship()
+        {
+            _championship.RoundsTotal = Mathf.Max(1, roundsPerChampionship);
+            _championship.Reset();
+            _championship.Seed(playerName, playerSpecies, playerLivery, true);
+            foreach (var r in rivals)
+            {
+                if (r == null) continue;
+                _championship.Seed(r.displayName, r.species, r.liveryColour, false);
+            }
+            _banked = false;
+        }
+
+        /// <summary>
+        /// Add this round's finished standings to the championship. Called once, from the board.
+        ///
+        /// Deliberately NOT called from <see cref="CloseRound"/>, even though that is where the marks
+        /// become final: the verdict beat still accepts input, so a round banked there could be
+        /// re-mown and banked again. The board is the first beat of the round with no way out except
+        /// forward, which makes it the only safe place to commit points.
+        /// </summary>
+        public void BankRound()
+        {
+            if (_banked || _standings.Count == 0) return;
+            _banked = true;
+            _championship.Record(_standings);
+        }
+
+        /// <summary>
+        /// Everyone starts at the klaxon, on the same picture, under the same rule.
+        ///
+        /// <paramref name="guideLostFraction"/> is how far into the round the chalk finishes
+        /// dissolving. It is handed down from the director rather than configured here so there is
+        /// exactly one schedule in the game: change the player's fade and every rival's recall
+        /// moves with it, which is the only way the tour can honestly claim they all had the same
+        /// amount of time to look.
+        /// </summary>
+        public void BeginRound(ShapeId playerShape, float guideLostFraction = 0.24f)
         {
             _standings.Clear();
             _running = true;
+            _banked = false;
 
             var all = TargetShapes.All;
             foreach (var r in rivals)
@@ -82,6 +176,7 @@ namespace DuckMow
                     int guard = 0;
                     do { s = all[_rng.Next(all.Length)]; } while (s == playerShape && ++guard < 12);
                 }
+                r.guideLostFraction = Mathf.Clamp01(guideLostFraction);
                 r.Begin(s);
             }
         }
@@ -90,13 +185,13 @@ namespace DuckMow
         /// Step every rival. <paramref name="progress01"/> is the round's own progress, so the
         /// whole venue finishes together however long the player's picture happened to grant.
         /// </summary>
-        public void Tick(float dt, float progress01)
+        public void Tick(float dt, float progress01, float guideVisibility = 0f)
         {
             if (!_running) return;
             foreach (var r in rivals)
             {
                 if (r == null) continue;
-                r.Tick(dt, progress01);
+                r.Tick(dt, progress01, guideVisibility);
             }
         }
 
@@ -111,7 +206,14 @@ namespace DuckMow
         /// The player's score arrives already computed by their own bench, so the two paths meet
         /// here and nowhere else.
         /// </summary>
-        public void CloseRound(float playerTotal, string playerRank, Vector2 playerPlot)
+        /// <param name="defenceAward">
+        /// What the bench made of the goose defence, added straight onto the player's round score.
+        /// Zero when the phase did not run, which keeps a round without it scoring exactly as it did.
+        /// Rivals never receive one — they do not face the geese, so the defence is the player's own
+        /// opportunity and their own risk.
+        /// </param>
+        public void CloseRound(float playerArtistry, string playerRank, Vector2 playerPlot,
+                               int defenceAward = 0)
         {
             _running = false;
 
@@ -122,7 +224,8 @@ namespace DuckMow
             {
                 name = playerName,
                 species = playerSpecies,
-                total = playerTotal,
+                total = playerArtistry,
+                defenceAward = defenceAward,
                 rank = playerRank,
                 isPlayer = true,
                 plotCentre = playerPlot,
@@ -137,6 +240,7 @@ namespace DuckMow
                     name = r.displayName,
                     species = r.species,
                     total = r.Total,
+                    defenceAward = 0,
                     rank = r.Rank,
                     isPlayer = false,
                     plotCentre = r.plotCentre,
@@ -148,14 +252,21 @@ namespace DuckMow
             // order is stable and never depends on which contestant happened to be listed first.
             _standings.Sort((a, b) =>
             {
-                int byTotal = b.total.CompareTo(a.total);
+                // Ordered on the ROUND SCORE, so the defence counts toward where a contestant placed
+                // rather than only toward the championship total. A round saved by the horn should be a
+                // round you won.
+                int byTotal = b.RoundScore.CompareTo(a.RoundScore);
                 if (byTotal != 0) return byTotal;
                 return string.CompareOrdinal(a.name, b.name);
             });
 
+            // Competition ranking, so a tie reads 1st / 2nd / 2nd / 4th — and so the outro card and
+            // the board standing next to it can never print two different numbers for the same
+            // contestant. Taking the place from the row index would have done exactly that.
+            var places = Scoring.CompetitionPlaces(_standings);
             PlayerPlace = 1;
             for (int i = 0; i < _standings.Count; i++)
-                if (_standings[i].isPlayer) { PlayerPlace = i + 1; break; }
+                if (_standings[i].isPlayer) { PlayerPlace = places[i]; break; }
         }
 
         /// <summary>Find the rival working a given plot, for the tour.</summary>

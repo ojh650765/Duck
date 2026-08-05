@@ -23,13 +23,42 @@ namespace DuckMow.EditorTools
         /// GitHub Pages publishes — the deploy workflow uploads exactly this directory. It is
         /// deliberately not called "docs": Pages only serves a branch root or /docs by itself, but
         /// the Actions deployment used here can publish any path, so the folder can say what it is.
+        ///
+        /// Resolved from the project rather than written out as C:\Duck\Web, which is what it was.
+        /// That literal is correct on exactly one machine, and the GitHub Actions runner that now
+        /// runs this same method is a Linux container with no C: drive at all — the build did not
+        /// fail there, it wrote a directory called "C:\Duck\Web" into the working folder and
+        /// published nothing.
         /// </summary>
-        public const string OutputDir = @"C:\Duck\Web";
+        public static string OutputDir =>
+            Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Web")
+                .Replace('\\', Path.DirectorySeparatorChar);
 
         [MenuItem("Duck/6 · Build WebGL", priority = 5)]
-        public static void BuildWebGL()
+        public static void BuildWebGL() => BuildWebGLCore();
+
+        /// <summary>
+        /// The same build, run from a headless editor by the GitHub Actions workflow.
+        ///
+        /// Separate entry point for one reason: a CI job that "passes" while having produced nothing
+        /// is worse than no CI job. BuildPipeline reports failure through a return value, and a
+        /// -executeMethod that returns normally is a success as far as Unity's exit code is
+        /// concerned, so the failure has to be turned into an exit code by hand.
+        /// </summary>
+        public static void BuildWebGLForCI()
         {
-            var scenes = new[] { DuckSceneBuilder.ScenePath };
+            bool ok = BuildWebGLCore();
+            // Exit(0) as well as Exit(1): -executeMethod leaves the editor running afterwards, and
+            // a headless editor that never quits is a job that hangs until the runner times out.
+            EditorApplication.Exit(ok ? 0 : 1);
+        }
+
+        static bool BuildWebGLCore()
+        {
+            // The menu first, then the game. This array — not the build settings window — is what the
+            // player actually ships, so shipping the menu means listing it here; it was a one-element
+            // array of the game scene, which is why the browser opened on a round.
+            var scenes = DuckMenuBuilder.PlayerScenes();
 
             // Make sure the platform is actually switched, or BuildPlayer silently no-ops.
             if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.WebGL)
@@ -40,7 +69,7 @@ namespace DuckMow.EditorTools
                 if (!ok)
                 {
                     Debug.LogError("[Duck] Could not switch to WebGL. Is the module installed?");
-                    return;
+                    return false;
                 }
             }
 
@@ -66,12 +95,12 @@ namespace DuckMow.EditorTools
             {
                 Debug.LogError("[Duck] Editor is busy compiling or importing; BuildPlayer would " +
                                "return Unknown without doing anything. Try again when idle.");
-                return;
+                return false;
             }
             if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.WebGL, BuildTarget.WebGL))
             {
                 Debug.LogError("[Duck] WebGL build target is not supported by this editor install.");
-                return;
+                return false;
             }
             BuildReport report = BuildPipeline.BuildPlayer(options);
             var s = report.summary;
@@ -109,12 +138,14 @@ namespace DuckMow.EditorTools
 
             if (s.result == BuildResult.Succeeded) Debug.Log(sb.ToString());
             else Debug.LogError(sb.ToString());
+
+            return s.result == BuildResult.Succeeded;
         }
 
         [MenuItem("Duck/6 · Build WebGL (development)", priority = 6)]
         public static void BuildWebGLDev()
         {
-            var scenes = new[] { DuckSceneBuilder.ScenePath };
+            var scenes = DuckMenuBuilder.PlayerScenes();
             Directory.CreateDirectory(OutputDir + "_Dev");
             var options = new BuildPlayerOptions
             {

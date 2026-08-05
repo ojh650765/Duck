@@ -267,30 +267,43 @@ namespace DuckMow.EditorTools
         {
             var wood = Mat("M_WoodWarm");
             var woodDark = Mat("M_WoodDark");
-            // Nothing on this bench casts. The sun crosses from behind the stand, so the top
-            // overhang threw a hard shadow straight down the front panel — the largest surface in
-            // every judging shot — and the panel read as a black wall under the judges.
-            Box(root, "BenchTop", new Vector3(0f, 0.78f, 0.42f), new Vector3(6.0f, 0.10f, 0.78f), wood,
-                null, PrimitiveType.Cube, castShadow: false);
-            Box(root, "BenchFront", new Vector3(0f, 0.40f, 0.79f), new Vector3(6.0f, 0.66f, 0.08f), wood,
-                null, PrimitiveType.Cube, castShadow: false);
-            Box(root, "BenchLegL", new Vector3(-2.7f, 0.38f, 0.15f), new Vector3(0.13f, 0.76f, 0.13f), woodDark,
-                null, PrimitiveType.Cube, castShadow: false);
-            Box(root, "BenchLegR", new Vector3(2.7f, 0.38f, 0.15f), new Vector3(0.13f, 0.76f, 0.13f), woodDark,
-                null, PrimitiveType.Cube, castShadow: false);
+            // Legs take M_WoodPost, not M_WoodDark. Both are the same brown; the difference is that
+            // the wood shader runs its grain along the mesh's own long axis, and a leg is scaled long
+            // on Y while every other piece here is scaled long on X. On M_WoodDark the legs would get
+            // grain banding running across a vertical timber.
+            var woodPost = Mat("M_WoodPost");
+            // The bench casts again. It was switched off because the top overhang threw a hard
+            // shadow down the front panel — the largest surface in every judging shot — and the
+            // panel read as a black wall under the judges.
+            //
+            // The shadow was never what made it black. Two lighting bugs were: the volume profile
+            // held no post-processing at all, so nothing was ever tonemapped, and the ambient probe
+            // was a near-pure green that multiplied a warm brown's red and blue channels away. A
+            // shadowed face had nothing to fall back on, so any shadow on it went to black.
+            //
+            // With both fixed, the shadow is the thing that puts the bench on the ground and the
+            // judges behind it. Switching the casters off was a workaround that cost the whole
+            // judging beat its depth, which is what "그림자가 없어서" was describing.
+            Box(root, "BenchTop", new Vector3(0f, 0.78f, 0.42f), new Vector3(6.0f, 0.10f, 0.78f), wood);
+            Box(root, "BenchFront", new Vector3(0f, 0.40f, 0.79f), new Vector3(6.0f, 0.66f, 0.08f), wood);
+            Box(root, "BenchLegL", new Vector3(-2.7f, 0.38f, 0.15f), new Vector3(0.13f, 0.76f, 0.13f), woodPost);
+            Box(root, "BenchLegR", new Vector3(2.7f, 0.38f, 0.15f), new Vector3(0.13f, 0.76f, 0.13f), woodPost);
         }
 
         public static void BuildJudgeProxies(Transform root, JudgePanel panel)
         {
             var wood = Mat("M_WoodWarm");
             var woodDark = Mat("M_WoodDark");
+            // Same reason as BuildJudgeBenchOnly: grain follows the mesh's long axis, and these legs
+            // are the only pieces here scaled long on Y.
+            var woodPost = Mat("M_WoodPost");
             var cream = Mat("M_TentCream");
 
             // Bench they sit behind.
             Box(root, "BenchTop", new Vector3(0f, 0.92f, 0.35f), new Vector3(6.4f, 0.14f, 0.9f), wood);
             Box(root, "BenchFront", new Vector3(0f, 0.45f, 0.75f), new Vector3(6.4f, 0.9f, 0.12f), woodDark);
-            Box(root, "BenchLegL", new Vector3(-2.9f, 0.45f, 0f), new Vector3(0.16f, 0.9f, 0.16f), woodDark);
-            Box(root, "BenchLegR", new Vector3(2.9f, 0.45f, 0f), new Vector3(0.16f, 0.9f, 0.16f), woodDark);
+            Box(root, "BenchLegL", new Vector3(-2.9f, 0.45f, 0f), new Vector3(0.16f, 0.9f, 0.16f), woodPost);
+            Box(root, "BenchLegR", new Vector3(2.9f, 0.45f, 0f), new Vector3(0.16f, 0.9f, 0.16f), woodPost);
 
             string[] names = { "Mildred", "Boris", "Priscilla" };
             string[] mats = { "M_TentCream", "M_FenceWhite", "M_TentCream" };
@@ -331,12 +344,23 @@ namespace DuckMow.EditorTools
                 card.localPosition = new Vector3(0f, -0.26f, 0.16f);
                 var cardGO = Box(card, "CardFace", Vector3.zero, new Vector3(0.34f, 0.44f, 0.02f), cream);
 
+                // The proxies keep only what a box stack can honour.
+                //
+                // JudgeCharacter is animator-driven now, and there is no rig here to drive — so
+                // this fallback gets a head to look with and a card to raise, and no animator at
+                // all. The component handles that: a null animator means the posture blend and the
+                // gestures are skipped, while the card and the look-at carry on working. These
+                // stand-ins exist so the scene still builds when the authored judges are missing,
+                // and a silent NullReferenceException in that case would defeat the point of
+                // having them.
                 var jc = jg.gameObject.AddComponent<JudgeCharacter>();
-                jc.body = body; jc.head = head; jc.armL = armL; jc.armR = armR; jc.card = card;
+                jc.animator = null;
+                jc.head = head;
+                jc.card = card;
                 jc.cardRenderer = cardGO.GetComponent<MeshRenderer>();
                 jc.idleSpeed = i == 1 ? 1.35f : (i == 2 ? 0.6f : 1f);
-                jc.idleAmount = i == 1 ? 1.4f : (i == 2 ? 0.55f : 1f);
-                jc.leanAngle = i == 2 ? 5f : 10f;
+                jc.temperament = i == 1 ? JudgeTemperament.Boisterous
+                               : (i == 2 ? JudgeTemperament.Aloof : JudgeTemperament.Severe);
 
                 if (panel.judges[i] != null) panel.judges[i].character = jc;
             }

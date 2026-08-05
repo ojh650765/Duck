@@ -658,6 +658,9 @@ MonoBehaviour:
   deckWidth: 1.2
   minCuttingSpeed: 0.35
   trackWidth: 0.2
+  staggerDuration: 0.3
+  staggerSpeedKeep: 0.18
+  staggerRebound: 1.8
   gravityScale: 2.1
   maxAirborneTime: 1.5
   fallResetHeight: -3

@@ -117,7 +117,18 @@ namespace DuckMow
 
         public void Tick(float dt)
         {
-            if (!_ready) { Prepare(); if (!_ready) return; }
+            // _matrices is checked as well as _ready, and the two can genuinely disagree.
+            //
+            // A script recompile while the editor is in play mode reloads the domain, and Unity
+            // restores what it can of a component across that: _ready is a bool and comes back
+            // true, while _matrices is an array of Lists and comes back null. The guard then
+            // passed on a half-restored component and the next line dereferenced null. It threw
+            // every frame for the rest of the session, from a line that cannot fail in a player.
+            //
+            // Harmless in a WebGL build, which never reloads a domain — but the whole team's
+            // workflow is edit-while-playing, and a console full of phantom exceptions is how a
+            // real one gets missed.
+            if (!_ready || _matrices == null) { Prepare(); if (!_ready) return; }
 
             Cheer = Mathf.Max(0f, Cheer - cheerDecay * dt);
             _clock += dt;

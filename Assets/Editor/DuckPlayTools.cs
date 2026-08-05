@@ -57,6 +57,24 @@ namespace DuckMow.EditorTools
             d.DebugSetTimeRemaining(0.01f);
         }
 
+        [MenuItem("Duck/Play · Victory ceremony (cheat)", priority = 27)]
+        public static void JumpToVictory()
+        {
+            var d = Director;
+            if (d == null) { Debug.LogWarning("[Duck] Enter play mode first."); return; }
+            d.DebugJumpToCeremony(true);
+            Debug.Log("[Duck] Jumped to the ceremony as champion.");
+        }
+
+        [MenuItem("Duck/Play · Defeat ceremony (cheat)", priority = 28)]
+        public static void JumpToDefeat()
+        {
+            var d = Director;
+            if (d == null) { Debug.LogWarning("[Duck] Enter play mode first."); return; }
+            d.DebugJumpToCeremony(false);
+            Debug.Log("[Duck] Jumped to the ceremony as runner-up.");
+        }
+
         [MenuItem("Duck/Play · Time scale 6x", priority = 24)]
         public static void Fast() { Time.timeScale = 6f; Debug.Log("[Duck] timeScale 6"); }
 
@@ -180,24 +198,37 @@ namespace DuckMow.EditorTools
             { antiAliasing = 1 };
             var prevTarget = cam.targetTexture;
             var prevActive = RenderTexture.active;
+            Texture2D tex = null;
 
-            cam.targetTexture = rt;
-            cam.Render();
+            // The restore is in a finally, and the reason is worse than a leaked texture.
+            //
+            // This borrows the MAIN camera's target. If anything between here and the restore throws
+            // — Render, ReadPixels, EncodeToPNG, a full disk — then cam.targetTexture is left pointing
+            // at a RenderTexture that is about to be destroyed, and the game view renders to a dead
+            // target from then on: the screen goes black and stays black for the rest of the session,
+            // with the original exception as the only clue. A capture tool that can permanently break
+            // the thing it is meant to observe is worse than one that occasionally fails.
+            try
+            {
+                cam.targetTexture = rt;
+                cam.Render();
 
-            RenderTexture.active = rt;
-            var tex = new Texture2D(width, height, TextureFormat.RGB24, false, false);
-            tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-            tex.Apply(false);
+                RenderTexture.active = rt;
+                tex = new Texture2D(width, height, TextureFormat.RGB24, false, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply(false);
 
-            cam.targetTexture = prevTarget;
-            RenderTexture.active = prevActive;
-
-            Directory.CreateDirectory(CaptureDir);
-            File.WriteAllBytes(Path.Combine(CaptureDir, name + ".png"), tex.EncodeToPNG());
-
-            Object.DestroyImmediate(tex);
-            rt.Release();
-            Object.DestroyImmediate(rt);
+                Directory.CreateDirectory(CaptureDir);
+                File.WriteAllBytes(Path.Combine(CaptureDir, name + ".png"), tex.EncodeToPNG());
+            }
+            finally
+            {
+                cam.targetTexture = prevTarget;
+                RenderTexture.active = prevActive;
+                if (tex != null) Object.DestroyImmediate(tex);
+                rt.Release();
+                Object.DestroyImmediate(rt);
+            }
         }
 
         /// <summary>Free-standing capture of the current frame, for one-off checks.</summary>

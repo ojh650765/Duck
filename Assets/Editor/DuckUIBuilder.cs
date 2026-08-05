@@ -68,7 +68,10 @@ namespace DuckMow.EditorTools
             return list;
         }
 
-        static Sprite Spr(string name)
+        /// <summary>Internal rather than private: DuckCutsceneBuilder builds its storybook page from
+        /// the same four primitives, and the one thing worse than sharing them is a second set of
+        /// slightly different ones drifting apart from these.</summary>
+        internal static Sprite Spr(string name)
         {
             var s = AssetDatabase.LoadAssetAtPath<Sprite>($"{TexDir}/{name}.png");
             if (s == null) Debug.LogWarning($"[Duck] UI sprite missing: {name}");
@@ -92,7 +95,7 @@ namespace DuckMow.EditorTools
             return rt;
         }
 
-        static Image AddImage(RectTransform rt, Sprite sprite, Color color, Image.Type type = Image.Type.Simple)
+        internal static Image AddImage(RectTransform rt, Sprite sprite, Color color, Image.Type type = Image.Type.Simple)
         {
             var img = rt.gameObject.AddComponent<Image>();
             img.sprite = sprite;
@@ -103,7 +106,7 @@ namespace DuckMow.EditorTools
             return img;
         }
 
-        static TextMeshProUGUI AddText(RectTransform rt, string text, float size, TextAlignmentOptions align,
+        internal static TextMeshProUGUI AddText(RectTransform rt, string text, float size, TextAlignmentOptions align,
                                        Color color, float outline = 0.22f, bool wrap = true)
         {
             var t = rt.gameObject.AddComponent<TextMeshProUGUI>();
@@ -123,7 +126,14 @@ namespace DuckMow.EditorTools
             t.fontSizeMax = size;
             t.fontSizeMin = Mathf.Max(9f, size * 0.4f);
             t.margin = new Vector4(10f, 6f, 10f, 6f);
+
             // Everything is set over bright grass, so every glyph carries its own dark edge.
+            EnsureFont(t);
+            if (t.fontSharedMaterial == null)
+            {
+                t.characterSpacing = 4f;
+                return t;      // readable, just unoutlined — better than aborting the build
+            }
             t.fontMaterial = new Material(t.fontSharedMaterial);
             t.fontMaterial.EnableKeyword("OUTLINE_ON");
             t.fontMaterial.SetFloat(ShaderUtilities.ID_OutlineWidth, outline);
@@ -135,6 +145,28 @@ namespace DuckMow.EditorTools
             t.fontMaterial.SetFloat(ShaderUtilities.ID_UnderlaySoftness, 0.22f);
             t.characterSpacing = 4f;
             return t;
+        }
+
+        /// <summary>
+        /// The font asset a fresh TMP component will draw with, resolved eagerly.
+        ///
+        /// AddText builds its outline material from t.fontSharedMaterial, and that is null until
+        /// TMP has a font. In the HUD path it always did, because those components are added under
+        /// a canvas that has already been through TMP's own initialisation. Building a second scene
+        /// from scratch hit it cold: fontSharedMaterial came back null, `new Material(null)` threw,
+        /// and the exception took the whole content rebuild down with it — the menu, the main scene
+        /// and every asset after it — from one text box on a controls card.
+        ///
+        /// Asserted here rather than guarded at the call site, because every future caller would
+        /// have the same problem and none of them would expect a text label to be able to fail.
+        /// </summary>
+        static void EnsureFont(TMP_Text t)
+        {
+            if (t.font != null) return;
+            t.font = TMP_Settings.defaultFontAsset;
+            if (t.font == null)
+                Debug.LogWarning("[Duck] No TMP default font asset; run 'Duck/1 · Import TMP Essentials'. " +
+                                 "Text will build without its outline.");
         }
 
         static readonly Color Cream = new Color(0.97f, 0.94f, 0.86f);
@@ -170,9 +202,54 @@ namespace DuckMow.EditorTools
             BuildBanner(root, hud);
             BuildTourCard(root, hud);
             BuildOutroCard(root, hud);
+            BuildCeremonyCard(root, hud);
             BuildResults(root, hud);
 
             return hud;
+        }
+
+        // There is no championship standing card. One was built here — a top-left panel carrying
+        // "ROUND 2 OF 3", the points table and the placing needed to take the title — and it was cut
+        // after a playthrough. It was meant to make the goal obvious and did the opposite: it read as
+        // chrome, and the player who saw it still had to ask what the format was.
+        //
+        // If the structure ever needs stating again, it does not want another panel in a corner. The
+        // only slots the player actually reads are the briefing ribbon and the line above the keys on
+        // the closing card, both of which are already on screen at the moments that matter.
+
+        /// <summary>
+        /// The closing title card, laid out as a television lower third rather than as a full-screen
+        /// panel.
+        ///
+        /// The ceremony's last beat is a portrait of the duck who just won, and the whole reason that
+        /// framing exists is that it holds a character in shot. Covering it with a modal card would
+        /// throw away the payoff in order to announce it.
+        /// </summary>
+        static void BuildCeremonyCard(RectTransform root, HUD hud)
+        {
+            var card = Frac("CeremonyCard", root, 0.13f, 0.075f, 0.87f, 0.325f);
+            hud.ceremonyGroup = card.gameObject.AddComponent<CanvasGroup>();
+            hud.ceremonyGroup.alpha = 0f;
+            AddImage(card, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+
+            var rosette = Frac("Rosette", card, 0.018f, 0.08f, 0.145f, 0.92f);
+            hud.ceremonyRosette = AddImage(rosette, null, Color.white);
+            hud.ceremonyRosette.preserveAspect = true;
+            hud.ceremonyRosette.enabled = false;
+
+            var title = Frac("Title", card, 0.17f, 0.50f, 0.98f, 0.95f);
+            hud.ceremonyTitle = AddText(title, "", 62f, TextAlignmentOptions.Left, Gold, 0.30f, false);
+            hud.ceremonyTitle.fontStyle = FontStyles.Bold;
+
+            var sub = Frac("Subtitle", card, 0.17f, 0.26f, 0.98f, 0.48f);
+            hud.ceremonySubtitle = AddText(sub, "", 24f, TextAlignmentOptions.Left, Cream, 0.22f, false);
+            hud.ceremonySubtitle.fontStyle = FontStyles.Bold;
+
+            var prompt = Frac("Prompt", card, 0.17f, 0.05f, 0.98f, 0.24f);
+            hud.ceremonyPrompt = AddText(prompt, "", 20f, TextAlignmentOptions.Left,
+                                         new Color(0.86f, 0.82f, 0.72f), 0.20f, false);
+            hud.ceremonyPrompt.fontStyle = FontStyles.Bold;
+            hud.ceremonyPrompt.alpha = 0f;
         }
 
         static void BuildRoundHud(RectTransform root, HUD hud)
@@ -195,21 +272,53 @@ namespace DuckMow.EditorTools
             hud.timerText = AddText(timerText, "1:30", 54f, TextAlignmentOptions.Center, Cream, 0.26f, false);
             hud.timerText.fontStyle = FontStyles.Bold;
 
-            // ---- minimap, top right ----
-            var mapFrame = Frac("Minimap", group, 0.815f, 0.70f, 0.985f, 0.985f);
-            var mapImg = Frac("Map", mapFrame, 0.08f, 0.08f, 0.92f, 0.92f);
-            var raw = mapImg.gameObject.AddComponent<RawImage>();
+            // ---- the entry card, top right ----
+            //
+            // This slot used to hold a live minimap that drew the target outline, the cut mask, the
+            // spill and the mower's position together. With the ground guide now dissolving a third
+            // of the way into the round, that was the answer key sitting in the corner of the
+            // screen — everything the round takes away, handed straight back.
+            //
+            // What sits here now is the picture and nothing else, drawn as ink on paper. The paper
+            // look is doing real work: an inset panel that resembles a display invites the player
+            // to keep checking it for position, whereas a pinned sheet reads as a reference and
+            // gets glanced at once.
+            var cardFrame = Frac("ShapeCard", group, 0.815f, 0.70f, 0.985f, 0.985f);
+            var cardImg = Frac("Card", cardFrame, 0.08f, 0.08f, 0.92f, 0.92f);
+            var raw = cardImg.gameObject.AddComponent<RawImage>();
             raw.raycastTarget = false;
-            var minimapShader = Shader.Find("Duck/MinimapUI");
-            if (minimapShader != null)
+            if (Shader.Find("Duck/ShapeCardUI") != null)
             {
-                var mat = DuckSceneBuilder.EnsureMaterial("M_MinimapUI", "Duck/MinimapUI");
-                raw.material = mat;
+                var cardMat = DuckSceneBuilder.EnsureMaterial("M_ShapeCardUI", "Duck/ShapeCardUI");
+                // Written here rather than left to the shader's property defaults.
+                // EnsureMaterial reuses an existing .mat if one is on disk, and a material already
+                // carries its own serialized copy of every property — so editing a default in the
+                // shader changes nothing on any machine that has built this scene before, which is
+                // every machine that matters.
+                //
+                // The fill is deliberately deep. At the pale value it started with, the card read
+                // as a faint smudge on cream paper from across the room and the shape had to be
+                // hunted for; the whole point of it is to be legible in the corner of the eye
+                // while the player is looking at grass.
+                cardMat.SetColor("_InkFill", new Color(0.30f, 0.25f, 0.16f));
+                cardMat.SetColor("_Ink", new Color(0.15f, 0.11f, 0.07f));
+                cardMat.SetFloat("_FillAmount", 1f);
+                cardMat.SetFloat("_StrokeWidth", 0f);
+                EditorUtility.SetDirty(cardMat);
+                raw.material = cardMat;
             }
-            hud.minimap = raw;
-            AddImage(mapFrame, Spr("minimap_frame_256"), Color.white, Image.Type.Sliced);
+            hud.shapeCard = raw;
+            AddImage(cardFrame, Spr("minimap_frame_256"), Color.white, Image.Type.Sliced);
 
-            // ---- boost + coverage, bottom left ----
+            // ---- aerial check token, under the card ----
+            var aerial = Frac("AerialCheck", group, 0.815f, 0.628f, 0.985f, 0.694f);
+            var token = Frac("Token", aerial, 0.02f, 0.05f, 0.30f, 0.95f);
+            hud.aerialToken = AddImage(token, Spr("icon_coverage_128"), new Color(1f, 0.86f, 0.44f), Image.Type.Simple);
+            var aerialHint = Frac("Hint", aerial, 0.34f, 0.05f, 1f, 0.95f);
+            hud.aerialHint = AddText(aerialHint, "[F]  LOOK", 20f, TextAlignmentOptions.Left, Gold, 0.24f, false);
+            hud.aerialHint.fontStyle = FontStyles.Bold;
+
+            // ---- boost, bottom left ----
             var boost = Frac("Boost", group, 0.018f, 0.035f, 0.235f, 0.125f);
             var boostBg = Frac("Bg", boost, 0f, 0.02f, 1f, 0.50f);
             AddImage(boostBg, Spr("progress_bar_bg_256"), Color.white, Image.Type.Sliced);
@@ -223,22 +332,14 @@ namespace DuckMow.EditorTools
             var boostLabel = Frac("Label", boost, 0.01f, 0.58f, 0.7f, 1f);
             AddText(boostLabel, "BOOST", 20f, TextAlignmentOptions.Left, Gold, 0.24f, false).fontStyle = FontStyles.Bold;
 
-            var cover = Frac("Coverage", group, 0.018f, 0.14f, 0.235f, 0.23f);
-            var coverBg = Frac("Bg", cover, 0f, 0.02f, 1f, 0.50f);
-            AddImage(coverBg, Spr("progress_bar_bg_256"), Color.white, Image.Type.Sliced);
-
-            var coverFill = Frac("Fill", coverBg, 0.015f, 0.16f, 0.985f, 0.84f);
-            var cf = AddImage(coverFill, Spr("progress_bar_fill_256"), new Color(0.68f, 0.86f, 0.36f), Image.Type.Filled);
-            cf.type = Image.Type.Filled;
-            cf.fillMethod = Image.FillMethod.Horizontal;
-            hud.coverageFill = cf;
-
-            var coverLabel = Frac("Label", cover, 0.01f, 0.58f, 0.66f, 1f);
-            AddText(coverLabel, "PICTURE FILLED", 20f, TextAlignmentOptions.Left, Cream, 0.24f, false).fontStyle = FontStyles.Bold;
-
-            var coverPct = Frac("Pct", cover, 0.66f, 0.58f, 0.99f, 1f);
-            hud.coverageText = AddText(coverPct, "0%", 22f, TextAlignmentOptions.Right, Gold, 0.24f, false);
-            hud.coverageText.fontStyle = FontStyles.Bold;
+            // Nothing else goes in this corner. There was a "MOWN 81 m²" readout above the gauge and
+            // it is gone, because it was never actionable: a player cannot tell whether 81 m² is good
+            // or bad, and it only ever existed to fill the hole left by an earlier "PICTURE FILLED
+            // 41%" that had to go for a much better reason (it measured cut cells against the hidden
+            // target, so the shape could be solved by driving around watching a number move).
+            //
+            // The rule for this HUD is three things: the clock, the picture, the dash gauge. Anything
+            // proposed for it has to beat that list, and a raw area figure does not.
         }
 
         /// <summary>
@@ -335,6 +436,32 @@ namespace DuckMow.EditorTools
             var title = Frac("Title", titlePill, 0.05f, 0.14f, 0.95f, 0.86f);
             hud.bannerTitle = AddText(title, "TODAY'S SUBJECT", 22f, TextAlignmentOptions.Center, Cream, 0.14f, false);
             hud.bannerTitle.fontStyle = FontStyles.Bold;
+
+            // A third plate, below the ribbon, for what this round is worth.
+            //
+            // This is where the championship states itself, and the only place it does during play.
+            // It belongs on the banner rather than on a panel of its own precisely because the banner
+            // LEAVES: the player is told what the round needs at the moment they are deciding how to
+            // mow it, and then the screen is clear again. The version of this that lived in a
+            // permanent top-left card was cut for being chrome, and the difference between the two is
+            // entirely that this one goes away.
+            //
+            // Anchored on negative fractions so it hangs below the parent while still belonging to the
+            // banner's CanvasGroup, which is what makes it fade in and out on the same beat.
+            var goalPlate = Frac("GoalPlate", banner, 0.14f, -0.30f, 0.86f, -0.04f);
+            // Its own group inside the banner's. The banner is also used for "STUDY IT", "TIME!" and
+            // the guide-lost beat, none of which have a goal line — and without this the plate would
+            // still be hanging under the ribbon on all of them, empty. Nested alphas multiply, so it
+            // both fades with the banner and vanishes when there is nothing to say.
+            hud.bannerGoalGroup = goalPlate.gameObject.AddComponent<CanvasGroup>();
+            hud.bannerGoalGroup.alpha = 0f;
+            AddImage(goalPlate, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+            var goal = Frac("Goal", goalPlate, 0.04f, 0.08f, 0.96f, 0.92f);
+            // Wrapping on: the round-one line carries the scoring rule under it, and the tightest
+            // final-round requirement — "WIN, AND HORACE MUST FINISH 3RD OR WORSE" — needs to be
+            // allowed to break rather than shrink away to nothing.
+            hud.bannerGoal = AddText(goal, "", 22f, TextAlignmentOptions.Center, Gold, 0.22f);
+            hud.bannerGoal.fontStyle = FontStyles.Bold;
 
             var count = Frac("Countdown", root, 0.34f, 0.36f, 0.66f, 0.62f);
             hud.countdownText = AddText(count, "3", 170f, TextAlignmentOptions.Center, Cream, 0.30f, false);
@@ -458,7 +585,7 @@ namespace DuckMow.EditorTools
         /// This is the only positioning primitive the results screen uses, so nothing in it can
         /// depend on the canvas scale factor being what we guessed.
         /// </summary>
-        static RectTransform Frac(string name, Transform parent, float x0, float y0, float x1, float y1)
+        internal static RectTransform Frac(string name, Transform parent, float x0, float y0, float x1, float y1)
         {
             var go = new GameObject(name, typeof(RectTransform));
             var rt = (RectTransform)go.transform;

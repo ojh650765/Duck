@@ -25,7 +25,9 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _AO: 0.5
+    - _AO: 0.34
+    - _AmbientFloor: 0.1
+    - _AmbientGain: 1.35
     - _CutHeight: 0.16
     - _CutLayover: 0.55
     - _FadeEnd: 41
@@ -36,12 +38,12 @@ Material:
     - _ThinEnd: 42
     - _ThinStart: 15
     - _TrackHeight: 0.55
-    - _Wrap: 0.18
+    - _Wrap: 0.42
     m_Colors:
-    - _CutBase: {r: 0.18447499, g: 0.4125427, b: 0.03071344, a: 1}
-    - _CutTip: {r: 0.5394796, g: 0.74540436, b: 0.09084173, a: 1}
+    - _CutBase: {r: 0.11443538, g: 0.39157256, b: 0.049706563, a: 1}
+    - _CutTip: {r: 0.42326775, g: 0.70837593, b: 0.1714411, a: 1}
     - _Translucency: {r: 0.3813261, g: 0.80695236, b: 0.06847818, a: 1}
-    - _UncutBase: {r: 0.027320892, g: 0.1714411, b: 0.03071344, a: 1}
-    - _UncutTip: {r: 0.11443538, g: 0.44520125, b: 0.057805434, a: 1}
+    - _UncutBase: {r: 0.035601314, g: 0.19120167, b: 0.027320892, a: 1}
+    - _UncutTip: {r: 0.09084173, g: 0.39157256, b: 0.046665084, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

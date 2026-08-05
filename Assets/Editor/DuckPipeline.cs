@@ -26,6 +26,9 @@ namespace DuckMow.EditorTools
             DuckModelIntegration.IntegrateAll();
             DuckSceneBuilder.BuildMaterials();
             DuckUIBuilder.ImportSprites();
+            // The menu first and the game scene second, so the editor is left on the game scene —
+            // that is the one anybody who runs this then wants to look at.
+            DuckMenuBuilder.BuildMenuScene();
             DuckSceneBuilder.BuildScene();
             AssetDatabase.SaveAssets();
 
@@ -41,6 +44,7 @@ namespace DuckMow.EditorTools
             DuckModelIntegration.IntegrateAll();
             DuckSceneBuilder.BuildMaterials();
             DuckUIBuilder.ImportSprites();
+            DuckMenuBuilder.BuildMenuScene();
             DuckSceneBuilder.BuildScene();
             AssetDatabase.SaveAssets();
             Debug.Log("[Duck] Content rebuilt.");

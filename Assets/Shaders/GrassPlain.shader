@@ -31,6 +31,8 @@ Shader "Duck/GrassPlain"
         _GrainScale  ("Grain scale",   Float) = 0.75
         _GrainAmount ("Grain amount",  Range(0,0.5)) = 0.14
         _Wrap        ("Light wrap",    Range(0,0.9)) = 0.35
+        _AmbientGain ("Ambient gain", Range(0.5, 3)) = 1.05
+        _AmbientFloor("Sky bounce floor", Range(0, 0.4)) = 0.035
         [Tooltip(Faint mown banding so the meadow is not perfectly uniform)]
         _OldStripe   ("Old mowing",    Range(0,0.2)) = 0.05
     }
@@ -69,6 +71,8 @@ Shader "Duck/GrassPlain"
                 float _GrainScale;
                 float _GrainAmount;
                 float _Wrap;
+                float _AmbientGain;
+                float _AmbientFloor;
                 float _OldStripe;
             CBUFFER_END
 
@@ -148,7 +152,10 @@ Shader "Duck/GrassPlain"
                 half ndotl = saturate(dot(N, mainLight.direction));
                 half wrapped = saturate((ndotl + _Wrap) / (1.0 + _Wrap));
                 half3 direct = mainLight.color * wrapped * lerp(0.55, 1.0, mainLight.shadowAttenuation);
-                half3 ambient = SampleSH(N);
+                // Matches the lawn layers exactly. The meadow abuts the playfield, so any
+                // mismatch in the fill term draws a rectangle around the picture.
+                half3 ambient = SampleSH(N) * _AmbientGain
+                                + half3(0.62, 0.76, 1.0) * _AmbientFloor;
 
                 half3 color = albedo * (direct + ambient);
                 color = MixFog(color, IN.fogCoord);

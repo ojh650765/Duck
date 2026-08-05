@@ -1,0 +1,217 @@
+# Builds the WebGL player in CI, and publishes it.
+#
+# ---- read this before wondering why a run was skipped ----
+#
+# Unity cannot be built without a licence. There is no unauthenticated path: the
+# editor refuses to run headless without one, and Unity's licence servers are the
+# only thing that can issue one. GitHub cannot supply it and neither can this
+# file — it has to be put into this repository's Actions secrets by its owner.
+# The exact secret names, and where to find their values, are printed into the
+# run summary by the `licence` job below; they are also spelled out in the
+# heredoc there, which is the copy to read if no run has happened yet.
+#
+# So there are two routes to a published player, and both are real:
+#
+#   local   — Duck/6 · Build WebGL in the editor writes Web/, that gets
+#             committed, and pages.yml publishes it. This is what has produced
+#             every build so far and it keeps working untouched.
+#
+#   CI      — this workflow, once the secrets exist. Same build, same output
+#             directory, same DuckBuild.BuildWebGLCore, just headless.
+#
+# The two are deliberately not merged. pages.yml publishes what is committed and
+# knows nothing about Unity; this one builds and publishes what it just built.
+# They share the "pages" concurrency group, so if both are triggered at once one
+# waits for the other rather than the two of them racing to replace each other's
+# deployment.
+#
+# WHY THIS DOES NOT COMMIT Web/ BACK TO MAIN, which would have fed pages.yml and
+# needed no second deploy step: the player is about 24 MB, and a job that pushes
+# a 24 MB directory into git history on every run makes the repository unusable
+# within a few dozen builds. A workflow with write access to main is also a
+# larger foot-gun (branch protection, push races, retrigger loops) than a second
+# deploy step is a duplication.
+name: Build WebGL
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Publish the result to GitHub Pages"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - 'Assets/**'
+      - 'Packages/**'
+      - 'ProjectSettings/**'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # Whether the licence secrets exist, decided in a job of its own.
+  #
+  # It has to be a job rather than an `if:` on the build, because the secrets
+  # context is not available in a job-level condition — the only way to ask
+  # "is this secret set?" is to read it into an env var inside a step and look.
+  # Nothing is echoed: the check is on length, and a secret would be masked in
+  # the log anyway, but "would be masked" is not a reason to print one.
+  licence:
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          if [ -n "$UNITY_LICENSE" ] || { [ -n "$UNITY_EMAIL" ] && [ -n "$UNITY_PASSWORD" ]; }; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## No Unity licence in this repository's secrets
+
+          A headless Unity editor will not start without one, so there is nothing
+          this workflow can do until the repository owner adds it.
+
+          **Settings -> Secrets and variables -> Actions -> New repository secret**
+
+          Personal licence (free) — one secret:
+
+          | Name | Value |
+          |---|---|
+          | `UNITY_LICENSE` | the entire contents of `Unity_lic.ulf`, including the XML header |
+
+          On Windows that file is at
+          `C:\ProgramData\Unity\Unity_lic.ulf`. Paste it whole; a truncated
+          licence fails with the same error as a missing one.
+
+          Pro / Plus licence — three secrets instead:
+
+          | Name | Value |
+          |---|---|
+          | `UNITY_EMAIL` | the Unity account email |
+          | `UNITY_PASSWORD` | that account's password |
+          | `UNITY_SERIAL` | the serial, `XX-XXXX-XXXX-XXXX-XXXX-XXXX` |
+
+          Until then: build locally with **Duck/6 - Build WebGL**, commit `Web/`,
+          and `pages.yml` publishes it.
+          EOF
+
+          # A manual run means somebody asked for a build, and answering that
+          # with a green tick and no player is worse than a red cross. A push
+          # is not a request, so it reports and stops rather than turning main
+          # permanently red over a setting the owner may never want.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::error::No Unity licence secret. See the job summary for what to add."
+            exit 1
+          fi
+          echo "::notice::Skipping the Unity build: no licence secret. See the job summary."
+
+  build:
+    needs: licence
+    if: needs.licence.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          # The importer hashes source files, and a shallow checkout is enough
+          # for that — but Library/ caching below keys off file contents, not
+          # history, so there is nothing here that wants the full log.
+          fetch-depth: 1
+
+      # The single biggest cost in a Unity CI job is reimporting every asset.
+      # Without this cache the runner spends the better part of an hour building
+      # Library/ from scratch before it compiles a line of C#. Keyed on the
+      # things that invalidate an import; the restore-key means a near-miss
+      # still starts from a warm Library instead of an empty one.
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-WebGL-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-WebGL-
+
+      - name: Build the player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          # "auto" reads ProjectSettings/ProjectVersion.txt, so the editor
+          # version can never drift from the project's. It does mean the run
+          # fails outright if game-ci has no published editor image for this
+          # exact version — 6000.3.6f1 at the time of writing — and that failure
+          # is the honest one to have: a build on a different editor version is
+          # not this game's build.
+          unityVersion: auto
+          targetPlatform: WebGL
+          # Our own entry point, not game-ci's default builder. DuckBuild owns
+          # the scene list (the menu must be index 0 or the browser opens on a
+          # round), the output path and the failure reporting; a second builder
+          # would have to be kept in step with all three.
+          buildMethod: DuckMow.EditorTools.DuckBuild.BuildWebGLForCI
+          # The working tree is dirty by construction: Web/ is committed, and the
+          # build being run here rewrites it.
+          allowDirtyBuild: true
+
+      # The same check pages.yml makes, made here too. BuildPipeline can report
+      # success and write nothing, which is exactly the failure DuckBuild's
+      # report exists to catch — this catches it from the outside as well.
+      - name: Check the player is actually there
+        run: |
+          test -f Web/index.html || { echo "::error::Web/index.html missing after the build."; exit 1; }
+          test -d Web/Build      || { echo "::error::Web/Build missing after the build."; exit 1; }
+          du -sh Web
+          ls -la Web Web/Build
+
+      # unity-builder runs the editor inside a container as root, so everything
+      # it touched — Library/ above all — comes out owned by root. actions/cache
+      # saves as the runner user in a post-step and cannot read it, so without
+      # this the cache silently never populates and every run pays the full
+      # asset-import cost again.
+      - name: Hand the build output back to the runner user
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" Library Web || true
+
+      # Downloadable even when not deployed, so a build can be inspected without
+      # being published to the live URL.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: duck-mow-webgl
+          path: Web
+          retention-days: 7
+
+      # github.event.inputs rather than the inputs context, and a string rather
+      # than a boolean: on a push there are no inputs at all, and comparing a
+      # missing input against a literal string is the form that evaluates to
+      # false there instead of erroring.
+      - uses: actions/configure-pages@v5
+        if: github.event_name == 'push' || github.event.inputs.deploy == 'true'
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push' || github.event.inputs.deploy == 'true'
+        with:
+          path: Web
+      - id: deployment
+        if: github.event_name == 'push' || github.event.inputs.deploy == 'true'
+        uses: actions/deploy-pages@v4

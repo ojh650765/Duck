@@ -6,10 +6,30 @@ namespace DuckMow
     {
         public float coverage;     // fraction of the picture that got mown
         public float spill;        // fraction of mowing that landed outside the picture
-        public float accuracy;     // coverage penalised by spill — the headline number
+        public float accuracy;     // coverage penalised by spill
         public float edgeQuality;  // how cleanly the outline was followed
         public float style;        // drifting, boosting, showmanship
         public float mownArea;     // square metres actually cut
+
+        /// <summary>
+        /// Whether the picture READS, on a curve rather than a ratio.
+        ///
+        /// This is the number that stopped the competition being a mowing race. Coverage is
+        /// linear, so under the old weights a contestant who filled 99% of the shape beat one who
+        /// filled 70% no matter how badly the first one did it — which made "cut everything" the
+        /// whole strategy and made the round unwinnable the moment the chalk faded and nobody
+        /// could fill anything accurately any more.
+        ///
+        /// Legibility saturates instead. Below about a quarter filled there is no picture there
+        /// and it pays nothing; by around two thirds the subject is unmistakable and further
+        /// mowing earns nothing more. Above that line the contest is decided on neatness and
+        /// edge, which is what a lawn-art championship would actually judge — and it is what
+        /// makes a small, clean, half-remembered heart beat a big scruffy one.
+        /// </summary>
+        public float legibility;
+
+        /// <summary>How little of the mowing landed outside the picture. Simply 1 - spill.</summary>
+        public float neatness;
     }
 
     /// <summary>
@@ -123,51 +143,26 @@ namespace DuckMow
 
         // ------------------------------------------------------------------ scoring
 
+        /// <summary>
+        /// Measure the player's lawn — through the same code every rival is measured by.
+        ///
+        /// This used to be its own copy of the arithmetic, sitting a few files away from
+        /// <see cref="Scoring.Evaluate"/> and quietly drifting from it. That is a fiction the
+        /// standings cannot afford: the whole point of the board at the end is that the player and
+        /// three rivals are compared, and they can only be compared if one rulebook produced all
+        /// four numbers. The duplicate had already fallen behind — it knew nothing about
+        /// legibility or neatness, so the player would have been marked on the old coverage-led
+        /// curve while the rivals were marked on the new one, and the player would have lost
+        /// every round for reasons nothing on screen could explain.
+        ///
+        /// The grids differ (the player's lawn is 64 m at 256, a rival's 48 m at 128) but that is
+        /// exactly why the shared function takes them as arguments.
+        /// </summary>
         public RoundScore Evaluate(CutMask mask, float driftMetres, float boostMetres, int bonks)
         {
-            var s = new RoundScore();
-            if (mask == null || Inside == null) return s;
-
-            byte[] cut = mask.Cut;
-            const byte threshold = 128;
-
-            int cutInside = 0, cutOutside = 0, totalCut = 0;
-            int edgeGood = 0, edgeTotal = 0;
-
-            for (int i = 0; i < cut.Length; i++)
-            {
-                bool isCut = cut[i] >= threshold;
-                bool isIn = Inside[i];
-
-                if (isCut)
-                {
-                    totalCut++;
-                    if (isIn) cutInside++; else cutOutside++;
-                }
-
-                if (Boundary[i])
-                {
-                    edgeTotal++;
-                    // On the outline band we want cut exactly where the picture is and not
-                    // where it isn't. Getting this right is what separates a B from an S.
-                    if (isCut == isIn) edgeGood++;
-                }
-            }
-
-            s.coverage = InsideCount > 0 ? (float)cutInside / InsideCount : 0f;
-            s.spill = totalCut > 0 ? (float)cutOutside / totalCut : 0f;
-            s.accuracy = Mathf.Clamp01(s.coverage * (1f - 0.65f * s.spill));
-            s.edgeQuality = edgeTotal > 0 ? (float)edgeGood / edgeTotal : 0f;
-            s.mownArea = totalCut * Field.CellArea;
-
-            // Style rewards commitment: long drifts, boost used while still cutting, and the
-            // occasional gnome. It is capped so it can never rescue a bad picture.
-            float driftScore = Mathf.Clamp01(driftMetres / 90f);
-            float boostScore = Mathf.Clamp01(boostMetres / 220f);
-            float bonkScore = Mathf.Clamp01(bonks / 4f);
-            s.style = Mathf.Clamp01(driftScore * 0.45f + boostScore * 0.40f + bonkScore * 0.15f);
-
-            return s;
+            if (mask == null || Inside == null) return default;
+            return Scoring.Evaluate(mask.Cut, Inside, Boundary, InsideCount, Field.CellArea,
+                                    driftMetres, boostMetres, bonks);
         }
 
         /// <summary>

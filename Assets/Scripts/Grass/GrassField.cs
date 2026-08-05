@@ -146,20 +146,34 @@ namespace DuckMow
             // A strict subset means the swap only removes blades, and the shader has already faded
             // exactly those blades to nothing by the time it happens, so there is nothing to see.
             float chunkSize = Field.Size / chunksPerSide;
-            _bladeMeshL0 = BakeBladeMesh("GrassBladesL0", chunkSize, density0, 1234, 1f);
-            _bladeMeshL1 = BakeBladeMesh("GrassBladesL1", chunkSize, density0, 1234, BladeIdCutoff);
+            _bladeMeshL0 = BakeBladeMesh("GrassBladesL0", chunkSize, density0, BladeSeed, 1f,
+                                         bladeHeight, bladeWidth, bladeCurve);
+            _bladeMeshL1 = BakeBladeMesh("GrassBladesL1", chunkSize, density0, BladeSeed, BladeIdCutoff,
+                                         bladeHeight, bladeWidth, bladeCurve);
         }
+
+        /// <summary>Blades with an id at or above this are dropped from the far LOD.</summary>
+        public const float BladeIdCutoff = 0.5f;
+
+        /// <summary>
+        /// The seed both LODs are baked from. Named rather than inlined because the rival plots
+        /// bake the same patch: two different seeds would give the venue two different lawns.
+        /// </summary>
+        public const int BladeSeed = 1234;
 
         /// <summary>
         /// Bakes a chunk-sized patch of blades on a jittered grid. Roots are laid out in
         /// [-chunkSize/2, +chunkSize/2] so the mesh is centred on its chunk transform.
+        ///
+        /// Static and public because <see cref="RivalBlades"/> bakes the rival plots' patches from
+        /// it. A second copy of the blade profile is the one thing that must not exist here: the
+        /// venue tour cuts straight from the player's lawn to a rival's, and any drift in height,
+        /// width, curve or vertex layout between the two shows up as a different species of grass.
         /// </summary>
-        /// <summary>Blades with an id at or above this are dropped from the far LOD.</summary>
-        public const float BladeIdCutoff = 0.5f;
-
-        Mesh BakeBladeMesh(string name, float chunkSize, float density, int seed, float idCutoff)
+        public static Mesh BakeBladeMesh(string name, float chunkSize, float density, int seed,
+                                         float idCutoff, float bladeHeight, float bladeWidth,
+                                         float bladeCurve)
         {
-            var rng = new System.Random(seed);
             int perSide = Mathf.Max(1, Mathf.RoundToInt(Mathf.Sqrt(density * chunkSize * chunkSize)));
             int gridCount = perSide * perSide;
 

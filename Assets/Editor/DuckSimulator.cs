@@ -31,6 +31,7 @@ namespace DuckMow.EditorTools
             public MowerVisuals visuals;
             public CutMask cutMask;
             public GrassField grass;
+            public RivalBlades rivalBlades;
             public CameraDirector camera;
             public JudgePanel judges;
             public SpectatorCrowd crowd;
@@ -40,6 +41,7 @@ namespace DuckMow.EditorTools
             public AudioDirector audio;
             public Tournament tournament;
             public NeighbourAmbience ambience;
+            public ComicSequence intro;
             public Camera cam;
         }
 
@@ -54,6 +56,7 @@ namespace DuckMow.EditorTools
                 visuals = Object.FindFirstObjectByType<MowerVisuals>(),
                 cutMask = Object.FindFirstObjectByType<CutMask>(),
                 grass = Object.FindFirstObjectByType<GrassField>(),
+                rivalBlades = Object.FindFirstObjectByType<RivalBlades>(),
                 camera = Object.FindFirstObjectByType<CameraDirector>(),
                 judges = Object.FindFirstObjectByType<JudgePanel>(),
                 crowd = Object.FindFirstObjectByType<SpectatorCrowd>(),
@@ -63,8 +66,16 @@ namespace DuckMow.EditorTools
                 audio = Object.FindFirstObjectByType<AudioDirector>(),
                 tournament = Object.FindFirstObjectByType<Tournament>(),
                 ambience = Object.FindFirstObjectByType<NeighbourAmbience>(),
+                intro = Object.FindFirstObjectByType<ComicSequence>(),
                 cam = Camera.main
             };
+
+            // Every path through this file is a capture of a round, and none of them want the
+            // forty seconds of opening story in front of it. Both halves are needed: clearing the
+            // flag covers a rig collected before the director has started, and SkipIntro covers one
+            // collected after it has already put the page up.
+            if (r.director != null) r.director.SkipIntro();
+
             return r;
         }
 
@@ -90,6 +101,7 @@ namespace DuckMow.EditorTools
 
             Physics.Simulate(dt);
 
+            r.intro?.Tick(dt);
             r.director?.Tick(dt);
             r.judges?.Tick(dt);
             r.visuals?.Tick(dt);
@@ -104,6 +116,11 @@ namespace DuckMow.EditorTools
             // so batch the uploads. The CPU grid that scoring reads is untouched by this.
             if ((_stepsSinceFlush & 3) == 0) r.cutMask?.Flush();
             r.grass?.TickLod(dt);
+            // The rivals' grass has to be stepped as well, and not only for its LOD: this is also
+            // where each plot's blades pick up their contestant's cut mask. Left out, a scripted
+            // capture of the tour shows three neighbours whose mown picture is in the ground shader
+            // while every blade above it is still standing uncut.
+            r.rivalBlades?.Tick(dt);
             r.camera?.Tick(dt);
             r.hud?.Tick(dt);
             r.audio?.Tick(dt);
@@ -495,6 +512,101 @@ namespace DuckMow.EditorTools
                                            $"spill={rv.Score.spill:0.00} edge={rv.Score.edgeQuality:0.00} marks=" +
                                            $"{rv.Marks[0]:0}/{rv.Marks[1]:0}/{rv.Marks[2]:0}");
                 }
+                log.AppendLine($"  final state = {r.director.State}");
+                Debug.Log(log.ToString());
+            }
+            finally
+            {
+                r.director.autopilotEnabled = wasAutopilot;
+                if (!wasAutopilot) r.autopilot?.Stop();
+                EndScripted();
+            }
+        }
+
+        [MenuItem("Duck/Sim · Capture championship win", priority = 17)]
+        public static void CaptureChampionshipWin() => CaptureCeremony(true);
+
+        [MenuItem("Duck/Sim · Capture championship defeat", priority = 18)]
+        public static void CaptureChampionshipDefeat() => CaptureCeremony(false);
+
+        /// <summary>
+        /// The last round of a championship and the ceremony that closes it.
+        ///
+        /// The table is stacked before the round rather than after it, so everything the round then
+        /// does is real: the round is mown by the autopilot, the board banks it, and the ceremony
+        /// resolves whatever came out. Only the two rounds NOTIONALLY already played are fabricated —
+        /// which is the only way to photograph a win without waiting for the autopilot to earn one.
+        ///
+        /// The briefing frame is kept even though there is no longer anything on it about the
+        /// championship. That is the point of it now: it is the check that no round counter has crept
+        /// back onto the screen.
+        /// </summary>
+        static void CaptureCeremony(bool playerAhead)
+        {
+            if (!EditorApplication.isPlaying) { Debug.LogWarning("[Duck] Enter play mode first."); return; }
+
+            var r = Collect();
+            if (r.director == null || r.tournament == null)
+            {
+                Debug.LogError("[Duck] No GameDirector or Tournament in scene.");
+                return;
+            }
+
+            string tag = playerAhead ? "champ_win" : "champ_loss";
+            bool wasAutopilot = r.director.autopilotEnabled;
+            BeginScripted();
+            try
+            {
+                r.director.autopilotEnabled = true;
+
+                // Two rounds' worth of points on the board, arranged so the final round can only go
+                // one way: a ten-point lead cannot be caught from any placing, and a ten-point deficit
+                // cannot be closed from any. The round is then mown for real and the ceremony that
+                // comes out of it is the one the player would have got.
+                var champ = r.tournament.Championship;
+                champ.DebugSetRoundsRecorded(Mathf.Max(1, r.tournament.roundsPerChampionship - 1));
+                champ.DebugSetPoints(r.tournament.playerName, playerAhead ? 10 : 0, playerAhead ? 2 : 0);
+                foreach (var rival in r.tournament.rivals)
+                {
+                    if (rival == null) continue;
+                    bool first = rival == r.tournament.rivals[0];
+                    champ.DebugSetPoints(rival.displayName,
+                                         playerAhead ? 2 : (first ? 10 : 4),
+                                         playerAhead ? 0 : (first ? 2 : 0));
+                }
+
+                r.director.DebugSetShape(ShapeId.Heart);
+                AdvanceUntil(r, () => r.director.State == GameState.Briefing, 12f);
+                Advance(r, 1.4f);
+                Shot(r.cam, $"{tag}_01_briefing");
+
+                AdvanceUntil(r, () => r.director.State == GameState.Mowing, 20f);
+                Advance(r, 26f);
+                r.director.DebugSetTimeRemaining(0.01f);
+
+                AdvanceUntil(r, () => r.director.State == GameState.Scoreboard, 90f);
+                AdvanceUntil(r, () => r.camera != null && r.camera.ScoreboardArrived, 14f);
+                Advance(r, 4.0f);
+                Shot(r.cam, $"{tag}_02_board");
+
+                AdvanceUntil(r, () => r.director.State == GameState.Ceremony, 20f);
+                Advance(r, 1.4f);
+                Shot(r.cam, $"{tag}_03_judges");
+                Advance(r, 2.6f);
+                Shot(r.cam, $"{tag}_04_prize");
+                Advance(r, 3.0f);
+                Shot(r.cam, $"{tag}_05_title_card");
+                Advance(r, 2.2f);
+                Shot(r.cam, $"{tag}_06_prompt");
+
+                var log = new System.Text.StringBuilder($"[Duck] CHAMPIONSHIP ({tag})\n");
+                log.AppendLine($"  rounds recorded {champ.RoundsRecorded} of {champ.RoundsTotal}, " +
+                               $"complete={champ.IsComplete}");
+                foreach (var e in champ.Table)
+                    log.AppendLine($"  {e.name,-9} {e.points,3} pts  wins {e.wins}  marks {e.marks,5:0}" +
+                                   $"{(e.isPlayer ? "   <- player" : "")}");
+                log.AppendLine($"  player placed {champ.PlayerPlace}, champion={champ.Leader.name}, " +
+                               $"playerIsChampion={champ.PlayerIsChampion}");
                 log.AppendLine($"  final state = {r.director.State}");
                 Debug.Log(log.ToString());
             }

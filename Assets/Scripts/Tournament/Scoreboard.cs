@@ -14,15 +14,28 @@ namespace DuckMow
         public TMPro.TextMeshPro grade;
 
         [HideInInspector] public Vector3 restPosition;
+        [HideInInspector] public bool restCaptured;
         [HideInInspector] public Material plateInstance;
     }
 
     /// <summary>
     /// The championship board at the plaza.
     ///
-    /// The rows do not simply appear in final order. They arrive in the order the tour visited the
-    /// plots, then re-sort themselves in front of you — the whole point of ending here is watching
-    /// your name move, so the board animates the change rather than reporting it.
+    /// Rows are written straight into rank order and never move. They used to arrive in the order
+    /// the tour visited the plots and then animate into their final places, which was a better
+    /// moment but carried a bug that got worse every round:
+    ///
+    ///     ResetBoard() captured each row's "rest position" from its CURRENT localPosition, and the
+    ///     sort had already moved it there. So the second round's rest positions were the first
+    ///     round's sorted positions, the third round's were the second's, and the mapping drifted
+    ///     further from the authored layout every time. Two rows would eventually be sent to the
+    ///     same slot, stack, and leave a hole — a board that looked shuffled rather than sorted,
+    ///     and only ever on a replay, which is why it read as "the sort is broken".
+    ///
+    /// The fix is not to animate positions at all. The drama now comes from the ORDER OF REVEAL:
+    /// the board fills from last place upward, so the top line — and therefore who won — is the
+    /// final thing to land. That reads better than the shuffle did and it cannot desynchronise,
+    /// because nothing is ever a permutation of anything.
     /// </summary>
     public class Scoreboard : MonoBehaviour
     {
@@ -31,9 +44,10 @@ namespace DuckMow
         public ScoreboardRow[] rows = new ScoreboardRow[0];
 
         [Header("Timing")]
+        [Tooltip("Seconds between rows landing, from last place upward.")]
         public float rowInterval = 0.55f;
-        public float sortDelay = 0.9f;
-        public float sortDuration = 1.35f;
+        [Tooltip("Seconds before the first row lands, so the camera arrives to a blank board.")]
+        public float revealDelay = 0.5f;
         public float winnerDelay = 0.7f;
 
         public bool Finished { get; private set; }
@@ -41,15 +55,12 @@ namespace DuckMow
         static readonly Color PlayerPlate = new Color(1f, 0.86f, 0.52f);
         static readonly Color RivalPlate = new Color(0.86f, 0.79f, 0.64f);
 
-        readonly List<Standing> _order = new List<Standing>(4);
         List<Standing> _final;
+        string _winnerLabel = "WINNER";
         float _clock;
-        int _revealed;
+        int _landed;
         bool _running;
-        bool _sorting;
-        float _sortT;
-        Vector3[] _from, _to;
-        int[] _dest;
+        float _winnerTimer;
 
         void Awake() => ResetBoard();
 
@@ -57,16 +68,32 @@ namespace DuckMow
         {
             Finished = false;
             _running = false;
-            _sorting = false;
             _clock = 0f;
-            _revealed = 0;
-            _order.Clear();
+            _landed = 0;
+            _winnerTimer = 0f;
+            _final = null;
 
             foreach (var r in rows)
             {
                 if (r?.root == null) continue;
-                r.restPosition = r.root.localPosition;
+
+                // Captured ONCE, from the layout the builder authored. Re-reading this every round
+                // is what corrupted the board — see the class comment. Restoring from it every
+                // round is belt and braces: nothing moves rows any more, but if anything ever does,
+                // the next round still starts from the real layout.
+                if (!r.restCaptured)
+                {
+                    r.restPosition = r.root.localPosition;
+                    r.restCaptured = true;
+                }
+                r.root.localPosition = r.restPosition;
+
+                if (r.place != null) r.place.text = "";
+                if (r.name != null) r.name.text = "";
+                if (r.total != null) r.total.text = "";
+                if (r.grade != null) r.grade.text = "";
                 SetRowAlpha(r, 0f);
+
                 if (r.plate != null)
                 {
                     if (r.plateInstance == null)
@@ -81,110 +108,94 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Post one contestant's result. Called by the tour as it reaches each plot, so the board
-        /// fills in as the camera travels rather than all at once at the end.
+        /// Called by the tour as it reaches each plot.
+        ///
+        /// Kept because the tour's pacing is built around it, but it no longer touches the board:
+        /// posting results in tour order was the thing that required a permutation later. The board
+        /// is at the plaza and the tour camera is out over the lawns, so nothing was being watched
+        /// here anyway.
         /// </summary>
-        public void Post(Standing s)
-        {
-            if (_order.Count >= rows.Length) return;
-            _order.Add(s);
-            _running = true;
-        }
+        public void Post(Standing s) { }
 
-        /// <summary>All results are in — sort into rank order and announce the winner.</summary>
-        public void Settle(IReadOnlyList<Standing> finalOrder)
+        /// <summary>
+        /// All results are in. Write them in rank order and reveal from the bottom up.
+        ///
+        /// <paramref name="winnerLabel"/> is what the bottom line calls the contestant on top. It has
+        /// to be told rather than assumed, because this board shows one picture out of several: the top
+        /// of it is the winner of THIS one, and calling them the champion — which it used to, every
+        /// single time — announced a title three times over and got it wrong twice.
+        ///
+        /// The board's own <see cref="title"/> is deliberately left alone. It carries the venue's name
+        /// as the builder painted it, and this method briefly overwrote it with the round number,
+        /// which is presentation the game no longer does anywhere.
+        /// </summary>
+        public void Settle(IReadOnlyList<Standing> finalOrder, string winnerLabel = "WINNER")
         {
+            if (finalOrder == null) return;
+
+            _winnerLabel = string.IsNullOrEmpty(winnerLabel) ? "WINNER" : winnerLabel;
+
             _final = new List<Standing>(finalOrder);
-            _sorting = true;
-            _sortT = -sortDelay;
-            _from = new Vector3[rows.Length];
-            _to = new Vector3[rows.Length];
+            _clock = 0f;
+            _landed = 0;
+            _winnerTimer = 0f;
+            Finished = false;
 
-            // Where each posted row ends up. This has to be a genuine permutation — if two rows
-            // are ever assigned the same slot they stack on top of each other and leave a hole,
-            // which is exactly what a mismatched name or a contestant who never got posted would
-            // do. So the mapping is built by name, recorded, and any row that failed to match is
-            // parked out of the way rather than being left to collide with a real one.
-            _dest = new int[rows.Length];
-            var taken = new bool[rows.Length];
+            // Row 0 is the top line. The standings arrive already sorted by the tournament, so this
+            // is a straight copy — no matching by name, no slot allocation, nothing that can fail.
+            // Places come off the shared rule so ties read 1st / 2nd / 2nd / 4th here and in the
+            // outro card, which are on screen at the same time.
+            var places = Scoring.CompetitionPlaces(_final);
 
             for (int i = 0; i < rows.Length; i++)
             {
-                _from[i] = rows[i]?.root != null ? rows[i].root.localPosition : Vector3.zero;
-                _dest[i] = -1;
-
-                if (i >= _order.Count) continue;
-                int k = _final.FindIndex(s => s.name == _order[i].name);
-                if (k < 0 || k >= rows.Length || taken[k])
-                {
-                    Debug.LogWarning($"[Duck] Scoreboard could not place '{_order[i].name}' " +
-                                     $"(match={k}); leaving its row where it is.");
-                    continue;
-                }
-                _dest[i] = k;
-                taken[k] = true;
+                if (rows[i] == null) continue;
+                if (i < _final.Count) Fill(rows[i], _final[i], places[i]);
+                SetRowAlpha(rows[i], 0f);
+                if (rows[i].plate != null) rows[i].plate.enabled = false;
             }
 
-            for (int i = 0; i < rows.Length; i++)
-                _to[i] = _dest[i] >= 0 ? rows[_dest[i]].restPosition : _from[i];
+            _running = true;
         }
 
         public void Tick(float dt)
         {
-            if (_running && _revealed < _order.Count)
+            if (!_running || _final == null) return;
+
+            _clock += dt;
+
+            // Land one row at a time from last place upward, so the winner's line is last.
+            int filled = Mathf.Min(_final.Count, rows.Length);
+            if (_landed < filled && _clock >= revealDelay + rowInterval * _landed)
             {
-                _clock += dt;
-                if (_clock >= rowInterval * _revealed)
-                {
-                    Fill(rows[_revealed], _order[_revealed]);
-                    _revealed++;
-                }
+                int row = filled - 1 - _landed;
+                if (rows[row]?.plate != null) rows[row].plate.enabled = true;
+                _landed++;
             }
 
-            // Rows fade up individually so a result lands with the camera rather than before it.
-            for (int i = 0; i < _revealed && i < rows.Length; i++)
+            // Fade in whatever has landed. Indices at or below (filled - _landed) are still to come.
+            for (int i = 0; i < filled; i++)
             {
                 var r = rows[i];
                 if (r?.place == null) continue;
-                float a = Mathf.MoveTowards(r.place.alpha, 1f, dt * 3.2f);
+                bool landed = i >= filled - _landed;
+                float a = Mathf.MoveTowards(r.place.alpha, landed ? 1f : 0f, dt * 3.4f);
                 SetRowAlpha(r, a);
             }
 
-            if (!_sorting) return;
+            if (_landed < filled) return;
 
-            _sortT += dt;
-            if (_sortT < 0f) return;
+            _winnerTimer += dt;
+            if (_winnerTimer < winnerDelay) return;
 
-            float t = Mathf.Clamp01(_sortT / Mathf.Max(sortDuration, 0.01f));
-            // Overshoot slightly on the way in: the rows arrive with a shunt, not a glide.
-            float e = 1f - Mathf.Pow(1f - t, 3f);
-            e += Mathf.Sin(t * Mathf.PI) * 0.06f;
-
-            for (int i = 0; i < rows.Length; i++)
+            if (!Finished && _final.Count > 0)
             {
-                if (rows[i]?.root == null) continue;
-                rows[i].root.localPosition = Vector3.LerpUnclamped(_from[i], _to[i], e);
-            }
-
-            if (t < 1f) return;
-
-            // Renumber into final order once everything has landed.
-            if (!Finished && _final != null)
-            {
-                // Numbered from the same mapping that moved them, so the number on a row and the
-                // slot it landed in can never disagree.
-                for (int i = 0; i < rows.Length; i++)
+                var w = _final[0];
+                if (winnerLine != null)
                 {
-                    if (_dest == null || _dest[i] < 0 || rows[i]?.place == null) continue;
-                    rows[i].place.text = Place(_dest[i] + 1);
-                }
-
-                if (winnerLine != null && _final.Count > 0)
-                {
-                    var w = _final[0];
                     winnerLine.text = w.isPlayer
-                        ? $"CHAMPION — {w.name}!"
-                        : $"CHAMPION — {w.name} THE {w.species.ToUpperInvariant()}";
+                        ? $"{_winnerLabel} — {w.name}!"
+                        : $"{_winnerLabel} — {w.name} THE {w.species.ToUpperInvariant()}";
                     winnerLine.color = w.livery;
                 }
                 Finished = true;
@@ -194,22 +205,15 @@ namespace DuckMow
                 winnerLine.alpha = Mathf.MoveTowards(winnerLine.alpha, 1f, dt * 1.6f);
         }
 
-        void Fill(ScoreboardRow r, Standing s)
+        void Fill(ScoreboardRow r, Standing s, int place)
         {
             if (r == null) return;
-            // No place number yet. Rows arrive in the order the tour visited the plots, and until
-            // the last contestant is in, that order says nothing about who is winning — numbering
-            // them as they land meant the board showed tour order in the numbers and rank order in
-            // the positions, which read as a scrambled list.
-            if (r.place != null) r.place.text = "";
+            if (r.place != null) r.place.text = Place(place);
             if (r.name != null) r.name.text = s.isPlayer ? $"{s.name}  (YOU)" : s.name;
             if (r.total != null) r.total.text = $"{s.total:0} / 30";
             if (r.grade != null) { r.grade.text = s.rank; r.grade.color = s.livery; }
             if (r.plate != null)
-            {
-                r.plate.enabled = true;
                 r.plateInstance?.SetColor("_BaseColor", s.isPlayer ? PlayerPlate : RivalPlate);
-            }
         }
 
         static void SetRowAlpha(ScoreboardRow r, float a)

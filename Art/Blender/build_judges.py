@@ -45,6 +45,79 @@ def col_faces(mb, faces, fn, col):
             f[mb.lay] = c
 
 
+# --------------------------------------------------------------------- hands
+#
+# THE JUDGES HAVE NO ARMS. They have floating mitts, the way a Mii does.
+#
+# They used to have jointed ones: a tapered tube from shoulder to hand with a fist
+# sphere on the end, modelled held out because these characters are built to read in
+# silhouette from sixty metres. Rigging that for a seated judge never came good, and
+# the reasons were structural rather than a matter of finding better numbers:
+#
+#   - The limb is a separate closed solid butted against the torso. Any rotation at
+#     the shoulder either tilts the end cap out from under the body and opens a seam,
+#     or — if the pivot is sunk far enough in to prevent that — swings the whole limb
+#     through the torso. Boris's arms needed 110 degrees of correction, which is well
+#     past where those two failures stop overlapping.
+#   - The bench makes it worse. The desk top sits barely above the judges' own base,
+#     so an arm hanging correctly puts the hand at exactly tabletop height, where the
+#     desk plate occludes it completely. Correct and invisible.
+#
+# A detached mitt has none of those problems, because there is no joint to preserve
+# and nothing to intersect: it sits on the desk where it can be seen, and clapping is
+# two mitts moving toward each other rather than a chain of rotations that has to stay
+# attached at the far end. It also matches the rest of the game's read — these are
+# chunky, simple, silhouette-first characters.
+#
+# WHERE THE BENCH TOP IS, in each judge's own model space.
+#
+# DuckSceneBuilder seats the judges at y = 0.68 and DuckMeshLibrary.BuildJudgeBenchOnly
+# puts the bench top plate at y = 0.83 (centre 0.78, thickness 0.10), so the tabletop
+# lands 0.15 above a judge's base. Change either of those and this has to move with them.
+TABLE_Z = 0.15
+
+# HOW FAR THE MITTS HOVER ABOVE THE TABLETOP.
+#
+# This started at 0.008, worked out so the hands would rest on the desk without quite
+# touching it. Measured in the built scene, that is exactly what happened: Boris's mitt
+# bottom sits at y = 0.838 against a tabletop surface at 0.830. Correct — and it still
+# read as buried, because eight millimetres is not visible at the judging camera and a
+# contact with no gap and no contact shadow looks like an intersection.
+#
+# Mii hands float, so the gap is free to be an obvious one. It also has to absorb
+# everything the clips subtract: the idle bob takes the whole torso down (Boris's low
+# point is -0.004) and the hands hang off Chest so they go with it, the hand keys
+# themselves dip a few millimetres, and spinning a squashed mitt raises its own effective
+# half height. 0.03 covers all of that with room to see.
+TABLE_CLEARANCE = 0.03
+
+
+def mitts(P, judge, ox, mat, col, spacing, forward, radius):
+    """One floating mitt per side, resting on the bench in front of the torso.
+
+    The height is DERIVED from the mitt's own size rather than typed once for all three
+    judges. A single shared constant was the first attempt and it buried Boris's hands in
+    the desk: his mitts have nearly twice Mildred's radius, so the same centre height put
+    his 17 mm under the tabletop while hers cleared it. Anything measured off one judge
+    is wrong for the other two — these characters are deliberately different sizes.
+
+    The pivot is the mitt's own centre, which is what lets the rig move a hand by
+    translating it and spin it in place without anything coming apart.
+    """
+    # The sphere is flattened front-to-back and slightly squashed vertically, so the half
+    # height is radius * 0.92 rather than radius.
+    half_height = radius * 0.92
+    z = TABLE_Z + half_height + TABLE_CLEARANCE
+
+    for nm, sx in (("Arm_L", 1), ("Arm_R", -1)):
+        centre = Vector((ox + sx * spacing, forward, z))
+        mb = MB()
+        # Slightly wider than tall and a little flattened front to back: a mitt, not a
+        # ball. Low segment counts keep it in the same faceted language as the bodies.
+        sphere(mb, col, centre, (radius, radius * 0.82, half_height), seg=10, rings=5)
+        P[nm] = (mb.finish("%s_%s" % (judge, nm), mat, 34.0), tuple(centre))
+
+
 # ==================================================================== MILDRED
 def mildred(ox):
     P = {}
@@ -145,17 +218,9 @@ def mildred(ox):
     cyl(mb, BRASS, (ox - 0.028, -0.127, 0.906), (ox + 0.028, -0.127, 0.906), 0.005, n=4)
     P["Head"] = (mb.finish("Mildred_Head", MAT, 30.0), tuple(MILD_PIV))
 
-    # ---- ARMS --------------------------------------------------------------
-    for nm, sx, hand in (("Arm_L", 1, Vector((0.130, -0.238, 0.600))),
-                         ("Arm_R", -1, Vector((-0.168, -0.258, 0.262)))):
-        mb = MB()
-        sh = Vector((ox + sx * 0.112, -0.048, 0.436))
-        h = Vector((ox + hand.x, hand.y, hand.z))
-        mid = sh.lerp(h, 0.5) + Vector((sx * 0.030, -0.030, 0.010))
-        tube(mb, WHITE, [sh, mid, h], [0.048, 0.036, 0.028], n=8, e=3.2, smooth=False)
-        sphere(mb, WOOD_D, h + Vector((0, -0.006, -0.010)),
-               (0.030, 0.030, 0.026), seg=8, rings=3)
-        P[nm] = (mb.finish("Mildred_" + nm, MAT, 30.0), tuple(sh))
+    # ---- HANDS -------------------------------------------------------------
+    mitts(P, "Mildred", ox, MAT, WOOD_D, spacing=0.150, forward=-0.245,
+          radius=0.052)
 
     # ---- CARD --------------------------------------------------------------
     mb = MB()
@@ -251,17 +316,8 @@ def boris(ox):
     sphere(mb, DARK, (ox, -0.300, 0.680), (0.036, 0.030, 0.028), seg=8, rings=4)
     P["Head"] = (mb.finish("Boris_Head", MAT, 30.0), tuple(BOR_PIV))
 
-    # ---- ARMS: permanently mid-applause ------------------------------------
-    for nm, sx, hand in (("Arm_L", 1, Vector((0.168, -0.258, 0.678))),
-                         ("Arm_R", -1, Vector((-0.292, -0.236, 0.556)))):
-        mb = MB()
-        sh = Vector((ox + sx * 0.286, -0.034, 0.392))
-        h = Vector((ox + hand.x, hand.y, hand.z))
-        mid = Vector((ox + sx * 0.308, -0.150, 0.540))
-        tube(mb, SLATE, [sh, mid, h], [0.088, 0.070, 0.056], n=8, e=2.6, smooth=False)
-        sphere(mb, DARK, h + Vector((0, -0.014, 0.006)),
-               (0.062, 0.056, 0.058), seg=8, rings=4)
-        P[nm] = (mb.finish("Boris_" + nm, MAT, 30.0), tuple(sh))
+    # ---- HANDS -------------------------------------------------------------
+    mitts(P, "Boris", ox, MAT, DARK, spacing=0.268, forward=-0.250, radius=0.094)
 
     # card held out to the side so it never covers his face when it goes up
     mb = MB()
@@ -359,17 +415,8 @@ def priscilla(ox):
              r=0.006, n=8, e=3.0)
     P["Head"] = (mb.finish("Priscilla_Head", MAT, 38.0), tuple(PRIS_PIV))
 
-    for nm, sx, hand in (("Arm_L", 1, Vector((0.112, -0.226, 0.352))),
-                         ("Arm_R", -1, Vector((-0.126, -0.238, 0.300)))):
-        mb = MB()
-        sh = Vector((ox + sx * 0.104, -0.030, 0.452))
-        h = Vector((ox + hand.x, hand.y, hand.z))
-        mid = sh.lerp(h, 0.55) + Vector((sx * 0.026, -0.020, 0.010))
-        tube(mb, WHITE, [sh, mid, h], [0.046, 0.034, 0.024], n=8, e=2.4,
-             squash=[(0.75, 1.0), (0.7, 1.0), (0.7, 1.0)], smooth=False)
-        sphere(mb, SAGE, h + Vector((0, -0.010, -0.004)),
-               (0.024, 0.026, 0.022), seg=8, rings=3)
-        P[nm] = (mb.finish("Priscilla_" + nm, MAT, 34.0), tuple(sh))
+    mitts(P, "Priscilla", ox, MAT, SAGE, spacing=0.128, forward=-0.232,
+          radius=0.044)
 
     mb = MB()
     grip = Vector((ox + 0.112, -0.234, 0.352))

@@ -21,6 +21,30 @@ Shader "Duck/Prop"
         _RimPower     ("Rim power", Range(0.5, 12)) = 4
         _RimStrength  ("Rim strength", Range(0, 1)) = 0.18
         _OcclusionBoost ("Vertex AO contrast", Range(0, 2)) = 1
+
+        // Environment fill. Deliberately shader defaults and NOT set per material: every .mat in
+        // the project was written before these existed, so they resolve from here and one edit
+        // moves the whole game's shade response. That matters because the fix has to reach
+        // M_Spectators and M_Judges too, and those are built by a different pass.
+        // 1.05 and 0.05, down from 1.35 and 0.16.
+        //
+        // The higher pair was set to stop north-facing surfaces going black, and it worked, but it
+        // overshot into the opposite failure: a judge sitting under a solid red awning was exactly
+        // as bright as one standing in open sun, so the set had no shading left at all.
+        //
+        // The FLOOR is the term that does the damage, and it is worth understanding why rather than
+        // just turning it down. It is added unconditionally — it is not multiplied by the light and
+        // it is not attenuated by the shadow — so every unit of floor raises shadowed and lit
+        // surfaces by the same amount, which compresses exactly the difference a shadow is made of.
+        // At 0.16 against a lit value near 1.0 it was flattening roughly a sixth of the available
+        // range, on top of an amplified SH term doing the same thing more gently. That is why the
+        // main light's shadows appeared to be missing entirely even once they were being cast.
+        //
+        // Small is the point: enough bounce that nothing reaches pure black, not enough to pay for
+        // it with the form of every object in the game.
+        _AmbientGain  ("Ambient gain", Range(0.5, 3)) = 1.05
+        _AmbientFloor ("Bounce floor", Range(0, 0.5)) = 0.05
+
         [Toggle(_ALPHATEST_ON)] _AlphaClip ("Alpha clip", Float) = 0
         _Cutoff       ("Cutoff", Range(0,1)) = 0.5
 
@@ -52,6 +76,7 @@ Shader "Duck/Prop"
             float4 _RimColor;
             float _VertexColorAmount, _Smoothness, _Metallic, _Wrap;
             float _RimPower, _RimStrength, _OcclusionBoost, _Cutoff;
+            float _AmbientGain, _AmbientFloor;
         CBUFFER_END
 
         #ifdef UNITY_INSTANCING_ENABLED
@@ -165,7 +190,18 @@ Shader "Duck/Prop"
                 half3 shadowed = mainLight.color * wrapped * _ShadowTint.rgb * 0.55;
                 half3 direct = lerp(shadowed, lit, shadow);
 
-                half3 ambient = SampleSH(N);
+                // A face turned away from the sun still bottoms out around 0.4 of the key even at
+                // the high wrap the props use, and SampleSH alone could not carry the rest: the
+                // scene uses a gradient ambient probe, and ambientIntensity is only applied to
+                // skybox ambient, so the probe is the raw gradient colour with no multiplier.
+                // The result was that the judges' bench read as unlit rather than shaded and the
+                // crowd in the stands sank into the hedge behind it.
+                //
+                // The floor is _ShadowTint pulled most of the way to white. Using the tint keeps
+                // the fill the same colour family as the shadows so shade stays one idea, and
+                // desaturating it means the fill lifts value without dyeing every prop blue.
+                half3 ambient = SampleSH(N) * _AmbientGain
+                                + lerp(_ShadowTint.rgb, half3(1, 1, 1), 0.45) * _AmbientFloor;
 
                 half3 H = normalize(mainLight.direction + V);
                 half spec = pow(saturate(dot(N, H)), lerp(8.0, 96.0, _Smoothness))
