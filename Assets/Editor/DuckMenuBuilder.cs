@@ -935,11 +935,7 @@ namespace DuckMow.EditorTools
             var scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
             scenes.RemoveAll(s => s.path == ScenePath ||
                                   s.path == DuckSceneBuilder.ScenePath ||
-                                  // A stale defence-arena entry, purged by literal path because the
-                                  // builder that used to name it is set aside with that phase. An entry
-                                  // pointing at a scene that is no longer on disk fails the player build
-                                  // outright, so the one thing this must keep doing is forgetting it.
-                                  s.path == "Assets/Scenes/Arena.unity");
+                                  s.path == DuckArenaBuilder.ScenePath);
 
             int at = 0;
             // Only ever list a scene that is on disk. A build settings entry pointing at a missing
@@ -948,6 +944,13 @@ namespace DuckMow.EditorTools
                 scenes.Insert(at++, new EditorBuildSettingsScene(ScenePath, true));
             if (File.Exists(DuckSceneBuilder.ScenePath))
                 scenes.Insert(at++, new EditorBuildSettingsScene(DuckSceneBuilder.ScenePath, true));
+            // The defence arena, after the two the game can open on. Order matters only for index 0 —
+            // which scene the WebGL build starts in — but it is listed last anyway because it is only
+            // ever reached from a round in progress, never cold. Registered here rather than in its own
+            // builder so there is exactly one place that decides what ships.
+            if (File.Exists(DuckArenaBuilder.ScenePath))
+                scenes.Insert(at, new EditorBuildSettingsScene(DuckArenaBuilder.ScenePath, true));
+
             EditorBuildSettings.scenes = scenes.ToArray();
         }
 

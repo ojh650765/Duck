@@ -199,15 +199,19 @@ namespace DuckMow.EditorTools
             root.tag = "Mower";
 
             var rb = root.AddComponent<Rigidbody>();
-            rb.mass = 180f;
+            rb.mass = MowerContact.ChassisMass;
             rb.linearDamping = 0f;
             rb.angularDamping = 2.2f;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
+            // The one collider the whole game's obstacle collision runs through. Its size and the
+            // mass above decide the band of heights the mower can touch, which is what MowerContact
+            // computes and what every prop in the venue is checked against — so it is authored from
+            // there rather than typed here and in DuckSceneBuilder as two independent copies.
             var box = root.AddComponent<BoxCollider>();
-            box.size = new Vector3(0.92f, 0.52f, 1.45f);
-            box.center = new Vector3(0f, 0.06f, 0f);
+            box.size = MowerContact.ChassisSize;
+            box.center = MowerContact.ChassisCentre;
 
             var ctrl = root.AddComponent<MowerController>();
             ctrl.groundMask = ~(1 << mowerLayer);

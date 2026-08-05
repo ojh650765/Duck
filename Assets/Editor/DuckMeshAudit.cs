@@ -546,7 +546,7 @@ namespace DuckMow.EditorTools
         /// merely interpenetrate share no vertices and stay separate, so they can still be compared,
         /// while a flat-shaded box's duplicated corners collapse into one point as they should.
         /// </summary>
-        static List<Bounds> MeshClusters(Mesh mesh, Matrix4x4 toWorld)
+        internal static List<Bounds> MeshClusters(Mesh mesh, Matrix4x4 toWorld)
         {
             var result = new List<Bounds>();
             var verts = mesh.vertices;

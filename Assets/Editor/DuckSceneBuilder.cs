@@ -721,6 +721,15 @@ namespace DuckMow.EditorTools
             // mower uses, so the venue never sounds like two different games running at once.
             ambience.audioDirector = audio;
 
+            // ---- everything the mower can hit, must be able to hit ----
+            //
+            // Last, because it measures the scene as built rather than as intended: combined batches,
+            // authored FBX props, primitives and rival dressing all end up in the same audit. It adds
+            // any collider the geometry requires and logs an error for anything standing where the
+            // mower drives that cannot be made solid at all. See DuckSolidity for why this is a pass
+            // over the finished scene and not a rule people are asked to remember.
+            DuckSolidity.Enforce();
+
             EnsureFolder("Assets/Scenes");
             EditorSceneManager.SaveScene(scene, ScenePath);
             // Not "insert this scene at index 0" any more. It used to be exactly that, which put the
@@ -743,6 +752,27 @@ namespace DuckMow.EditorTools
             var list = new System.Collections.Generic.List<AudioClip>();
             foreach (var p in paths) { var c = Clip(p); if (c != null) list.Add(c); }
             return list.ToArray();
+        }
+
+        /// <summary>
+        /// An AudioDirector with the whole clip bank wired, for any scene that needs one.
+        ///
+        /// Internal so the arena can call it. The arena had NO AudioDirector at all, which meant
+        /// AudioDirector.Instance was null there and every impact sound, honk, thud and crowd cue in the
+        /// defence phase did nothing while succeeding silently — the same failure the missing crowd had.
+        /// "Cannot be verified in a silent environment" was the wrong diagnosis: not being able to HEAR a
+        /// sound and no sound being PLAYED are different problems, and the second one is checkable.
+        /// </summary>
+        internal static AudioDirector BuildAudioDirector(MowerController mower, JudgePanel judges,
+                                                         GameDirector director = null)
+        {
+            var go = new GameObject("~ Audio");
+            var a = go.AddComponent<AudioDirector>();
+            a.mower = mower;
+            a.director = director;
+            a.judges = judges;
+            WireAudioClips(a);
+            return a;
         }
 
         static void WireAudioClips(AudioDirector a)
@@ -1112,13 +1142,16 @@ namespace DuckMow.EditorTools
             root.tag = "Mower";
 
             var rb = root.AddComponent<Rigidbody>();
-            rb.mass = 180f;
+            rb.mass = MowerContact.ChassisMass;
             rb.linearDamping = 0f;
             rb.angularDamping = 2.2f;
 
+            // From MowerContact, for the same reason as the authored path in DuckModelIntegration:
+            // this box IS the game's obstacle collision, and the venue's props are all checked
+            // against the contact band it produces.
             var box = root.AddComponent<BoxCollider>();
-            box.size = new Vector3(0.92f, 0.52f, 1.45f);
-            box.center = new Vector3(0f, 0.06f, 0f);
+            box.size = MowerContact.ChassisSize;
+            box.center = MowerContact.ChassisCentre;
 
             var ctrl = root.AddComponent<MowerController>();
             ctrl.groundMask = ~(1 << mowerLayer);

@@ -470,10 +470,48 @@ namespace DuckMow.EditorTools
                 go.transform.SetParent(root, false);
                 go.transform.SetPositionAndRotation(p, Quaternion.Euler(0f, Range(0f, 360f), 0f));
 
-                var body = Spawn(go.transform, "Body", mesh, mat, p - Vector3.up * bottom,
-                                 go.transform.rotation, true);
+                // ---- THE MISPLACED-GNOME BUG. Read this before touching the line below. ----
+                //
+                // This used to read `Spawn(go.transform, "Body", mesh, mat, p - Vector3.up * bottom,
+                // go.transform.rotation, true)` — the ornament's WORLD position and WORLD rotation
+                // handed to a helper whose last two arguments are LOCAL (see Spawn, at the bottom of
+                // this file; DuckEnvironmentBuilder's identically-shaped Spawn is world-space, and
+                // this code was written in that idiom in this file).
+                //
+                // The parent already carries both, so the visual was offset by the plot position a
+                // second time and then swung round by the parent's random yaw. Two of the twelve
+                // rival ornaments landed INSIDE THE PLAYER'S FENCE — full-size gnomes standing on the
+                // player's lawn at (4.9, 0.8) and (4.2, -21.0), drawn but with no collider, because
+                // rival dressing is deliberately collider-free. The mower drove straight through
+                // them. That is the "two of the obstacles do not collide" report, and it is also the
+                // best explanation for the earlier "the ones that are still small do not collide"
+                // report: same mechanism, an older ornament scale, and the strays were deleted from
+                // the scene instead of being traced back to here, so a rebuild brought them back.
+                //
+                // Nothing about the rivals looked wrong, which is why it survived: the Gnome_i
+                // transform this returns — the thing RivalContestant swerves around — was always in
+                // the right place. Only the mesh wandered.
+                //
+                // The visual's pose is now derived from its parent instead of recomputed: the only
+                // local offset it needs is the model's own base, and the rotation is inherited. There
+                // is no world coordinate left here to get wrong.
+                var body = Spawn(go.transform, "Body", mesh, mat, Vector3.down * bottom,
+                                 Quaternion.identity, true);
                 if (body != null) body.transform.localScale = Vector3.one * scale;
 
+                // And checked, not merely fixed. An ornament that leaves its own plot is exactly the
+                // fault above, whatever caused it, and it is invisible in the rival's behaviour.
+                if (body != null)
+                {
+                    Vector3 w = body.transform.position;
+                    float strayed = Mathf.Max(Mathf.Abs(w.x - spec.centre.x), Mathf.Abs(w.z - spec.centre.y));
+                    if (strayed > half + 2f)
+                        Debug.LogError(
+                            $"[Duck] {spec.contestant}'s ornament Gnome_{i} is drawn at " +
+                            $"({w.x:0.0}, {w.z:0.0}), {strayed:0.0} m from the middle of a plot only " +
+                            $"{half:0.0} m across. Its visual has escaped its plot — check which " +
+                            $"space the pose passed to Spawn is in.");
+                }
 
                 list.Add(go.transform);
             }
@@ -839,6 +877,15 @@ namespace DuckMow.EditorTools
 
         // ------------------------------------------------------------------ helpers
 
+        /// <summary>
+        /// A mesh under a parent, posed in the PARENT'S space.
+        ///
+        /// The last two arguments are LOCAL. DuckEnvironmentBuilder has a Spawn with the same shape
+        /// whose equivalent arguments are WORLD, and mixing the two up is what put two rival gnomes
+        /// on the player's lawn — see the long note in BuildPlotOrnaments. If you are copying a
+        /// placement out of that file, convert it: pass the offset FROM the parent, not the position
+        /// in the world.
+        /// </summary>
         static GameObject Spawn(Transform parent, string name, Mesh mesh, Material mat, Vector3 localPos,
                                 Quaternion localRot, bool castShadow)
         {

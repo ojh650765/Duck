@@ -151,14 +151,32 @@ namespace DuckMow.EditorTools
             public Transform duckRoot, duckHead, duckWingL, duckWingR;
         }
 
+        /// <summary>
+        /// One drawn box, with collision if — and only if — the mower can hit it.
+        ///
+        /// This helper builds most of the venue's furniture: the judges' bench, the marker boards,
+        /// the rivals' stations and stands, the scoreboard's frame. It used to destroy the collider
+        /// that CreatePrimitive hands it, every time, without looking at where the box stood. Two of
+        /// those boxes stand inside the fence — the six-metre judges' bench and the plot's marker
+        /// board — so the mower drove straight through them, which is the "some obstacles are
+        /// ignored" report in its third and fourth incarnations.
+        ///
+        /// Stripping it wholesale was not laziness, it was a reasonable default: hundreds of these
+        /// boxes are dressing, standing far outside the fence, and colliders on them would be pure
+        /// cost. What was missing is that the default was applied to the two boxes it was wrong for
+        /// with no way for anyone to notice.
+        ///
+        /// So the decision is made from the geometry instead of by hand. The primitive's own collider
+        /// IS its mesh — a unit cube under the same transform — so keeping it cannot disagree with
+        /// what is drawn, at any scale or rotation. DuckSolidity owns the question; see the note at
+        /// the top of that file and of MowerContact.
+        /// </summary>
         static GameObject Box(Transform parent, string name, Vector3 pos, Vector3 scale, Material mat,
                               Vector3? euler = null, PrimitiveType type = PrimitiveType.Cube,
                               bool castShadow = true)
         {
             var go = GameObject.CreatePrimitive(type);
             go.name = name;
-            var col = go.GetComponent<Collider>();
-            if (col != null) Object.DestroyImmediate(col);
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
             go.transform.localScale = scale;
@@ -166,6 +184,27 @@ namespace DuckMow.EditorTools
             var mr = go.GetComponent<MeshRenderer>();
             mr.sharedMaterial = mat;
             mr.shadowCastingMode = castShadow ? ShadowCastingMode.On : ShadowCastingMode.Off;
+
+            var col = go.GetComponent<Collider>();
+            if (col != null)
+            {
+                var mf = go.GetComponent<MeshFilter>();
+                Bounds world = mf != null && mf.sharedMesh != null
+                    ? DuckSolidity.WorldBounds(go.transform, mf.sharedMesh)
+                    : new Bounds(go.transform.position, Vector3.zero);
+
+                // A box belonging to a rigidbody keeps nothing: the mower's stand-in chassis is built
+                // from these, and extra colliders there join the mower's own compound shape and grind
+                // along the ground.
+                bool ownedByABody = go.GetComponentInParent<Rigidbody>() != null;
+
+                // A box too short to be hit is NOT reported here. One box knows nothing about its
+                // neighbours, and most short pieces are the top slab of something whose front panel
+                // will stop the mower a moment earlier. Judging that needs the whole scene, so it is
+                // DuckSolidity.Enforce at the end of the build that reports it.
+                if (ownedByABody || !DuckSolidity.MustBeSolid(world))
+                    Object.DestroyImmediate(col);
+            }
             return go;
         }
 

@@ -24,7 +24,14 @@ namespace DuckMow
         /// The championship is decided: the bench reacts, the prize is shown, and a title card
         /// lands. Appended for the same reason Intro is — see above.
         /// </summary>
-        Ceremony
+        Ceremony,
+        /// <summary>
+        /// The final defence: the picture is finished and a flock comes in over the venue. Sits
+        /// between the klaxon and the reveal in the flow, and appended here rather than inserted
+        /// there for the same reason Intro and Ceremony are — see above. Only entered when
+        /// <see cref="GameDirector.defencePhaseEnabled"/> is set, which it is not by default.
+        /// </summary>
+        Defence
     }
 
     /// <summary>
@@ -64,6 +71,15 @@ namespace DuckMow
         [Header("Demo")]
         [Tooltip("Let the autopilot drive. Used to capture repeatable footage and to sanity-check scoring.")]
         public bool autopilotEnabled;
+
+        [Header("Defence phase (GREYBOX, on probation)")]
+        [Tooltip("Run the goose raid between the klaxon and the reveal. OFF by default: the phase is " +
+                 "an unproven greybox and the round has to be exactly as it was until it earns its " +
+                 "place. Turning this on is the whole of the wiring — see EnsureDefence.")]
+        public bool defencePhaseEnabled;
+        [Tooltip("The raid. Left empty on purpose: it is found or created on demand, so enabling the " +
+                 "phase needs no scene rebuild and cutting it leaves nothing to unwire.")]
+        public GooseDefence defence;
 
         [Header("Round")]
         public float roundDuration = 75f;
@@ -282,10 +298,35 @@ namespace DuckMow
 
         // ------------------------------------------------------------------ round flow
 
+        /// <summary>
+        /// The defence phase, found or made.
+        ///
+        /// Created on demand rather than wired into Main.unity, and that is the point: the phase is a
+        /// greybox on probation, so enabling it must not require a scene rebuild and cutting it must
+        /// not leave a dangling reference in a saved scene for somebody to find later.
+        /// </summary>
+        GooseDefence EnsureDefence()
+        {
+            if (defence != null) return defence;
+
+            defence = FindFirstObjectByType<GooseDefence>();
+            if (defence != null) return defence;
+
+            var go = new GameObject("~ GooseDefence (greybox)");
+            go.transform.SetParent(transform, false);
+            defence = go.AddComponent<GooseDefence>();
+            return defence;
+        }
+
         public void BeginRound(ShapeId shape, bool announce)
         {
             _currentShape = shape;
             RoundNumber++;
+
+            // A retry can land in the middle of the raid, and the flock holds the camera and has
+            // capsules standing on the lawn. Nothing about a fresh round should have to survive
+            // either of those.
+            defence?.Abort();
 
             target.Build(shape);
             cutMask.ClearAll();
@@ -371,7 +412,18 @@ namespace DuckMow
             State = s;
             _stateTime = 0f;
 
-            bool driving = s == GameState.Mowing;
+            // Whatever the round does next, the defence phase must not be left holding the camera.
+            // Its own tick shuts it down on the way to the reveal; this covers the routes that do
+            // not go through that — DebugForceState, the capture tools, and a retry pressed while a
+            // goose is still in the air. A phase that kept the camera would leave the next beat being
+            // rendered by a lens pointed at a hedge.
+            if (from == GameState.Defence) defence?.Abort();
+
+            // Driving stays live through the defence phase, and that is the point of it: the player
+            // keeps the machine and the controls they have spent the whole round with, so the phase
+            // reads as the round continuing rather than as a minigame that borrowed the duck. The
+            // blade is locked instead of the wheels — see MowerController.BladeLocked.
+            bool driving = s == GameState.Mowing || s == GameState.Defence;
             if (InputReader.Instance != null) InputReader.Instance.DrivingEnabled = driving;
 
             switch (s)
@@ -445,9 +497,31 @@ namespace DuckMow
                     tournament?.FlushMasks();
                     break;
 
+                case GameState.Defence:
+                    // Started from here rather than from the first Tick so the arena exists and the
+                    // machine has been moved into it on the same frame the state changes. A frame
+                    // later leaks one frame of the mower still standing on the finished lawn.
+                    //
+                    // The picture itself is already settled and is not touched again: the phase is
+                    // played on a garden grown from it, 420 m off the map, and the score the reveal
+                    // is about to compute is exactly what the player mowed.
+                    defence = EnsureDefence();
+                    defence?.Begin();
+                    break;
+
                 case GameState.Reveal:
                     LastScore = target.Evaluate(cutMask, mower.DriftMetres, mower.BoostMetres, BonkCount);
-                    cameraDirector?.SetMode(CameraMode.Reveal, 2.4f);
+                    // Cut, do not blend, when arriving from the defence phase.
+                    //
+                    // That phase is played on a pitch 420 m off the map and it deliberately LEAVES the
+                    // mower there, so a 2.4 s blend spends every one of those seconds sailing the camera
+                    // across the landscape. A cut is also the right edit: the reveal is a hard change of
+                    // subject from the duck to its picture.
+                    {
+                        bool fromDefence = from == GameState.Defence;
+                        cameraDirector?.SetMode(CameraMode.Reveal, fromDefence ? 0f : 2.4f);
+                        if (fromDefence) cameraDirector?.SnapToCurrent();
+                    }
                     OnRevealStarted?.Invoke(LastScore);
                     break;
                 case GameState.Judging:
@@ -472,9 +546,13 @@ namespace DuckMow
                     cameraDirector?.SnapToCurrent();
                     // The player's own marks close the venue: everybody is measured now, so the
                     // standings exist before the tour starts showing them.
+                    // The picture's marks and the defence award meet here and nowhere else. The award is
+                    // read off the phase rather than recomputed, and it is zero unless the phase actually
+                    // ran and finished — so a round without it scores exactly as it always did.
                     tournament?.CloseRound(judges != null ? judges.Total : 0f,
                                            judges != null ? judges.Rank : "D",
-                                           Venue.Player.centre);
+                                           Venue.Player.centre,
+                                           defencePhaseEnabled && defence != null ? defence.Award : 0);
                     _tourIndex = -1;
                     _tourHold = 0f;
                     break;
@@ -607,7 +685,23 @@ namespace DuckMow
 
                 case GameState.Klaxon:
                     if (_stateTime >= klaxonDuration)
+                        SetState(defencePhaseEnabled ? GameState.Defence : GameState.Reveal);
+                    break;
+
+                case GameState.Defence:
+                    // Stepped before the finish test, so the phase gets its last frame — putting the
+                    // machine back and handing the clock over — before the reveal is entered.
+                    defence?.Tick(dt);
+                    // Budgeted, not trusted — the same rule the opening story is under. A phase that
+                    // never reports itself over would strand the round one beat short of the reveal,
+                    // with a finished picture nothing on screen is able to show.
+                    if (defence == null || defence.Finished || _stateTime > 30f)
+                    {
+                        if (defence != null && !defence.Finished)
+                            Debug.LogWarning($"[Duck] defence phase did not finish within " +
+                                             $"{_stateTime:0.0}s; going to the reveal without it.");
                         SetState(GameState.Reveal);
+                    }
                     break;
 
                 case GameState.Reveal:
@@ -719,6 +813,12 @@ namespace DuckMow
             // call while the first is still loading would queue a redundant load.
             if (_leavingToMenu) return;
             _leavingToMenu = true;
+            // Shut the defence phase down before the load rather than leaving it to OnDisable. The
+            // load is ASYNCHRONOUS, so this scene keeps ticking for a while yet — and the phase holds
+            // Time.timeScale down to two percent during a hit stop, which is a global that outlives a
+            // scene change. Escape pressed on the frame a goose connects would otherwise drop the
+            // player onto the menu in slow motion.
+            defence?.Abort();
             UnityEngine.SceneManagement.SceneManager.LoadSceneAsync("Menu");
         }
 

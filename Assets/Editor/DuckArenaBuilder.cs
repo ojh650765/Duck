@@ -1,0 +1,721 @@
+using System.Collections.Generic;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using DuckMow;
+
+namespace DuckMow.EditorTools
+{
+    /// <summary>
+    /// Writes <c>Assets/Scenes/Arena.unity</c>: the defence pitch, both flower gardens, the fence, the
+    /// opponent's board, the judges' bench, lighting, post processing, the camera rig and the mower —
+    /// all as REAL GAMEOBJECTS SAVED IN THE SCENE FILE.
+    ///
+    /// The saving is the whole point, and it is worth stating why because a runtime version passed every
+    /// test except the one that mattered. Geometry generated in Awake exists only in play mode: nobody
+    /// can select it, nobody can drag it, nobody can even look at it without pressing play. The only
+    /// adjustment available was to edit a constant, rebuild, play, capture, look at a PNG — a
+    /// minutes-long loop for "move that bed two metres", on an arena whose entire job is to feel good to
+    /// drive around. Baking is not a finishing step that freezes decisions; it is the tool that makes
+    /// every remaining decision cheap.
+    ///
+    /// This follows DuckSceneBuilder's own pattern rather than inventing one. That builder treats the
+    /// scene as generated output — "edit a number, rebuild, look" — and deterministic generation and a
+    /// hand-inspectable result are only in tension if the generator forgets to write a file. Re-running
+    /// this overwrites the arena, so hand tweaks are lost on a rebuild in exactly the way they are for
+    /// the main scene; that is the established bargain here, not an oversight.
+    ///
+    /// Reuses <see cref="DuckSceneBuilder.BuildLighting"/>, <c>BuildEnvironmentLighting</c>,
+    /// <c>BuildPostProcessing</c> and <c>BuildJudgeBench</c> so the arena cannot drift from the venue's
+    /// look, and instantiates the existing <c>Mower.prefab</c> rather than duplicating a machine.
+    ///
+    /// Greybox: the beds are coloured boxes. The authored `Flowerbed` in Foliage.fbx — 1.6 x 0.84 m with
+    /// sixteen vertex-coloured flowers, currently unused anywhere in the project — is the drop-in for the
+    /// art pass, and swapping it in is one GetCombined call in <see cref="BedMesh"/>.
+    /// </summary>
+    public static class DuckArenaBuilder
+    {
+        public const string ScenePath = "Assets/Scenes/Arena.unity";
+
+        // ---- dimensions. Every one of these is reasoned about in DefenceArena's own comments; the
+        // ---- numbers live here because this is what writes them into the world.
+
+        /// <summary>Half a garden's frontage. Small: the garden is the GOAL, not the playing space.</summary>
+        const float GardenHalf = 5f;
+        /// <summary>
+        /// Centre to centre between the goals. The number the whole feel rests on.
+        ///
+        /// 50 m leaves 40 m of clear pitch. A mower tops out at 10 m/s and turns at 165 deg/s slow but
+        /// only 88 fast, so a committed turn needs real ground: 40 m is four to five seconds end to end,
+        /// which is enough to read where the goose will be, commit to an approach, OVERSHOOT, and
+        /// recover. Being unable to overshoot is what made an 18 m box feel like rails even though
+        /// nothing was holding the player — there was no room to be wrong in.
+        /// </summary>
+        const float GoalGap = 50f;
+        const float PitchHalfWidth = 15f;
+
+        [MenuItem("Duck/2 · Build defence arena scene", priority = 2)]
+        public static void Build()
+        {
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            DuckSceneBuilder.BuildLighting();
+            DuckSceneBuilder.BuildEnvironmentLighting();
+            DuckSceneBuilder.BuildPostProcessing();
+
+            var root = new GameObject("~ Arena").transform;
+
+            Vector3 playerCentre = Vector3.zero;
+            Vector3 toward = Vector3.forward;
+            Vector3 opponentCentre = playerCentre + toward * GoalGap;
+            Vector3 side = Vector3.Cross(Vector3.up, toward).normalized;
+
+            BuildPitch(root, playerCentre, toward);
+            Lanes(root, playerCentre, toward, side);
+            Crowd(root, playerCentre, toward, side);
+
+            var playerBeds = new List<Transform>(32);
+            var opponentBeds = new List<Transform>(32);
+            PlantGarden(root, "PlayerGarden", playerCentre, toward, side, playerBeds, PlayerBedMat());
+            PlantGarden(root, "OpponentGarden", opponentCentre, -toward, side, opponentBeds, OpponentBedMat());
+
+            // Only the PLAYER's fence is collected. The opponent's is 50 m away and never looked at
+            // closely, so tracking it would be work nobody can see.
+            var playerFence = new List<Transform>(80);
+            Fence(root, playerCentre, toward, side, playerFence);
+            Fence(root, opponentCentre, toward, side, null);
+
+            var board = OpponentBoard(root, opponentCentre, toward, side);
+            var npc = Opponent(root, opponentCentre, toward);
+
+            // Anchors, as real empties so every one of them can be dragged and kept.
+            var playerAnchor = Anchor(root, "Anchor_PlayerGarden", playerCentre, toward);
+            var oppAnchor = Anchor(root, "Anchor_OpponentGarden", opponentCentre, -toward);
+            var spawn = Anchor(root, "Anchor_Spawn",
+                               playerCentre - toward * (GardenHalf * 0.8f) + Vector3.up * 0.4f, toward);
+            // Portrait: in front of the garden it defended, turned three-quarters so the duck and the
+            // beds are both in the closing shot.
+            var portrait = Anchor(root, "Anchor_Portrait",
+                                  playerCentre + toward * (GardenHalf + 3.2f) + side * 1.6f,
+                                  Quaternion.LookRotation(
+                                      (playerCentre - (playerCentre + toward * (GardenHalf + 3.2f))).normalized
+                                      + side * 0.4f, Vector3.up));
+            // The bench, placed to be SEEN rather than to be out of the way.
+            //
+            // It sat at PitchHalfWidth + 3.5 m — fifteen metres off the touchline plus three — which is
+            // tidy and put it outside the chase camera's frustum for the entire phase. The judges were in
+            // the scene and never once on screen, which for a beat whose whole job is "the bench marks
+            // your defence here, with the flattened beds still in shot" is the same as their not being
+            // there.
+            //
+            // Now just beyond the player's own garden and one third of the way up the touchline: the
+            // chase camera looks from behind the mower down the pitch, so this sits inside that cone
+            // without ever being between the player and the goose.
+            Vector3 benchPos = playerCentre + side * (GardenHalf + 4.5f) + toward * (GoalGap * 0.3f);
+            var benchAnchor = Anchor(root, "Anchor_Bench", benchPos,
+                                     Quaternion.LookRotation(
+                                         ((playerCentre + toward * (GoalGap * 0.18f)) - benchPos).normalized,
+                                         Vector3.up));
+
+            // The bench itself, authored here rather than borrowed from the venue at runtime. Reusing the
+            // venue's builder means the same bench, the same three rigged judges and the same animators,
+            // so the arena cannot drift from the panel the player already knows.
+            var judges = DuckSceneBuilder.BuildJudgeBench();
+            if (judges != null)
+                judges.transform.SetPositionAndRotation(benchAnchor.position, benchAnchor.rotation);
+
+            var mower = InstantiateMower(spawn);
+
+            var systems = new GameObject("~ Systems").transform;
+            systems.gameObject.AddComponent<InputReader>();
+
+            var arena = systems.gameObject.AddComponent<DefenceArena>();
+            arena.playerBeds = playerBeds.ToArray();
+            arena.opponentBeds = opponentBeds.ToArray();
+            arena.playerGarden = playerAnchor;
+            arena.opponentGarden = oppAnchor;
+            arena.spawnAnchor = spawn;
+            arena.portraitAnchor = portrait;
+            arena.benchAnchor = benchAnchor;
+            arena.opponentMarker = board;
+            arena.flattenedMaterial = FlattenedMat();
+            arena.gardenHalfWidth = GardenHalf;
+            arena.fencePieces = playerFence.ToArray();
+
+            var phase = systems.gameObject.AddComponent<GooseDefence>();
+
+            // What makes this a level rather than a set. Without a driver in the scene the arena could
+            // only ever be entered by GameDirector dragging the player into it mid-round from Main —
+            // which is precisely what read as an abduction — and it could not be opened and played on
+            // its own, so nothing about how it feels could be checked without running a whole round.
+            var boot = systems.gameObject.AddComponent<ArenaBootstrap>();
+            boot.defence = phase;
+
+            // Tier and rally readouts. The component builds its own canvas at runtime — see its note on
+            // why screen-space UI is the one thing here that does not need baking.
+            var hud = systems.gameObject.AddComponent<DefenceHud>();
+            hud.defence = phase;
+
+            // Sound. Without this the arena had no AudioDirector, so AudioDirector.Instance was null and
+            // every impact layer, honk, thud and crowd cue the phase fires did nothing at all — silently.
+            DuckSceneBuilder.BuildAudioDirector(mower.GetComponent<MowerController>(), judges);
+
+            var camera = BuildCameraRig(mower);
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            System.IO.Directory.CreateDirectory("Assets/Scenes");
+            EditorSceneManager.SaveScene(scene, ScenePath);
+            AssetDatabase.SaveAssets();
+
+            // Registered here as well as in the project-settings pass. The scene cannot be entered from
+            // a round unless it is in the build settings, and leaving that to a separate menu item meant
+            // the builder reported success while producing a scene the game could not actually load.
+            DuckMenuBuilder.RegisterBuildScenes();
+
+            Debug.Log($"[Duck] built {ScenePath}: {playerBeds.Count} player beds, " +
+                      $"{opponentBeds.Count} opponent beds, goals {GoalGap} m apart, " +
+                      $"pitch {PitchHalfWidth * 2f} m wide. Open it and drag anything.");
+        }
+
+        // ------------------------------------------------------------------ pitch
+
+        static void BuildPitch(Transform root, Vector3 centre, Vector3 toward)
+        {
+            // Wider and longer than the play area on purpose. The seam where this plane ends used to be
+            // visible past the fence as a hard edge against the venue's darker grass 270 m away, which
+            // read as an unfinished join; running it well past the goals puts that edge out of frame from
+            // a low chase camera, and it also means a mower that overshoots its own goal is still on
+            // solid ground rather than falling through and being flung back to the playfield by
+            // MowerController's fall-reset.
+            var g = Box(root, "Pitch", GroundMat(),
+                        new Vector3(PitchHalfWidth * 2f + 34f, 1f, GoalGap + GardenHalf * 2f + 46f),
+                        centre + toward * (GoalGap * 0.5f) + Vector3.down * 0.5f,
+                        Quaternion.identity, keepCollider: true, castShadows: false);
+            g.gameObject.isStatic = true;
+        }
+
+        /// <summary>
+        /// Plant one garden's beds.
+        ///
+        /// A SHALLOW ARC across the frontage, not a straight line and not a cluster, and every part of
+        /// that is a gameplay choice rather than a look:
+        ///
+        ///   * spread across the frontage, so which part of the goal you stand in front of is a real
+        ///     positional decision. Clustered beds make one spot correct and the rest of the pitch
+        ///     decorative.
+        ///   * even spacing at about two dozen beds, so the 18% damage cap lands at four or five and one
+        ///     flattened bed is a legible fraction. Uneven density would make identical play cost
+        ///     different amounts depending only on where the goose happened to aim.
+        ///   * an arc rather than a line, so the beds nearest the pitch are the exposed ones and the goal
+        ///     has a front and a back for the crash radius to bite differently at.
+        ///   * two rows, inset from the fence, so no bed is ever ambiguously behind a picket from a low
+        ///     chase camera — which is the sort of thing that is invisible until you look at a frame.
+        /// </summary>
+        static void PlantGarden(Transform root, string name, Vector3 centre, Vector3 facing,
+                                Vector3 side, List<Transform> into, Material mat)
+        {
+            var parent = new GameObject(name).transform;
+            parent.SetParent(root, false);
+            parent.position = centre;
+
+            // Six, not twelve, and the authored bed's own width is what decides it.
+            //
+            // Twelve across a 8.6 m span is 0.78 m apart, and the authored flowerbed is 1.6 m wide — so
+            // every bed overlapped its neighbours by half and the garden came out as one continuous strip
+            // of flowers. That is not a cosmetic complaint: the phase is scored in BEDS LOST, and a
+            // player who cannot see where one bed ends and the next begins cannot read "four gone" off
+            // the ground. Six leaves 1.7 m centres, which clears the mesh with a gap to spare.
+            const int perRow = 6;
+            const float bow = 1.9f;          // how far the arc's middle bulges toward the pitch
+            float[] rowDepth = { 1.5f, 3.4f };
+
+            for (int row = 0; row < rowDepth.Length; row++)
+            {
+                // The back row is offset half a step, so the two rows interlock rather than forming a
+                // grid — a grid reads as a car park from above and leaves clean lanes through the goal.
+                float stagger = row == 0 ? 0f : 0.5f;
+
+                for (int i = 0; i < perRow; i++)
+                {
+                    float t = (i + stagger) / (perRow - 1f);
+                    if (t > 1f) continue;
+
+                    float across = Mathf.Lerp(-GardenHalf * 0.86f, GardenHalf * 0.86f, t);
+                    // Arc: deepest at the edges, closest to the pitch in the middle.
+                    float curve = (1f - Mathf.Abs(t * 2f - 1f)) * bow;
+                    Vector3 p = centre + side * across + facing * (rowDepth[row] - curve);
+
+                    into.Add(PlantBed(parent, p, facing, mat, i + row * perRow));
+                }
+            }
+        }
+
+        /// <summary>
+        /// One flowerbed: a soil trough with blooms standing in it.
+        ///
+        /// It was a single coloured box, and forty-six of them read as one red mass rather than as a
+        /// garden — which mattered more than any effect layered on top, because the whole phase is about
+        /// defending *this*, and a block is not something a player minds losing.
+        ///
+        /// The SOIL is the bed root, and that is load-bearing rather than tidy. DefenceArena flattens a
+        /// bed by squashing `body.localScale` and swapping the renderer on that same transform, so
+        /// putting the soil at the root gets both for free: the parent squash crushes the blooms along
+        /// with the trough, and the material swap turns the trough to bare earth without touching them.
+        /// Had the root been an empty holder, the swap would have found no renderer and a destroyed bed
+        /// would have stayed in full colour.
+        ///
+        /// Blooms are boxes, not spheres. At the size these are actually seen at — a low camera thirty
+        /// metres out — a sphere costs eight times the triangles to render the same four pixels, and
+        /// there are 184 of them.
+        /// </summary>
+        static Transform PlantBed(Transform parent, Vector3 p, Vector3 facing, Material sideMat, int index)
+        {
+            var rot = Quaternion.LookRotation(facing, Vector3.up);
+
+            // The authored flowerbed IS the bed, when it is on disk.
+            //
+            // Foliage.fbx has carried a `Flowerbed` — 1.6 x 0.84 m, sixteen vertex-coloured blooms and
+            // its own soil trough — for this whole project and nothing had ever placed it.
+            //
+            // Making it the ROOT rather than a child of a box trough fixes three things at once that the
+            // child version got wrong: the authored mesh brings its own soil, so a box underneath it only
+            // ever z-fought and cast a black band; a child inherits the trough's non-uniform scale and
+            // has to undo it, which is fragile arithmetic for no gain; and DefenceArena flattens a bed by
+            // squashing this transform and swapping ITS renderer, so as the root the whole planting
+            // crushes and turns to bare earth in one move. One renderer per bed, and the good-looking
+            // option is also the cheap one.
+            var authored = BedMesh();
+            if (authored != null)
+            {
+                var go = new GameObject("Bed");
+                go.transform.SetParent(parent, false);
+                go.transform.SetPositionAndRotation(p, rot);
+                go.AddComponent<MeshFilter>().sharedMesh = authored;
+                var mr = go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = BloomVertexMat();
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+                mr.receiveShadows = true;
+                return go.transform;
+            }
+
+            // Soil is SOIL, not the garden's colour. Passing the old bed material through here was the
+            // whole original problem wearing a new shape: forty-six pink troughs read as one pink mass
+            // exactly as forty-six pink blocks did. Whose garden it is comes from the blooms.
+            var bed = Box(parent, "Bed", SoilMat(),
+                          new Vector3(0.98f, 0.22f, 0.66f), p + Vector3.up * 0.11f, rot,
+                          keepCollider: false, castShadows: true);
+
+            // Deterministic per bed rather than random, so a rebuild does not reshuffle the garden the
+            // level was dressed against.
+            var rng = new System.Random(index * 7919 + 13);
+            float R(float a, float b) => a + (float)rng.NextDouble() * (b - a);
+
+            var palette = BloomMats(sideMat != null && sideMat.name.Contains("Rival"));
+
+            for (int f = 0; f < 4; f++)
+            {
+                var mat = palette[(index + f) % palette.Length];
+                float h = R(0.20f, 0.30f);
+
+                // Local space: the bed is already placed and turned, so the blooms only need to be
+                // spread across its own footprint. Deriving them from world coordinates is exactly the
+                // mistake that put two rival gnomes on the player's lawn.
+                var stem = Box(bed, "Stem", StemMat(),
+                               new Vector3(0.035f, h, 0.035f),
+                               Vector3.zero, Quaternion.identity,
+                               keepCollider: false, castShadows: false);
+                stem.localPosition = new Vector3(R(-0.34f, 0.34f), 0.5f + h * 0.5f / 0.22f, R(-0.2f, 0.2f));
+                stem.localScale = new Vector3(0.035f / 0.98f, h / 0.22f, 0.035f / 0.66f);
+
+                var head = Box(bed, "Bloom", mat,
+                               new Vector3(0.15f, 0.12f, 0.15f),
+                               Vector3.zero, Quaternion.identity,
+                               keepCollider: false, castShadows: false);
+                head.localPosition = new Vector3(stem.localPosition.x, 0.5f + (h + 0.06f) / 0.22f,
+                                                 stem.localPosition.z);
+                head.localScale = new Vector3(0.15f / 0.98f, 0.12f / 0.22f, 0.15f / 0.66f);
+                // Deliberately NOT turned. The soil trough is scaled non-uniformly (0.98 / 0.22 / 0.66),
+                // and a rotation inside a non-uniform parent shears its child — the blooms would come out
+                // as leaning rhomboids. Variety comes from position and colour instead, which cost
+                // nothing and cannot skew.
+                head.localRotation = Quaternion.identity;
+            }
+
+            return bed;
+        }
+
+        /// <summary>
+        /// Warm blooms for the player, cool for the rival. Hue is what tells the two gardens apart at a
+        /// glance from a chase camera — the soil is identical, because soil is.
+        /// </summary>
+        static Material[] BloomMats(bool rival) => rival
+            ? new[]
+            {
+                DuckSceneBuilder.EnsureLit("M_ArenaBloomRivalA", "#C0509E"),
+                DuckSceneBuilder.EnsureLit("M_ArenaBloomRivalB", "#8E6BC8"),
+                DuckSceneBuilder.EnsureLit("M_ArenaBloomRivalC", "#EFE4F2")
+            }
+            : new[]
+            {
+                DuckSceneBuilder.EnsureLit("M_ArenaBloomA", "#E4574C"),
+                DuckSceneBuilder.EnsureLit("M_ArenaBloomB", "#F2B237"),
+                DuckSceneBuilder.EnsureLit("M_ArenaBloomC", "#FBF3E2")
+            };
+
+        static Material StemMat() => DuckSceneBuilder.EnsureLit("M_ArenaStem", "#3F7A32");
+
+        /// <summary>Turned earth. Identical on both sides, because soil is.</summary>
+        static Material SoilMat() => DuckSceneBuilder.EnsureLit("M_ArenaSoil", "#4A3527");
+
+        /// <summary>
+        /// The authored flowerbed from Foliage.fbx, baked once and shared by every bed. Null when the
+        /// export is missing, which is the signal to fall back to boxes rather than an error — the arena
+        /// has to build on a fresh clone that has not run Blender yet.
+        /// </summary>
+        static Mesh BedMesh() =>
+            DuckAssetLibrary.GetCombined("Foliage.fbx", "Flowerbed", "ArenaFlowerbed");
+
+        /// <summary>
+        /// White base with vertex colour fully on, because the sixteen blooms' colours live in the MESH
+        /// rather than in a material. Tinting the base here would multiply every authored bloom by that
+        /// tint and collapse the variety the asset exists to provide.
+        /// </summary>
+        static Material BloomVertexMat()
+        {
+            var m = DuckSceneBuilder.EnsureLit("M_ArenaBloomAuthored", "#FFFFFF");
+            if (m != null && m.HasProperty("_VertexColorAmount")) m.SetFloat("_VertexColorAmount", 1f);
+            return m;
+        }
+
+        /// <summary>A low picket ring. Also what a missed goose comes down through.</summary>
+        static void Fence(Transform root, Vector3 centre, Vector3 toward, Vector3 side,
+                          List<Transform> collect)
+        {
+            var parent = new GameObject("Fence").transform;
+            parent.SetParent(root, false);
+            parent.position = centre;
+
+            var mat = FenceMat();
+
+            // Fifteen pickets and TWO RAILS, where it was eleven pickets and nothing.
+            //
+            // Eleven 9 cm pickets across ten metres is ninety-one percent air, and the result read as a
+            // ring of standing stones rather than as a fence — which matters beyond looks, because a
+            // missed goose is supposed to SMASH THROUGH this and there was visibly nothing to smash.
+            //
+            // The rails do most of the work for almost nothing. A picket fence is read from its
+            // horizontal lines, not from the count of its uprights: two long thin boxes per side turn
+            // twenty-two disconnected posts into one continuous barrier for eight extra renderers.
+            const int perSide = 15;
+            const float railY0 = 0.20f, railY1 = 0.48f;
+
+            for (int s = 0; s < 4; s++)
+            {
+                Vector3 along = (s < 2) ? side : toward;
+                Vector3 outward = (s < 2) ? toward : side;
+                float sign = (s % 2 == 0) ? 1f : -1f;
+                Vector3 lineCentre = centre + outward * (GardenHalf * sign);
+
+                for (int i = 0; i < perSide; i++)
+                {
+                    float t = Mathf.Lerp(-GardenHalf, GardenHalf, i / (float)(perSide - 1));
+                    var picket = Box(parent, "Picket", mat, new Vector3(0.09f, 0.62f, 0.09f),
+                        centre + along * t + outward * (GardenHalf * sign) + Vector3.up * 0.31f,
+                        Quaternion.identity, keepCollider: false, castShadows: true);
+                    collect?.Add(picket);
+                }
+
+                // Turned to lie along the run. Uniform in the two axes being rotated about, so no shear.
+                var rot = Quaternion.LookRotation(along, Vector3.up);
+                foreach (float y in new[] { railY0, railY1 })
+                    collect?.Add(Box(parent, "Rail", mat, new Vector3(0.045f, 0.075f, GardenHalf * 2f),
+                        lineCentre + Vector3.up * y, rot, keepCollider: false, castShadows: true));
+            }
+        }
+
+        /// <summary>
+        /// Mown stripes down the pitch.
+        ///
+        /// The pitch was one flat sheet of colour, and on a flat sheet a mower moving at ten metres a
+        /// second has nothing to move RELATIVE TO — speed stopped reading, and so did which way the
+        /// player was pointing. Stripes are the cheapest fix that is also the right one for this game:
+        /// a mown lawn genuinely has them, they run naturally toward the goal the player is defending
+        /// or attacking, and eight long quads cost eight renderers.
+        ///
+        /// Laid just above the pitch rather than blended into it, because the pitch is one mesh and this
+        /// has to be adjustable by dragging.
+        /// </summary>
+        static void Lanes(Transform root, Vector3 centre, Vector3 toward, Vector3 side)
+        {
+            var parent = new GameObject("Lanes").transform;
+            parent.SetParent(root, false);
+            parent.position = centre;
+
+            var mat = LaneMat();
+            const int stripes = 8;
+            float width = PitchHalfWidth * 2f / stripes;
+            var rot = Quaternion.LookRotation(toward, Vector3.up);
+
+            for (int i = 0; i < stripes; i += 2)
+            {
+                float across = Mathf.Lerp(-PitchHalfWidth, PitchHalfWidth, (i + 0.5f) / stripes);
+                Box(parent, "Lane", mat,
+                    new Vector3(width, 0.02f, GoalGap + GardenHalf * 4f),
+                    centre + side * across + toward * (GoalGap * 0.5f) + Vector3.up * 0.012f,
+                    rot, keepCollider: false, castShadows: false);
+            }
+        }
+
+        /// <summary>A shade off the pitch, not a stripe of paint. Mown grass, not a road marking.</summary>
+        static Material LaneMat() => DuckSceneBuilder.EnsureLit("M_ArenaLane", "#5E8F3E");
+
+        /// <summary>
+        /// A stand down the far touchline, with spectators on it.
+        ///
+        /// The arena had no crowd at all, and that blocked more than dressing: the phase already calls
+        /// SpectatorCrowd.Excite on every parry and every crash, so "immediate crowd response" and
+        /// "escalate through crowd excitement" were both wired to an object that did not exist. The code
+        /// was doing nothing and silently succeeding.
+        ///
+        /// Seats are TYPED here, unlike the venue's, and that is not the mistake the venue's comment warns
+        /// about. That warning is about a grid authored against one model and used with another; here the
+        /// same function builds the benches and places the sitters, so there is one source of truth for
+        /// where a bench is. Ray-sweeping geometry this simple would be ceremony.
+        ///
+        /// Opposite the judges deliberately: the bench is on the near-right, so putting the crowd on the
+        /// far-left fills the other side of the frame instead of stacking both on one edge.
+        /// </summary>
+        static void Crowd(Transform root, Vector3 centre, Vector3 toward, Vector3 side)
+        {
+            var parent = new GameObject("Crowd").transform;
+            parent.SetParent(root, false);
+
+            var deck = DuckSceneBuilder.EnsureLit("M_ArenaStandDeck", "#C4B393");
+            var skirt = DuckSceneBuilder.EnsureLit("M_ArenaStandSkirt", "#7B5F3E");
+
+            const int tiers = 3;
+            const float run = 34f;            // along the touchline
+            const float tierDepth = 1.15f;
+            const float tierRise = 0.62f;
+            float outward = PitchHalfWidth + 2.2f;
+
+            var seats = new List<SpectatorCrowd.Seat>(96);
+            var rng = new System.Random(4211);
+
+            for (int t = 0; t < tiers; t++)
+            {
+                float y = 0.31f + t * tierRise;
+                float across = outward + t * tierDepth;
+                Vector3 mid = centre - side * across + toward * (GoalGap * 0.5f);
+
+                // The bench itself, and a skirt under it so the tier is not a slab floating on air.
+                Box(parent, "StandDeck", deck, new Vector3(tierDepth, 0.16f, run),
+                    mid + Vector3.up * (y + tierRise * 0.5f),
+                    Quaternion.LookRotation(toward, Vector3.up), keepCollider: false, castShadows: true);
+                Box(parent, "StandSkirt", skirt, new Vector3(tierDepth * 0.92f, y + tierRise * 0.5f, run),
+                    mid + Vector3.up * ((y + tierRise * 0.5f) * 0.5f),
+                    Quaternion.LookRotation(toward, Vector3.up), keepCollider: false, castShadows: false);
+
+                int perTier = 14;
+                for (int i = 0; i < perTier; i++)
+                {
+                    float alongT = Mathf.Lerp(-run * 0.46f, run * 0.46f, i / (float)(perTier - 1));
+                    // Skip a few at random so the rows are not a picket line of animals.
+                    if (rng.NextDouble() < 0.18) continue;
+
+                    Vector3 p = mid + toward * alongT + Vector3.up * (y + tierRise * 0.5f + 0.08f);
+                    seats.Add(new SpectatorCrowd.Seat
+                    {
+                        position = p,
+                        // Facing the pitch, with a little scatter so the rows are not machined.
+                        yaw = Quaternion.LookRotation(side, Vector3.up).eulerAngles.y
+                              + (float)(rng.NextDouble() * 16.0 - 8.0),
+                        scale = 0.9f + (float)rng.NextDouble() * 0.25f,
+                        species = i + t,
+                        phase = (float)rng.NextDouble() * 6.28f
+                    });
+                }
+            }
+
+            var crowd = parent.gameObject.AddComponent<SpectatorCrowd>();
+
+            var species = new List<Mesh>();
+            foreach (var n in new[] { "Rabbit_Root", "Sheep_Root", "Pig_Root", "Fox_Root", "Tortoise_Root" })
+            {
+                var m = DuckAssetLibrary.GetCombined("Spectators.fbx", n, n.Replace("_Root", ""));
+                if (m != null) species.Add(m);
+            }
+            foreach (var n in new[] { "Goose_Root", "Hedgehog_Root", "Squirrel_Root" })
+            {
+                var m = DuckAssetLibrary.GetCombined("CrowdExtra.fbx", n, n.Replace("_Root", ""));
+                if (m != null) species.Add(m);
+            }
+
+            if (species.Count > 0)
+            {
+                crowd.speciesMeshes = species.ToArray();
+                crowd.crowdMaterial =
+                    AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/M_Spectators.mat");
+                for (int i = 0; i < seats.Count; i++)
+                {
+                    var s = seats[i];
+                    s.species = s.species % species.Count;
+                    seats[i] = s;
+                }
+            }
+            else
+            {
+                // No authored spectators on disk: the component falls back to generated blobs, which is
+                // still a crowd that reacts. Better than an empty stand.
+                crowd.crowdMaterial =
+                    AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/M_Crowd.mat");
+            }
+
+            crowd.seats = seats.ToArray();
+        }
+
+        /// <summary>
+        /// The tall board behind the opponent's goal, in their livery.
+        ///
+        /// It exists because a garden is FLAT. The far goal is 50 m up the pitch and its ground sits a
+        /// few degrees below the horizon from a chase camera, so a 10 m square of it spans about a degree
+        /// and a half — thirty pixels of a nine-hundred-pixel frame, hard against the top edge. It was
+        /// technically in shot and might as well not have been, which is how "send it back over there"
+        /// ended up with no visible target twice running. Three and a half metres of vertical board
+        /// subtends nearly six degrees at that range: give the far end HEIGHT and the frame can find it.
+        /// </summary>
+        static Transform OpponentBoard(Transform root, Vector3 centre, Vector3 toward, Vector3 side)
+        {
+            var parent = new GameObject("OpponentBoard").transform;
+            parent.SetParent(root, false);
+
+            var mat = LiveryMat();
+            Vector3 at = centre + toward * (GardenHalf + 2.4f);
+
+            var board = Box(parent, "Board", mat, new Vector3(6.5f, 3.4f, 0.25f),
+                            at + Vector3.up * 3.1f, Quaternion.LookRotation(-toward, Vector3.up),
+                            keepCollider: false, castShadows: true);
+
+            Box(parent, "Post", mat, new Vector3(0.3f, 1.5f, 0.3f),
+                at + side * 2.6f + Vector3.up * 0.75f, Quaternion.identity, false, true);
+            Box(parent, "Post", mat, new Vector3(0.3f, 1.5f, 0.3f),
+                at - side * 2.6f + Vector3.up * 0.75f, Quaternion.identity, false, true);
+
+            return board;
+        }
+
+        static Transform Opponent(Transform root, Vector3 centre, Vector3 toward)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            go.name = "Opponent";
+            Object.DestroyImmediate(go.GetComponent<Collider>());
+            go.transform.SetParent(root, false);
+            go.transform.localScale = new Vector3(0.8f, 0.6f, 0.8f);
+            go.transform.SetPositionAndRotation(
+                centre + toward * (GardenHalf * 0.55f) + Vector3.up * 1.2f,
+                Quaternion.LookRotation(-toward, Vector3.up));
+            go.GetComponent<MeshRenderer>().sharedMaterial = NpcMat();
+            return go.transform;
+        }
+
+        // ------------------------------------------------------------------ systems
+
+        static GameObject InstantiateMower(Transform spawn)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Mower.prefab");
+            if (prefab == null)
+            {
+                Debug.LogWarning("[Duck] Mower.prefab is missing; the arena has no machine in it.");
+                return null;
+            }
+
+            // The existing prefab rather than a second machine built here. A duplicate would drift from
+            // the one the player has spent the round driving, and the whole premise of this phase is that
+            // it is the same mower on the same controls.
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+            go.name = "Mower";
+            go.transform.SetPositionAndRotation(spawn.position, spawn.rotation);
+
+            var controller = go.GetComponent<MowerController>();
+            if (controller != null) DuckVFXBuilder.Build(go, controller);
+            return go;
+        }
+
+        static CameraDirector BuildCameraRig(GameObject mower)
+        {
+            var go = new GameObject("MainCamera");
+            go.tag = "MainCamera";
+
+            var cam = go.AddComponent<Camera>();
+            cam.nearClipPlane = 0.12f;
+            cam.farClipPlane = 420f;
+            cam.allowHDR = false;
+            if (go.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>() == null)
+                go.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+
+            var director = go.AddComponent<CameraDirector>();
+            if (mower != null)
+            {
+                director.target = mower.transform;
+                director.mower = mower.GetComponent<MowerController>();
+            }
+            go.AddComponent<AudioListener>();
+            return director;
+        }
+
+        // ------------------------------------------------------------------ materials, on disk
+
+        // Every one of these is an ASSET, not a runtime material. A scene full of
+        // HideFlags.DontSave materials looks wrong the moment somebody opens it without pressing play,
+        // which would defeat the entire purpose of baking the arena in the first place.
+
+        static Material GroundMat() => DuckSceneBuilder.EnsureLit("M_ArenaPitch", "#57703F");
+        static Material PlayerBedMat() => DuckSceneBuilder.EnsureLit("M_ArenaBed", "#D15C70");
+        static Material OpponentBedMat() => DuckSceneBuilder.EnsureLit("M_ArenaBedRival", "#C86A9E");
+        static Material FlattenedMat() => DuckSceneBuilder.EnsureLit("M_ArenaBedFlat", "#4C3B2E");
+        static Material FenceMat() => DuckSceneBuilder.EnsureLit("M_ArenaPicket", "#DCD8CE");
+        static Material NpcMat() => DuckSceneBuilder.EnsureLit("M_ArenaOpponent", "#5C85C7");
+        static Material LiveryMat() => DuckSceneBuilder.EnsureLit("M_ArenaBoard", "#F0B83D");
+
+        // ------------------------------------------------------------------ helpers
+
+        static Transform Box(Transform parent, string name, Material mat, Vector3 scale,
+                             Vector3 position, Quaternion rotation, bool keepCollider, bool castShadows)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = name;
+
+            // Colliders come off everything but the pitch. Beds and pickets with colliders would turn the
+            // arena into an obstacle course the mower wedges in, and the phase needs the machine drivable
+            // at every moment.
+            if (!keepCollider) Object.DestroyImmediate(go.GetComponent<Collider>());
+
+            go.transform.SetParent(parent, false);
+            go.transform.SetPositionAndRotation(position, rotation);
+            go.transform.localScale = scale;
+
+            var r = go.GetComponent<MeshRenderer>();
+            if (r != null)
+            {
+                r.sharedMaterial = mat;
+                r.shadowCastingMode = castShadows
+                    ? UnityEngine.Rendering.ShadowCastingMode.On
+                    : UnityEngine.Rendering.ShadowCastingMode.Off;
+                r.receiveShadows = true;
+            }
+            return go.transform;
+        }
+
+        static Transform Anchor(Transform parent, string name, Vector3 position, Vector3 forward)
+            => Anchor(parent, name, position, Quaternion.LookRotation(forward, Vector3.up));
+
+        static Transform Anchor(Transform parent, string name, Vector3 position, Quaternion rotation)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.SetPositionAndRotation(position, rotation);
+            return go.transform;
+        }
+    }
+}

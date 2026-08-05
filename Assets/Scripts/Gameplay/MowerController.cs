@@ -50,10 +50,19 @@ namespace DuckMow
         public float boostMinimumToStart = 0.12f;
 
         [Header("Suspension")]
-        public float suspensionRest = 0.30f;
-        public float suspensionTravel = 0.16f;
-        public float suspensionStiffness = 24000f;
+        // Defaulted from MowerContact, not typed here. The environment builder has to know how high
+        // this machine rides before one exists — that ride height is what decides which props can be
+        // hit at all — so the numbers live in one place and this end takes them from there. See the
+        // note at the top of MowerContact.cs.
+        public float suspensionRest = MowerContact.SuspensionRest;
+        public float suspensionTravel = MowerContact.SuspensionTravel;
+        public float suspensionStiffness = MowerContact.SuspensionStiffness;
         public float suspensionDamping = 2400f;
+        [Tooltip("Angular velocity added about the machine's lateral axis when it is struck, so the nose " +
+                 "rocks up and the springs compress. Zero means an impact the chassis does not feel.")]
+        [Range(0f, 6f)] public float bonkPitchKick = 2.6f;
+        [Tooltip("The same about its long axis, for a blow that lands off-centre.")]
+        [Range(0f, 6f)] public float bonkRollKick = 1.9f;
         public Vector3 wheelbase = new Vector3(0.40f, 0f, 0.52f);
         public LayerMask groundMask = ~0;
 
@@ -74,7 +83,7 @@ namespace DuckMow
         public float staggerRebound = 1.8f;
 
         [Header("Body")]
-        public float gravityScale = 2.1f;
+        public float gravityScale = MowerContact.GravityScale;
         public float maxAirborneTime = 1.5f;
         [Tooltip("Below this height the mower is considered lost and is put back on the lawn.")]
         public float fallResetHeight = -3f;
@@ -121,6 +130,7 @@ namespace DuckMow
         float _yawRate;
         float _staggerTimer;
         readonly RaycastHit[] _hitBuffer = new RaycastHit[4];
+        bool _rideVerified;
         Vector3 _spawnPos;
         Quaternion _spawnRot;
 
@@ -263,6 +273,8 @@ namespace DuckMow
         void ApplySuspension(float dt)
         {
             bool anyGrounded = false;
+            float rideSum = 0f;
+            int rideRays = 0;
             for (int i = 0; i < 4; i++)
             {
                 float sx = (i == 0 || i == 2) ? -1f : 1f;
@@ -275,6 +287,8 @@ namespace DuckMow
                 if (Physics.Raycast(worldPos, -up, out RaycastHit hit, maxLen, groundMask, QueryTriggerInteraction.Ignore))
                 {
                     anyGrounded = true;
+                    rideSum += hit.distance;
+                    rideRays++;
                     float compression = 1f - Mathf.Clamp01(hit.distance / maxLen);
                     Vector3 pointVel = _rb.GetPointVelocity(worldPos);
                     float upVel = Vector3.Dot(pointVel, up);
@@ -287,6 +301,8 @@ namespace DuckMow
 
             IsGrounded = anyGrounded;
             _airborneTimer = anyGrounded ? 0f : _airborneTimer + dt;
+
+            VerifyRideHeight(rideSum, rideRays);
 
             // Absolute floor. Any hole in the ground collision — a missing collider, a gap
             // between two meshes — used to mean falling forever with no way back. Catch it and
@@ -314,6 +330,37 @@ namespace DuckMow
                 _rb.angularVelocity = Vector3.zero;
                 _airborneTimer = 0f;
             }
+        }
+
+        /// <summary>
+        /// Confirm, once, that the machine rides as high as MowerContact predicts.
+        ///
+        /// The contact band that decides which props can be hit at all is derived from the spring
+        /// balance in MowerContact, at edit time, with no mower in existence. If anyone retunes the
+        /// stiffness, the mass or the travel in the Inspector — or if a scene ships with an older
+        /// serialised value — the band silently stops describing this mower and the builder's
+        /// obstacle checks start certifying props against a machine that is not there. That is
+        /// exactly how the "some obstacles are ignored" bug got in three times, so the loop is
+        /// closed here rather than trusted: four springs settling on flat ground measure the ride
+        /// height directly, and a disagreement is a console error naming both numbers.
+        /// </summary>
+        void VerifyRideHeight(float rideSum, int rideRays)
+        {
+            if (_rideVerified || rideRays < 4) return;
+            // Only on a level, settled machine: a lean, a bump or a landing all read as a
+            // disagreement that is not one.
+            if (Mathf.Abs(_rb.linearVelocity.y) > 0.05f) return;
+            if (Vector3.Dot(transform.up, Vector3.up) < 0.999f) return;
+
+            _rideVerified = true;
+            float measured = rideSum / rideRays;
+            float predicted = MowerContact.RideHeight;
+            if (Mathf.Abs(measured - predicted) > 0.03f)
+                Debug.LogError(
+                    $"[Duck] Mower ride height is {measured:0.000} m but MowerContact predicts " +
+                    $"{predicted:0.000} m. Every obstacle in the venue was checked against " +
+                    $"{MowerContact.Describe()}, so those checks are now wrong. Reconcile " +
+                    $"MowerContact with this mower's mass and suspension, then rebuild the scene.");
         }
 
         // ------------------------------------------------------------------ drive
@@ -508,6 +555,29 @@ namespace DuckMow
             // only costs time, and the interesting cost is the scar it leaves across the picture.
             float spin = (UnityEngine.Random.value < 0.5f ? -1f : 1f) * (1.1f + strength * 2.0f);
             _rb.AddTorque(Vector3.up * spin, ForceMode.VelocityChange);
+
+            // Rock the chassis, and do it with TORQUE rather than by animating a visual offset.
+            //
+            // This was missing entirely, and a frame-by-frame capture is what found it: twelve
+            // consecutive frames across a parry had the machine's pitch and roll pinned at +0.1 and 0.0
+            // the whole way through. The camera kicked, the goose squashed, the debris flew — and the
+            // mower itself did not so much as nod. "Suspension recoil and tire compression" had nothing
+            // behind it at all.
+            //
+            // Torque rather than a scripted lean because the suspension here is four real spring
+            // raycasts: shove the body and the springs compress, fight back and settle on their own, so
+            // the recoil has the machine's actual mass and damping in it. A scripted lean would have to
+            // reproduce all of that and would fight the springs while doing it.
+            Vector3 from = -away.normalized;
+            // Head-on lifts the nose; a side-swipe rolls it away from the blow. Both fall out of where
+            // the hit came from, so a glancing goose reads differently from one straight up the front.
+            float head = Mathf.Clamp01(Vector3.Dot(from, fwd));
+            float lateral = Vector3.Dot(from, transform.right);
+
+            _rb.AddTorque(-transform.right * (bonkPitchKick * strength * (0.35f + head)),
+                          ForceMode.VelocityChange);
+            _rb.AddTorque(transform.forward * (bonkRollKick * strength * lateral),
+                          ForceMode.VelocityChange);
 
             LastImpactStrength = strength;
             OnImpact?.Invoke(strength, impactPoint);

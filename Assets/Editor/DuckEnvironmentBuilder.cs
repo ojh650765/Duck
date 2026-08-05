@@ -331,26 +331,66 @@ namespace DuckMow.EditorTools
         /// </summary>
         class Combiner
         {
-            readonly Dictionary<Material, List<CombineInstance>> _buckets = new();
+            struct Item
+            {
+                public CombineInstance instance;
+                public bool solid;
+            }
+
+            readonly Dictionary<Material, List<Item>> _buckets = new();
 
             public void Add(Mesh mesh, Matrix4x4 trs, Material mat)
             {
                 if (mesh == null || mat == null) return;
                 if (!_buckets.TryGetValue(mat, out var list))
                 {
-                    list = new List<CombineInstance>();
+                    list = new List<Item>();
                     _buckets[mat] = list;
                 }
-                list.Add(new CombineInstance { mesh = mesh, transform = trs, subMeshIndex = 0 });
+                list.Add(new Item
+                {
+                    instance = new CombineInstance { mesh = mesh, transform = trs, subMeshIndex = 0 },
+                    // Decided here, while the mesh and its placement are both still in hand. Once
+                    // CombineMeshes has run there is no instance left to ask about.
+                    solid = DuckSolidity.MustBeSolid(mesh, trs)
+                });
             }
 
+            /// <summary>
+            /// Emit the batch, and give it collision the mower can actually use.
+            ///
+            /// <paramref name="addCollider"/> now means "this whole batch needs a collider for its own
+            /// reasons" — the surround is the ground, the stands are what the crowd's seating rays are
+            /// fired at. It is no longer the only way a batch becomes solid, because that is what the
+            /// "some obstacles are ignored" bug kept being: a per-batch flag set by hand while the
+            /// question is per-prop. A batch may hold a hay bale standing where the mower drives and a
+            /// tent forty metres outside the fence, and one flag cannot be right for both.
+            ///
+            /// So every instance is measured. Any that stand where the mower can reach them and fill
+            /// enough of its contact band are baked into a SECOND mesh, from the same meshes and the
+            /// same matrices as the visual, and that is what the collider gets — so the collision can
+            /// never disagree with what is drawn, and nothing hittable can be left out by forgetting a
+            /// flag. Instances the mower could drive at but could never hit are errors, not silence.
+            /// </summary>
             public void Emit(Transform parent, string name, bool castShadow = true, bool addCollider = false)
             {
                 int index = 0;
                 foreach (var kv in _buckets)
                 {
+                    var all = new CombineInstance[kv.Value.Count];
+                    var solid = new List<CombineInstance>();
+                    for (int i = 0; i < kv.Value.Count; i++)
+                    {
+                        var item = kv.Value[i];
+                        all[i] = item.instance;
+                        // Instances too short to be hit are not reported from here: a prop is usually
+                        // several instances, and its own solid parts shield the short ones. Judging
+                        // that needs the finished scene, so DuckSolidity.Enforce does it.
+                        if (item.solid) solid.Add(item.instance);
+                    }
+
                     var combined = new Mesh { indexFormat = IndexFormat.UInt32 };
-                    combined.CombineMeshes(kv.Value.ToArray(), true, true);
+                    combined.CombineMeshes(all, true, true);
                     combined.RecalculateNormals();
                     combined.RecalculateBounds();
                     var saved = Save(combined, $"{name}_{index}");
@@ -358,10 +398,20 @@ namespace DuckMow.EditorTools
                     var go = Spawn(parent, $"{name}_{kv.Key.name}", saved, kv.Key,
                                    Vector3.zero, Quaternion.identity, Vector3.one, castShadow);
                     go.isStatic = true;
-                    if (addCollider)
+
+                    Mesh collision = null;
+                    if (addCollider) collision = saved;
+                    else if (solid.Count > 0)
+                    {
+                        var hittable = new Mesh { indexFormat = IndexFormat.UInt32 };
+                        hittable.CombineMeshes(solid.ToArray(), true, true);
+                        hittable.RecalculateBounds();
+                        collision = Save(hittable, $"{name}_{index}_Solid");
+                    }
+                    if (collision != null)
                     {
                         var mc = go.AddComponent<MeshCollider>();
-                        mc.sharedMesh = saved;
+                        mc.sharedMesh = collision;
                     }
                     index++;
                 }
@@ -685,21 +735,28 @@ namespace DuckMow.EditorTools
             comb.Emit(f, "Fence");
 
             // An invisible wall just inside the fence so the mower cannot escape the fair.
+            //
+            // Built out from MowerContact.ReachRadius rather than in from FenceRadius, because this
+            // wall's inner face IS the definition of "where the mower can drive" — and that is what
+            // decides which props in the venue have to be solid. Written as two independent numbers
+            // it was only a matter of time before a fence tweak moved the wall and left every
+            // obstacle check certifying the wrong area. Same 39.6 m centre as before.
+            const float wallThickness = 0.6f;
             for (int side = 0; side < 4; side++)
             {
                 var go = new GameObject($"Bound_{side}");
                 go.transform.SetParent(f, false);
                 var box = go.AddComponent<BoxCollider>();
-                float r = FenceRadius - 0.4f;
+                float r = MowerContact.ReachRadius + wallThickness * 0.5f;
                 if (side < 2)
                 {
                     go.transform.position = new Vector3(0f, 1.2f, side == 0 ? r : -r);
-                    box.size = new Vector3(r * 2f + 2f, 2.4f, 0.6f);
+                    box.size = new Vector3(r * 2f + 2f, 2.4f, wallThickness);
                 }
                 else
                 {
                     go.transform.position = new Vector3(side == 2 ? r : -r, 1.2f, 0f);
-                    box.size = new Vector3(0.6f, 2.4f, r * 2f + 2f);
+                    box.size = new Vector3(wallThickness, 2.4f, r * 2f + 2f);
                 }
                 go.layer = LayerMask.NameToLayer("Prop");
             }
@@ -2067,7 +2124,20 @@ namespace DuckMow.EditorTools
             PlaceProp("Wheelbarrow", "Wheelbarrow", new Vector3(23f, 0f, 38.5f), -62f);
             PlaceProp("Bicycle", "Bicycle", new Vector3(-30f, 0f, -35f), 104f);
             PlaceProp("Thermos", "Thermos", new Vector3(1.1f, 0.83f, -38.9f), 20f);
-            PlaceProp("Sprinkler", "Sprinkler", new Vector3(-34f, 0f, 12f), 0f);
+            // The sprinkler stands OUTSIDE the rail, and it has to.
+            //
+            // At (-34, 12) it stood on the apron, well inside the fence, and it is 0.26 m tall — so it
+            // reached 2 cm into the band the mower's chassis sweeps (y 0.24..0.76) and the machine went
+            // straight over it. That is not a collider fault: the sprinkler is in the Clutter batch and
+            // has an exact mesh collider. It is simply too short for this mower to touch, and no
+            // configuration of the builder can make a 26 cm prop hittable — see MowerContact.
+            //
+            // So the rule is the other way round: a prop that cannot be solid must not stand where the
+            // mower can drive. This spot is 1.3 m past the mower's reach and still inside the radius
+            // that keeps trees out, tucked between two fence posts under the bottom rail — visible
+            // dressing from the lawn and from the reveal, and impossible to drive at. DuckSolidity's
+            // audit fails the build if anyone puts a prop like this back inside the rail.
+            PlaceProp("Sprinkler", "Sprinkler", new Vector3(-(MowerContact.ReachRadius + 1.3f), 0f, 24.9f), 0f);
             // No ScoreboardProp here. It was the second of two boards in the same spot — see the
             // note at the end of BuildAwningAndScoreboard for the measurement and for why removing
             // both is safe.
@@ -2080,25 +2150,24 @@ namespace DuckMow.EditorTools
             //
             // ---- WHY SOME OBSTACLES ARE IGNORED AND OTHERS ARE NOT ----
             //
-            // "무시되는 장애물이 있음" — SOME obstacles pass through — and the answer is arithmetic
-            // rather than a bug in any one prop. The mower has exactly ONE collider, a BoxCollider on
-            // its root (see DuckModelIntegration) 0.52 m tall centred 0.06 above its own origin, and
-            // the suspension holds that origin about 0.44 m up. Two independent routes agree on that
-            // 0.44: a runtime state dump, and the spring itself — a 0.46 m ray (rest 0.3 + travel
-            // 0.16) against 24000 N/m per corner under 3708 N of weight barely compresses, giving
-            // 0.442. So:
+            // The arithmetic that used to be written out here now lives in MowerContact, as code, and
+            // is checked against every prop in the venue by DuckSolidity. Read those two if you are
+            // chasing an obstacle that does not collide; this comment is only the summary.
+            //
+            // The mower has exactly ONE collider, a box 0.52 m tall held about 0.44 m off the ground by
+            // its suspension, so:
             //
             //     THE MOWER CAN ONLY TOUCH THINGS BETWEEN y 0.24 AND y 0.76.
             //     Nothing below 0.24 m can be hit, whatever collider it has.
             //
-            // Which makes it a per-PROP fact, not a per-instance one, and the measured heights sort
-            // every obstacle in the venue into hittable and not:
+            // Which makes it a per-PROP fact, and the measured heights sort the venue's dressing into
+            // hittable and not (measured by the solidity audit, not by hand):
             //
-            //     Sprinkler      0.26 m  ->  0.02 m of overlap   never hittable
-            //     Thermos        0.27 m  ->  0.03 m              never hittable
-            //     Wheelbarrow    0.52 m  ->  0.28 m              hittable, thin
-            //     HayBale        0.54 m  ->  0.30 m              hittable, thin
-            //     gnome, OLD     0.60 m  ->  0.36 m              hittable, thin — glancing hits slip
+            //     Sprinkler      0.26 m  ->  0.02 m of overlap   never hittable, so it lives outside the rail
+            //     Thermos        0.27 m, on the bench at 0.83    entirely above the band; nothing to drive through
+            //     Wheelbarrow    0.52 m  ->  0.22 m              hittable
+            //     HayBale        0.54 m  ->  0.29 m              hittable
+            //     gnome, OLD     0.60 m  ->  0.36 m              hittable, thin — glancing hits slipped
             //     TrophyPlinth   0.76 m  ->  0.52 m              full contact
             //     MarkerStake    0.86 m  ->  0.52 m              full contact
             //     Bicycle        1.10 m  ->  0.52 m              full contact

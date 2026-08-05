@@ -1,0 +1,359 @@
+using UnityEngine;
+
+namespace DuckMow
+{
+    /// <summary>
+    /// The debris half of a parry: feathers, dirt, grass and the impact ring.
+    ///
+    /// Built by hand rather than with ParticleSystem, and the reason is the frame budget rather than
+    /// taste. A ParticleSystem per effect brings its own module evaluation, its own transparent
+    /// material and its own draw call, and the effects here fire in bursts during the exact frames the
+    /// hit stop has already made expensive. Twenty pre-allocated boxes on two shared meshes cost four
+    /// draw calls, no allocation after the first burst, and no garbage — which is what makes them
+    /// affordable in a rally rather than only in a screenshot.
+    ///
+    /// THREE decisions worth keeping:
+    ///
+    /// EVERYTHING IS OPAQUE. Feathers shrink to nothing and the ring collapses its own thickness, so
+    /// nothing here blends. Transparency would mean sort order, overdraw and a depth-write decision on
+    /// every quad, all of it landing on the impact frames. A shrinking opaque box reads as a vanishing
+    /// fleck perfectly well at the size these are actually seen at.
+    ///
+    /// EVERYTHING IS A BOX. A flat quad is the obvious cheaper feather and it is invisible edge-on —
+    /// which, for something tumbling, means each fleck blinks out at random. Twelve triangles buys
+    /// visibility from every angle, and twenty of them is 240 triangles against a 41k scene.
+    ///
+    /// THE CLOCK IS THE SCALED ONE. Driven from GooseDefence.Tick with the same dt as everything else,
+    /// so a hit stop freezes the burst mid-air along with the world. That is deliberate: the debris
+    /// hangs at the contact point for the whole 70–110 ms and then bursts outward as the clock
+    /// releases. Running these on real time would spend the entire burst during the frames nothing
+    /// else is moving, and the freeze would be the one moment the impact looked empty.
+    /// </summary>
+    public class DefenceImpactFX : MonoBehaviour
+    {
+        const int FeatherCount = 20;
+        const int GritCount    = 14;
+        const int RingCount    = 3;
+
+        struct Bit
+        {
+            public Transform t;
+            public Vector3 vel;
+            public float life, maxLife;
+            public float gravity;
+            public Vector3 spinAxis;
+            public float spin;
+            public float size;
+        }
+
+        readonly Bit[] _feathers = new Bit[FeatherCount];
+        readonly Bit[] _grit     = new Bit[GritCount];
+
+        struct Ring
+        {
+            public Transform t;
+            public float life, maxLife;
+            public float radius0, radius1, thickness;
+        }
+        readonly Ring[] _rings = new Ring[RingCount];
+
+        int _nextFeather, _nextGrit, _nextRing;
+
+        Mesh _box, _ring;
+        Material _matFeather, _matDirt, _matGrass, _matRing;
+        System.Random _rng;
+
+        // ------------------------------------------------------------------ build
+
+        public void Setup(System.Random rng)
+        {
+            _rng = rng ?? new System.Random(7);
+
+            _box  = BuildBox();
+            _ring = BuildRing(28);
+
+            // Cream feathers against a dark goose and pale sage ground; the ring takes the same hot
+            // orange the struck goose flares to, so the two halves of the impact read as one event.
+            _matFeather = Flat(new Color(0.96f, 0.94f, 0.88f), "FXFeather");
+            _matDirt    = Flat(new Color(0.28f, 0.19f, 0.13f), "FXDirt");
+            _matGrass   = Flat(new Color(0.34f, 0.58f, 0.24f), "FXGrass");
+            _matRing    = Flat(new Color(1.00f, 0.55f, 0.13f), "FXRing");
+
+            for (int i = 0; i < FeatherCount; i++) _feathers[i].t = MakeBit("Feather", _matFeather);
+            for (int i = 0; i < GritCount; i++)
+                _grit[i].t = MakeBit("Grit", i % 3 == 0 ? _matGrass : _matDirt);
+            for (int i = 0; i < RingCount; i++) _rings[i].t = MakeRing();
+        }
+
+        Transform MakeBit(string name, Material mat)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(transform, false);
+            go.AddComponent<MeshFilter>().sharedMesh = _box;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            go.SetActive(false);
+            return go.transform;
+        }
+
+        Transform MakeRing()
+        {
+            var go = new GameObject("ImpactRing");
+            go.transform.SetParent(transform, false);
+            go.AddComponent<MeshFilter>().sharedMesh = _ring;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _matRing;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            go.SetActive(false);
+            return go.transform;
+        }
+
+        // ------------------------------------------------------------------ emit
+
+        /// <summary>
+        /// A parry. <paramref name="strength"/> is 0..1 across Normal/Good/Perfect, and it scales the
+        /// count as well as the speed — a perfect hit should throw MORE debris, not the same debris
+        /// faster, because count is what reads at a glance and speed is what reads in motion.
+        /// </summary>
+        public void Impact(Vector3 pos, Vector3 dir, float strength)
+        {
+            strength = Mathf.Clamp01(strength);
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 1e-4f) dir = Vector3.forward;
+            dir.Normalize();
+
+            int feathers = Mathf.RoundToInt(6f + 10f * strength);
+            for (int i = 0; i < feathers; i++)
+            {
+                // Biased along the launch heading and upward, with enough spread that the frozen frame
+                // reads as a burst rather than as a line. A cone this wide is what makes the contact
+                // point legible while everything is held still.
+                Vector3 v = (dir * Rand(0.35f, 1.25f)
+                          + Vector3.up * Rand(0.55f, 1.5f)
+                          + Random.onUnitSphere * 0.55f).normalized * Rand(2.6f, 6.2f + 2.5f * strength);
+                Spawn(ref _feathers[_nextFeather], pos + Random.insideUnitSphere * 0.35f, v,
+                      life: Rand(0.55f, 0.95f), gravity: 7.5f, size: Rand(0.07f, 0.13f), flat: true);
+                _nextFeather = (_nextFeather + 1) % FeatherCount;
+            }
+
+            int grit = Mathf.RoundToInt(4f + 6f * strength);
+            for (int i = 0; i < grit; i++)
+            {
+                Vector3 v = (dir * Rand(0.2f, 0.9f)
+                          + Vector3.up * Rand(0.7f, 1.6f)
+                          + Random.onUnitSphere * 0.4f).normalized * Rand(2.2f, 5.4f);
+                Spawn(ref _grit[_nextGrit], pos + Random.insideUnitSphere * 0.25f, v,
+                      life: Rand(0.38f, 0.68f), gravity: 15f, size: Rand(0.05f, 0.10f), flat: false);
+                _nextGrit = (_nextGrit + 1) % GritCount;
+            }
+
+            EmitRing(pos, 0.45f, 1.9f + 2.6f * strength, 0.22f + 0.12f * strength, 0.26f);
+        }
+
+        /// <summary>
+        /// A miss that ended in the flowers: earth and leaves, no feathers, no ring. The goose is not
+        /// struck here, so borrowing the parry's vocabulary would say it was.
+        /// </summary>
+        public void Dirt(Vector3 pos, float strength)
+        {
+            strength = Mathf.Clamp01(strength);
+            int grit = Mathf.RoundToInt(6f + 8f * strength);
+            for (int i = 0; i < grit; i++)
+            {
+                Vector3 v = (Vector3.up * Rand(0.8f, 1.7f) + Random.onUnitSphere * 0.7f).normalized
+                          * Rand(2.4f, 5.8f);
+                Spawn(ref _grit[_nextGrit], pos + Random.insideUnitSphere * 0.4f, v,
+                      life: Rand(0.4f, 0.75f), gravity: 15f, size: Rand(0.06f, 0.12f), flat: false);
+                _nextGrit = (_nextGrit + 1) % GritCount;
+            }
+        }
+
+        /// <summary>
+        /// One fleck shed by a launched goose, called along its arc. The goal asks for "a clean
+        /// directional trail" on a perfect strike, and a sparse line of feathers is the version of that
+        /// which shows the trajectory without becoming the visual noise the same goal warns against.
+        /// </summary>
+        public void TrailPuff(Vector3 pos)
+        {
+            Spawn(ref _feathers[_nextFeather], pos, Random.onUnitSphere * 0.6f,
+                  life: 0.4f, gravity: 2.5f, size: 0.075f, flat: true);
+            _nextFeather = (_nextFeather + 1) % FeatherCount;
+        }
+
+        void Spawn(ref Bit b, Vector3 pos, Vector3 vel, float life, float gravity, float size, bool flat)
+        {
+            b.t.position = pos;
+            b.t.rotation = Random.rotationUniform;
+            // A feather is a flattened, elongated box; grit is chunky. Same mesh, different scale — the
+            // silhouette difference is what separates plumage from soil at a glance.
+            b.t.localScale = flat ? new Vector3(size * 1.7f, size * 0.35f, size)
+                                  : new Vector3(size, size * 0.8f, size * 0.9f);
+            b.vel = vel;
+            b.life = b.maxLife = life;
+            b.gravity = gravity;
+            b.spinAxis = Random.onUnitSphere;
+            b.spin = Rand(180f, 620f) * (Rand(0f, 1f) > 0.5f ? 1f : -1f);
+            b.size = size;
+            b.t.gameObject.SetActive(true);
+        }
+
+        void EmitRing(Vector3 pos, float r0, float r1, float thickness, float life)
+        {
+            ref var r = ref _rings[_nextRing];
+            _nextRing = (_nextRing + 1) % RingCount;
+
+            // Flat on the ground rather than facing the lens. From a low chase camera a horizontal ring
+            // reads as a shockwave leaving the point of contact and stays anchored to the pitch; a
+            // camera-facing disc reads as a decal stuck to the screen.
+            r.t.position = new Vector3(pos.x, Mathf.Max(pos.y, 0.06f), pos.z);
+            r.t.rotation = Quaternion.identity;
+            r.radius0 = r0; r.radius1 = r1; r.thickness = thickness;
+            r.life = r.maxLife = life;
+            r.t.localScale = new Vector3(r0, 1f, r0);
+            r.t.gameObject.SetActive(true);
+        }
+
+        // ------------------------------------------------------------------ tick
+
+        public void Tick(float dt)
+        {
+            if (dt <= 0f) return;
+
+            for (int i = 0; i < _feathers.Length; i++) Step(ref _feathers[i], dt, drag: 2.2f);
+            for (int i = 0; i < _grit.Length; i++)     Step(ref _grit[i], dt, drag: 1.1f);
+
+            for (int i = 0; i < _rings.Length; i++)
+            {
+                ref var r = ref _rings[i];
+                if (r.life <= 0f) continue;
+                r.life -= dt;
+                float k = 1f - Mathf.Clamp01(r.life / r.maxLife);
+                // Fast out, slow to a stop: the shape of an impact rather than of a balloon.
+                float e = 1f - (1f - k) * (1f - k);
+                float radius = Mathf.Lerp(r.radius0, r.radius1, e);
+                // Thickness collapses to nothing, which is the fade. See the class note on why nothing
+                // here is transparent.
+                float thick = r.thickness * (1f - k);
+                r.t.localScale = new Vector3(radius, Mathf.Max(thick, 0.0001f), radius);
+                if (r.life <= 0f) r.t.gameObject.SetActive(false);
+            }
+        }
+
+        void Step(ref Bit b, float dt, float drag)
+        {
+            if (b.life <= 0f) return;
+            b.life -= dt;
+            if (b.life <= 0f) { b.t.gameObject.SetActive(false); return; }
+
+            b.vel += Vector3.down * (b.gravity * dt);
+            b.vel -= b.vel * Mathf.Min(drag * dt, 0.9f);
+            Vector3 p = b.t.position + b.vel * dt;
+
+            // Settle on the pitch instead of sinking through it, and stop tumbling once down. Debris
+            // that keeps spinning on the ground reads as a physics bug in exactly the frames the
+            // player is looking at the ground.
+            if (p.y < b.size * 0.5f)
+            {
+                p.y = b.size * 0.5f;
+                b.vel.x *= 0.4f; b.vel.z *= 0.4f;
+                b.vel.y = -b.vel.y * 0.22f;
+                b.spin *= 0.3f;
+            }
+            b.t.position = p;
+            b.t.Rotate(b.spinAxis, b.spin * dt, Space.World);
+
+            // The last third of life is spent shrinking away. Cheaper than a fade and, at the size
+            // these are actually seen at, indistinguishable from one.
+            float k = b.life / b.maxLife;
+            if (k < 0.34f)
+            {
+                float s = Mathf.Clamp01(k / 0.34f);
+                b.t.localScale *= Mathf.Lerp(0.86f, 1f, s);
+            }
+        }
+
+        public void Clear()
+        {
+            for (int i = 0; i < _feathers.Length; i++)
+            { _feathers[i].life = 0f; if (_feathers[i].t != null) _feathers[i].t.gameObject.SetActive(false); }
+            for (int i = 0; i < _grit.Length; i++)
+            { _grit[i].life = 0f; if (_grit[i].t != null) _grit[i].t.gameObject.SetActive(false); }
+            for (int i = 0; i < _rings.Length; i++)
+            { _rings[i].life = 0f; if (_rings[i].t != null) _rings[i].t.gameObject.SetActive(false); }
+        }
+
+        // ------------------------------------------------------------------ plumbing
+
+        float Rand(float a, float b) => a + (float)_rng.NextDouble() * (b - a);
+
+        Material Flat(Color c, string name)
+        {
+            var sh = Shader.Find("Duck/Prop")
+                  ?? Shader.Find("Universal Render Pipeline/Lit")
+                  ?? Shader.Find("Sprites/Default");
+            if (sh == null) return null;
+
+            var m = new Material(sh) { name = name, hideFlags = HideFlags.DontSave };
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
+            if (m.HasProperty("_Color")) m.SetColor("_Color", c);
+            // Same trap as the greybox materials: the workhorse shader multiplies by vertex colour and
+            // these meshes carry none, which comes out black rather than coloured.
+            if (m.HasProperty("_VertexColorAmount")) m.SetFloat("_VertexColorAmount", 0f);
+            return m;
+        }
+
+        static Mesh BuildBox()
+        {
+            var m = new Mesh { name = "FXBox", hideFlags = HideFlags.DontSave };
+            Vector3[] v =
+            {
+                new(-0.5f,-0.5f,-0.5f), new(0.5f,-0.5f,-0.5f), new(0.5f,0.5f,-0.5f), new(-0.5f,0.5f,-0.5f),
+                new(-0.5f,-0.5f, 0.5f), new(0.5f,-0.5f, 0.5f), new(0.5f,0.5f, 0.5f), new(-0.5f,0.5f, 0.5f)
+            };
+            int[] t =
+            {
+                0,2,1, 0,3,2,   5,6,4, 4,6,7,   4,7,0, 0,7,3,
+                1,2,5, 5,2,6,   3,7,2, 2,7,6,   0,1,4, 4,1,5
+            };
+            m.vertices = v; m.triangles = t; m.RecalculateNormals(); m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>
+        /// A flat annulus in the XZ plane, unit outer radius. Scaled non-uniformly at runtime: X and Z
+        /// carry the radius, Y carries the thickness that collapses as it fades.
+        /// </summary>
+        static Mesh BuildRing(int segments)
+        {
+            var m = new Mesh { name = "FXRing", hideFlags = HideFlags.DontSave };
+            const float inner = 0.72f;
+            var verts = new Vector3[segments * 2];
+            var tris = new int[segments * 6];
+            for (int i = 0; i < segments; i++)
+            {
+                float a = i / (float)segments * Mathf.PI * 2f;
+                float ca = Mathf.Cos(a), sa = Mathf.Sin(a);
+                verts[i * 2] = new Vector3(ca * inner, 0f, sa * inner);
+                verts[i * 2 + 1] = new Vector3(ca, 0f, sa);
+
+                int n = (i + 1) % segments;
+                int o = i * 6;
+                tris[o] = i * 2; tris[o + 1] = i * 2 + 1; tris[o + 2] = n * 2 + 1;
+                tris[o + 3] = i * 2; tris[o + 4] = n * 2 + 1; tris[o + 5] = n * 2;
+            }
+            m.vertices = verts; m.triangles = tris; m.RecalculateNormals(); m.RecalculateBounds();
+            return m;
+        }
+
+        void OnDestroy()
+        {
+            if (_box != null) DestroyImmediate(_box);
+            if (_ring != null) DestroyImmediate(_ring);
+            foreach (var mat in new[] { _matFeather, _matDirt, _matGrass, _matRing })
+                if (mat != null) DestroyImmediate(mat);
+        }
+    }
+}
