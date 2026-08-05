@@ -59,6 +59,9 @@ namespace DuckMow
                  "so the far goal stays in shot — a flat garden 50 m away spans about a degree and a " +
                  "half and might as well not be there; a board has height the frame can find.")]
         public Transform opponentMarker;
+        [Tooltip("The rival themselves, so they can flinch when a goose lands in their beds and cheer " +
+                 "when one lands in yours. Null is fine — nothing reacts.")]
+        public Transform opponentNpc;
         [Tooltip("Centre of the player's garden. Used to aim dives and to place the award beat.")]
         public Transform playerGarden;
         [Tooltip("Centre of the opponent's garden.")]

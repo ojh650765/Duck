@@ -139,6 +139,7 @@ namespace DuckMow.EditorTools
             arena.portraitAnchor = portrait;
             arena.benchAnchor = benchAnchor;
             arena.opponentMarker = board;
+            arena.opponentNpc = npc;
             arena.flattenedMaterial = FlattenedMat();
             arena.gardenHalfWidth = GardenHalf;
             arena.fencePieces = playerFence.ToArray();

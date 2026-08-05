@@ -270,6 +270,8 @@ namespace DuckMow
         CameraDirector _camera;
         SpectatorCrowd _crowd;
         JudgePanel _judgePanel;
+        float _npcKick;
+        Quaternion _npcRest;
         DefenceImpactFX _fx;
 
         Vector3 _mowerHomePos;
@@ -679,6 +681,7 @@ namespace DuckMow
             // Whip decays slower than the squash: a neck snapping back is a longer gesture than a body
             // compressing, and matching them makes the whole bird read as one rubber blob.
             _whip = Mathf.Max(0f, _whip - real * 3.4f);
+            StepOpponent(real);
 
             if (_hitStop > 0f)
             {
@@ -828,6 +831,9 @@ namespace DuckMow
 
             PlayStrikeAudio(tier);
             ReactCrowd(tier);
+            // Struck well: the rival draws up, because this one is coming at them.
+            ReactOpponent(tier == Tier.Perfect ? 1f : tier == Tier.Good ? 0.6f : 0.35f,
+                          inTheirFavour: false);
 
             // Debris last, and thrown along the LAUNCH heading rather than along the goose's incoming
             // velocity. The burst is the clearest read of where the bird has been sent — it points at
@@ -1298,6 +1304,8 @@ namespace DuckMow
             LowThud(0.7f);
             Honk(0.9f);
             PunchJudges(-0.6f);
+            // A goose in the player's beds is the rival's good news.
+            ReactOpponent(0.8f, inTheirFavour: true);
 
             // Earth and leaves, no feathers and no ring. The goose was not struck here — borrowing the
             // parry's vocabulary would tell the player they had hit something when they had not.
@@ -1495,6 +1503,40 @@ namespace DuckMow
             if (tier != Tier.Perfect) return;
 
             audio.PlayOne(audio.quackProud, 0.7f);
+        }
+
+        /// <summary>
+        /// The rival reacting — the other half of "a distinct character reaction from BOTH competitors".
+        ///
+        /// They stood in their own garden for this entire phase and never moved: not when a goose came
+        /// down in their flowers, not when the player put one there on purpose. Eighth instance of the
+        /// same fault in this phase, and the most conspicuous, because the rival is the thing every throw
+        /// is aimed AT.
+        ///
+        /// A lean and a hop rather than an animation: the NPC is a greybox capsule and giving it a rig
+        /// would be building an asset to solve a timing problem. Sign tells which way it read the event —
+        /// recoiling backward when it is their beds, drawing up when it is yours.
+        /// </summary>
+        void ReactOpponent(float amount, bool inTheirFavour)
+        {
+            var npc = _arena != null ? _arena.opponentNpc : null;
+            if (npc == null) return;
+            _npcKick = Mathf.Clamp(amount * (inTheirFavour ? 1f : -1f), -1.2f, 1.2f);
+            _npcRest = _npcRest == default ? npc.localRotation : _npcRest;
+        }
+
+        /// <summary>Runs the rival's lean down, on real time so a hit stop holds the pose.</summary>
+        void StepOpponent(float real)
+        {
+            var npc = _arena != null ? _arena.opponentNpc : null;
+            if (npc == null || Mathf.Abs(_npcKick) < 0.001f) return;
+
+            if (_npcRest == default) _npcRest = npc.localRotation;
+            _npcKick = Mathf.MoveTowards(_npcKick, 0f, real * 2.2f);
+
+            // Tipped back on bad news, drawn upright and forward on good. Both about its own lateral
+            // axis, so from the player's end of the pitch it reads as body language rather than as spin.
+            npc.localRotation = _npcRest * Quaternion.Euler(_npcKick * 26f, 0f, _npcKick * 9f);
         }
 
         void ReactCrowd(Tier tier)
