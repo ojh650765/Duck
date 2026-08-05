@@ -169,3 +169,8 @@ Packages/packages-lock.json linguist-generated
 
 # Exceptions for .asset files such as lightning pre-baking
 LightingData.asset     binary
+
+# Unity WebGL build output. 40 MB of data file per build, and this directory is committed
+# because GitHub Pages deploys from it — without LFS every build would add ~50 MB to the
+# repository history permanently.
+*.unityweb              lfs
