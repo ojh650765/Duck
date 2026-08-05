@@ -58,10 +58,21 @@ namespace DuckMow
         public const float SuspensionStiffness = 24000f;
 
         /// <summary>
-        /// How high the chassis origin settles above flat ground, from the spring balance rather
-        /// than from a remembered measurement: four corners share the scaled weight, and each one
-        /// compresses a 0.46 m ray until its spring pushes back that hard. Comes out at 0.442, which
-        /// a runtime state dump independently confirmed.
+        /// How high the chassis origin settles above flat ground, from the spring balance: four
+        /// corners share the scaled weight, and each compresses its 0.46 m ray until the spring
+        /// pushes back that hard.
+        ///
+        /// THE UNITS WERE WRONG HERE. force / stiffness is a DISTANCE — 927 N over 24 000 N/m is
+        /// 0.039 m of travel — and it was being used as a FRACTION, so the ray length was scaled by
+        /// (1 − 0.039) instead of having 0.039 m taken off it. Those happen to be close for a small
+        /// compression, which is why the error survived: 0.442 against 0.421, both plausible, and the
+        /// doc comment claimed a runtime dump had confirmed the wrong one.
+        ///
+        /// MowerController.VerifyRideHeight measures 0.400 m on the real machine. Correcting the units
+        /// closes most of that — 0.442 to 0.421 — and the residual 21 mm is real: ChassisMass is the
+        /// chassis alone and the mower carries a duck. The verifier keeps reporting the gap rather
+        /// than being widened to swallow it, because the whole reason this file exists is that a
+        /// contract which cannot disagree with the machine is not a contract.
         /// </summary>
         public static float RideHeight
         {
@@ -69,8 +80,8 @@ namespace DuckMow
             {
                 float rayLength = SuspensionRest + SuspensionTravel;
                 float perCorner = ChassisMass * 9.81f * GravityScale * 0.25f;
-                float compression = Mathf.Clamp01(perCorner / SuspensionStiffness);
-                return rayLength * (1f - compression);
+                float compression = Mathf.Min(perCorner / SuspensionStiffness, SuspensionTravel);
+                return rayLength - compression;
             }
         }
 
