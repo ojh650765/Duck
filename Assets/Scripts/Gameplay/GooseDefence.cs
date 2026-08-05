@@ -304,6 +304,8 @@ namespace DuckMow
         Quaternion _neckRest, _wingRestL, _wingRestR;
         /// <summary>Counts up while the bird is in the air, so the wingbeat has a phase of its own.</summary>
         float _flapPhase;
+        /// <summary>0 while the bird is far, 1 the instant it is in range. Drives the tell.</summary>
+        float _tell;
         /// <summary>1 at contact, decaying. Drives the neck whip and the wings snapping back.</summary>
         float _whip;
 
@@ -542,6 +544,7 @@ namespace DuckMow
                     ResolveInput(dt);
                     StepGoose(dt);
                     UpdateCameraEnergy(dt);
+                    UpdateTell();
                     if (_stateTime >= liveSeconds) SetPhase(Phase.Settle);
                     break;
 
@@ -549,6 +552,7 @@ namespace DuckMow
                     ResolveInput(dt);
                     StepGoose(dt);
                     UpdateCameraEnergy(dt);
+                    UpdateTell();
                     if (_gooseState == GooseState.Gone || _stateTime >= settleMaxSeconds) BeginAward();
                     break;
 
@@ -1152,6 +1156,43 @@ namespace DuckMow
         /// Driven by the scaled dt like everything else, so the flap freezes with the world during a hit
         /// stop instead of carrying on and giving away that the freeze is only skin deep.
         /// </summary>
+        /// <summary>
+        /// The tell: how close the bird is to being hittable, as a number the pose and the cue both read.
+        ///
+        /// The parry had NO anticipation at all. Every signal fired after contact — freeze, punch, debris,
+        /// a word on screen — so the window could only ever be found by trial, never read. Juice that only
+        /// happens on success teaches nothing, and "a clear anticipation pose and readable timing cue" is
+        /// first on the goal's list for that reason.
+        ///
+        /// Measured in TIME rather than in distance, because the dive speed climbs with the rally: at
+        /// 20 m/s the outer window is 0.4 s wide and at 32 m/s it is 0.25 s, so a fixed-distance tell would
+        /// give less and less warning exactly as the exchange got harder. A time-based one gives the same
+        /// warning at every speed, which is what makes a long rally hard because it is FAST rather than
+        /// because it became unreadable.
+        /// </summary>
+        void UpdateTell()
+        {
+            float range = GooseRange;
+            if (range < 0f)
+            {
+                _tell = 0f;
+                _fx?.ClearTimingRing();
+                return;
+            }
+
+            float speed = Mathf.Max(_gooseVel.magnitude, 1f);
+            float secondsOut = Mathf.Max(range - parryRadius, 0f) / speed;
+            // Full tell from a third of a second out. Less than that and it arrives with the bird; much
+            // more and it is on screen so long it stops meaning "now".
+            _tell = 1f - Mathf.Clamp01(secondsOut / 0.34f);
+
+            if (_mower != null && _tell > 0.02f)
+                _fx?.TimingRing(_mower.transform.position,
+                                Mathf.Lerp(parryRadius * 2.2f, parryRadius, _tell), _tell);
+            else
+                _fx?.ClearTimingRing();
+        }
+
         void AnimateLimbs(float dt)
         {
             bool flying = _gooseState == GooseState.Diving || _gooseState == GooseState.Launched;
@@ -1162,18 +1203,26 @@ namespace DuckMow
             float beat = flying ? Mathf.Sin(_flapPhase) : 0f;
             // Struck wings fold back and stop beating, which is what makes the flap's ABSENCE readable.
             float fold = _whip * 62f;
-            float amp = Mathf.Lerp(34f, 6f, _whip);
+            // The ANTICIPATION POSE: wings flare wide and the beat stills as the bird commits. A held
+            // pose reads as a wind-up where a faster flap would only read as more of the same motion,
+            // and stillness against a beating silhouette is the clearest change a shape this size can
+            // make. Suppressed once struck, so the tell cannot fight the impact.
+            float tell = _tell * (1f - _whip);
+            float flare = tell * 38f;
+            float amp = Mathf.Lerp(34f, 6f, Mathf.Max(_whip, tell * 0.8f));
 
             if (_wingL != null)
-                _wingL.localRotation = _wingRestL * Quaternion.Euler(0f, 0f, beat * amp - fold);
+                _wingL.localRotation = _wingRestL * Quaternion.Euler(0f, 0f, beat * amp - fold + flare);
             if (_wingR != null)
-                _wingR.localRotation = _wingRestR * Quaternion.Euler(0f, 0f, -beat * amp + fold);
+                _wingR.localRotation = _wingRestR * Quaternion.Euler(0f, 0f, -beat * amp + fold - flare);
 
             if (_neck != null)
             {
                 // Past the rest angle rather than toward it: a whip overshoots, and the overshoot is the
                 // whole reason it reads as a whip and not as a nod.
-                float lash = -_whip * 54f + beat * (flying ? 5f : 0f);
+                // Drawn BACK on the tell and thrown forward on the whip, so the two read as one
+                // gesture: wind up, then snap through.
+                float lash = -_whip * 54f + tell * 22f + beat * (flying ? 5f : 0f);
                 _neck.localRotation = _neckRest * Quaternion.Euler(lash, 0f, 0f);
             }
         }

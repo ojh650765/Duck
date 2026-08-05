@@ -183,6 +183,42 @@ namespace DuckMow
             _nextFeather = (_nextFeather + 1) % FeatherCount;
         }
 
+        /// <summary>
+        /// The timing cue: a ring around the mower that CONTRACTS as the goose closes.
+        ///
+        /// The parry had no tell at all. Everything about a hit was communicated after it happened —
+        /// freeze, punch, debris, a word on screen — and nothing before, so the window was found by trial
+        /// and never by reading. "A clear anticipation pose and readable timing cue" is first on the
+        /// goal's own list for a reason: juice that only fires on success teaches nothing.
+        ///
+        /// Contracting rather than expanding, and that is deliberately the opposite of the impact ring.
+        /// An expanding ring says "this happened"; a ring closing on the machine says "this is arriving",
+        /// and the two can never be confused because they move in opposite directions. When it reaches
+        /// the mower, the goose is in range.
+        ///
+        /// Held rather than emitted: called every frame with a fresh radius while the bird is inbound, so
+        /// it tracks the machine instead of being left behind at the point it was spawned.
+        /// </summary>
+        public void TimingRing(Vector3 centre, float radius, float strength)
+        {
+            if (_rings.Length == 0) return;
+
+            // Slot zero is reserved for the cue so an impact burst cannot recycle it out from under a
+            // goose that is still inbound.
+            ref var r = ref _rings[0];
+            r.life = 0f;                        // never ticked; this one is driven from outside
+            r.t.position = new Vector3(centre.x, 0.07f, centre.z);
+            r.t.rotation = Quaternion.identity;
+            r.t.localScale = new Vector3(radius, Mathf.Lerp(0.06f, 0.20f, strength), radius);
+            r.t.gameObject.SetActive(true);
+        }
+
+        /// <summary>Take the cue down — the exchange is over, one way or the other.</summary>
+        public void ClearTimingRing()
+        {
+            if (_rings.Length > 0 && _rings[0].t != null) _rings[0].t.gameObject.SetActive(false);
+        }
+
         void Spawn(ref Bit b, Vector3 pos, Vector3 vel, float life, float gravity, float size, bool flat)
         {
             b.t.position = pos;
@@ -202,8 +238,11 @@ namespace DuckMow
 
         void EmitRing(Vector3 pos, float r0, float r1, float thickness, float life)
         {
+            // Slots 1..N only: slot zero belongs to the timing cue, which is driven from outside and
+            // must not be recycled away while a goose is still inbound.
+            if (_nextRing < 1) _nextRing = 1;
             ref var r = ref _rings[_nextRing];
-            _nextRing = (_nextRing + 1) % RingCount;
+            _nextRing = _nextRing + 1 >= RingCount ? 1 : _nextRing + 1;
 
             // Flat on the ground rather than facing the lens. From a low chase camera a horizontal ring
             // reads as a shockwave leaving the point of contact and stays anchored to the pitch; a
@@ -225,7 +264,8 @@ namespace DuckMow
             for (int i = 0; i < _feathers.Length; i++) Step(ref _feathers[i], dt, drag: 2.2f);
             for (int i = 0; i < _grit.Length; i++)     Step(ref _grit[i], dt, drag: 1.1f);
 
-            for (int i = 0; i < _rings.Length; i++)
+            // From 1: slot zero is the timing cue and has no lifetime to tick.
+            for (int i = 1; i < _rings.Length; i++)
             {
                 ref var r = ref _rings[i];
                 if (r.life <= 0f) continue;

@@ -161,6 +161,11 @@ namespace DuckMow.EditorTools
             // every impact layer, honk, thud and crowd cue the phase fires did nothing at all — silently.
             DuckSceneBuilder.BuildAudioDirector(mower.GetComponent<MowerController>(), judges);
 
+            // The duck flinching when the machine is hit. On the instance rather than the shared prefab,
+            // because the prefab is authored elsewhere and this is the scene that needed it first — the
+            // main venue's duck still sits through a gnome, which is worth fixing at the prefab.
+            if (mower.GetComponent<DuckRider>() == null) mower.gameObject.AddComponent<DuckRider>();
+
             var camera = BuildCameraRig(mower);
 
             EditorSceneManager.MarkSceneDirty(scene);
