@@ -33,6 +33,8 @@ namespace DuckMow
         public CameraDirector cameraDirector;
         public JudgePanel judges;
         public Material chalkMaterial;
+        [Tooltip("How solid the chalk outline is while the player is mowing.")]
+        [Range(0f, 1f)] public float chalkLineAlpha = 0.62f;
         public Autopilot autopilot;
         public Tournament tournament;
         public Scoreboard scoreboard;
@@ -89,15 +91,39 @@ namespace DuckMow
         static readonly int IdLineAlpha = Shader.PropertyToID("_LineAlpha");
 
         float _chalkBaseAlpha = 0.62f;
+        Material _chalkInstance;
 
         void Awake()
         {
             Instance = this;
             _rng = new System.Random(Environment.TickCount);
-            if (chalkMaterial != null) _chalkBaseAlpha = chalkMaterial.GetFloat(IdLineAlpha);
+            // The chalk outline is animated by writing to a material, and that must never be the
+            // shared asset.
+            //
+            // It was. The reveal fades _LineAlpha to zero, and on a shared material that zero is
+            // written straight into the asset on disk — so the next time the game started, Awake
+            // read the base alpha back out of a material the last session had already faded to
+            // nothing, and the outline never appeared again. The player is then mowing a field
+            // with no picture on it, which reads exactly like being dropped outside the shape, and
+            // it only happens after a session that reached the reveal. Hence "sometimes".
+            //
+            // So: instance the material, and take the base value from a serialized field rather
+            // than from the thing being animated.
+            _chalkBaseAlpha = chalkLineAlpha;
+            if (chalkMaterial != null)
+            {
+                _chalkInstance = new Material(chalkMaterial) { name = chalkMaterial.name + " (round)" };
+                var chalkRenderers = FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);
+                foreach (var r in chalkRenderers)
+                    if (r.sharedMaterial == chalkMaterial) r.sharedMaterial = _chalkInstance;
+            }
         }
 
-        void OnDestroy() { if (Instance == this) Instance = null; }
+        void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+            if (_chalkInstance != null) Destroy(_chalkInstance);
+        }
 
         void Start()
         {
@@ -174,7 +200,23 @@ namespace DuckMow
             if (!autopilotEnabled) autopilot?.Stop();
 
             target.GetStartPose(out Vector3 pos, out Quaternion rot);
+            _roundStartPos = pos;
+            _roundStartRot = rot;
             mower.ResetTo(pos, rot);
+
+            // Say out loud where the round started and whether that is inside the picture.
+            //
+            // This exists because "it starts outside" and "the audit says it starts 8 m inside"
+            // were both being reported about the same build, and there was no way to tell which
+            // session was wrong. Now the game states it, in the log, every round — so the claim
+            // and the measurement come from the same machine.
+            {
+                var sp = new Vector2(pos.x / target.shapeRadius, pos.z / target.shapeRadius);
+                float d = TargetShapes.Sdf(shape, sp);
+                float clearance = -d * target.shapeRadius;
+                Debug.Log($"[Duck] round {RoundNumber}: {shape} start ({pos.x:0.0}, {pos.z:0.0}) " +
+                          $"{(d < 0f ? "INSIDE" : "OUTSIDE")} clearance {clearance:0.00} m");
+            }
             InputReader.Instance?.ResetSmoothing();
 
             SetChalk(_chalkBaseAlpha, 0f, 0f, 1.2f);
@@ -201,6 +243,11 @@ namespace DuckMow
 
         void SetState(GameState s)
         {
+            // Entering a state you are already in re-runs its setup — which for Verdict means
+            // parking the mower on the portrait mark a second time, potentially after a new round
+            // has already placed it.
+            if (State == s) return;
+
             State = s;
             _stateTime = 0f;
 
@@ -213,6 +260,15 @@ namespace DuckMow
                     cameraDirector?.SetMode(CameraMode.Briefing, 0.9f);
                     break;
                 case GameState.Countdown:
+                    // Put the mower back on its mark.
+                    //
+                    // The verdict parks it on a staging spot for the closing portrait, and nothing
+                    // was undoing that reliably — a round could begin with the player sitting at
+                    // (7.5, -14), which is outside every picture. It reads exactly like the spawn
+                    // being broken: no outline anywhere nearby, nothing scoring, the whole round
+                    // spent mowing blank lawn. Re-asserting here means the countdown is the single
+                    // moment that decides where a round starts, whatever happened before it.
+                    if (mower != null) mower.ParkAt(_roundStartPos, _roundStartRot);
                     cameraDirector?.SetMode(CameraMode.Chase, 1.1f);
                     CountdownNumber = Mathf.CeilToInt(countdownDuration);
                     OnCountdownTick?.Invoke(CountdownNumber);
@@ -376,6 +432,9 @@ namespace DuckMow
         int _tourIndex = -1;
         float _tourHold;
 
+        Vector3 _roundStartPos;
+        Quaternion _roundStartRot = Quaternion.identity;
+
         public event Action<int> OnTourPlot;   // index into Venue.Plots
 
         /// <summary>
@@ -476,11 +535,13 @@ namespace DuckMow
 
         void SetChalk(float lineAlpha, float ghost, float analysis, float sweep)
         {
-            if (chalkMaterial == null) return;
-            chalkMaterial.SetFloat(IdLineAlpha, lineAlpha);
-            chalkMaterial.SetFloat(IdGhostAmount, ghost);
-            chalkMaterial.SetFloat(IdAnalysisAmount, analysis);
-            chalkMaterial.SetFloat(IdSweepPhase, sweep);
+            // Never the shared asset — see Awake.
+            var m = _chalkInstance != null ? _chalkInstance : chalkMaterial;
+            if (m == null) return;
+            m.SetFloat(IdLineAlpha, lineAlpha);
+            m.SetFloat(IdGhostAmount, ghost);
+            m.SetFloat(IdAnalysisAmount, analysis);
+            m.SetFloat(IdSweepPhase, sweep);
         }
     }
 }

@@ -121,7 +121,7 @@ namespace DuckMow
         {
             _rb.linearVelocity = Vector3.zero;
             _rb.angularVelocity = Vector3.zero;
-            transform.SetPositionAndRotation(position, rotation);
+            Place(position, rotation);
             _yawRate = 0f;
             BoostFuel = 1f;
             CutLoad = 0f; SmoothedCutLoad = 0f;
@@ -147,11 +147,38 @@ namespace DuckMow
         {
             _rb.linearVelocity = Vector3.zero;
             _rb.angularVelocity = Vector3.zero;
-            transform.SetPositionAndRotation(position, rotation);
+            Place(position, rotation);
             _yawRate = 0f;
             IsBoosting = false;
             IsDrifting = false;
             _airborneTimer = 0f;
+        }
+
+        /// <summary>
+        /// Move the mower, and move the RIGIDBODY with it.
+        ///
+        /// Setting only the transform does not survive: this body is physics-driven and
+        /// interpolated, so the next step restores the pose the rigidbody still believes in and
+        /// the mower snaps back to wherever it was. Every round therefore began at the mower's
+        /// original scene position instead of on the picture — outside every shape, no outline
+        /// anywhere near, nothing scoring for the whole round.
+        ///
+        /// This hid for a long time because the capture harness steps physics by hand
+        /// (Physics.simulationMode = Script), so nothing was there to overwrite the transform and
+        /// every screenshot showed the mower exactly where it was asked to be. The bug only
+        /// existed when the game was actually being played.
+        /// </summary>
+        void Place(Vector3 position, Quaternion rotation)
+        {
+            transform.SetPositionAndRotation(position, rotation);
+            _rb.position = position;
+            _rb.rotation = rotation;
+            // Interpolation keeps a history of previous poses to blend between; without this the
+            // mower visibly streaks across the field from its old position to the new one.
+            var interp = _rb.interpolation;
+            _rb.interpolation = RigidbodyInterpolation.None;
+            Physics.SyncTransforms();
+            _rb.interpolation = interp;
         }
 
         void FixedUpdate()
