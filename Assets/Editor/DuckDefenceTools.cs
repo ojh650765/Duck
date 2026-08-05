@@ -500,7 +500,9 @@ namespace DuckMow.EditorTools
                 // dozen of them in sequence shows the punch and the recovery as a curve.
                 float dist = (cam != null && mower != null)
                     ? Vector3.Distance(cam.transform.position, mower.transform.position) : 0f;
-                shots.Add(Snap($"{i:00}_fov{fov:0.0}_dist{dist:0.00}" +
+                var cd = Object.FindFirstObjectByType<CameraDirector>();
+                float punch = cd != null ? cd.PunchAmount : -1f;
+                shots.Add(Snap($"{i:00}_fov{fov:0.0}_dist{dist:0.00}_punch{punch:0.00}" +
                                $"_pitch{pitch:+0.0;-0.0}_roll{roll:+0.0;-0.0}"));
                 yield return null;
             }

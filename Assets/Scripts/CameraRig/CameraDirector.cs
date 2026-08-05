@@ -482,6 +482,16 @@ namespace DuckMow
         /// </summary>
         public void AddPunch(float amount) => _punch = Mathf.Min(1.4f, _punch + amount);
 
+        /// <summary>
+        /// The live punch envelope, 0..1.4. Exposed for measurement only.
+        ///
+        /// A perfect parry adds 1.0 and punchDolly is 1.5 m, so the camera should dolly about 1.4 m in on
+        /// the frame after contact. A frame-by-frame capture measured 0.05 m. Reading this alongside the
+        /// distance separates the two possible causes — the envelope never arriving, or arriving and not
+        /// being applied — which is the difference between a wiring fault and a maths fault.
+        /// </summary>
+        public float PunchAmount => _punch;
+
         Transform _defenceSubject;
         float _defenceEnergy;
         float _defenceBiasScale = 1f;
