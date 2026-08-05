@@ -494,7 +494,14 @@ namespace DuckMow.EditorTools
                 Vector3 e = mower != null ? mower.transform.eulerAngles : Vector3.zero;
                 float pitch = Mathf.DeltaAngle(0f, e.x);
                 float roll = Mathf.DeltaAngle(0f, e.z);
-                shots.Add(Snap($"{i:00}_fov{fov:0.0}_pitch{pitch:+0.0;-0.0}_roll{roll:+0.0;-0.0}"));
+                // Camera-to-mower distance, which is what "punch in briefly on a successful parry" and
+                // "immediately return to the player-focused chase camera" actually ARE. Both are camera
+                // POSITION, and a still cannot be eyeballed for a 30 cm dolly — but a number can, and a
+                // dozen of them in sequence shows the punch and the recovery as a curve.
+                float dist = (cam != null && mower != null)
+                    ? Vector3.Distance(cam.transform.position, mower.transform.position) : 0f;
+                shots.Add(Snap($"{i:00}_fov{fov:0.0}_dist{dist:0.00}" +
+                               $"_pitch{pitch:+0.0;-0.0}_roll{roll:+0.0;-0.0}"));
                 yield return null;
             }
 

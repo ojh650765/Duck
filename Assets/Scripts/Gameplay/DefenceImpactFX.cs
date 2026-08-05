@@ -81,8 +81,11 @@ namespace DuckMow
             _matGrass   = Flat(new Color(0.34f, 0.58f, 0.24f), "FXGrass");
             _matRing    = Flat(new Color(1.00f, 0.55f, 0.13f), "FXRing");
             // Scuffed earth, not rubber: this is a lawn, and a black tyre stripe on grass reads as a
-            // road. Darker than the soil so it registers, warm so it belongs to the ground.
-            _matSkid    = Flat(new Color(0.22f, 0.17f, 0.11f), "FXSkid");
+            // road. But the first value was too cautious about that — on screen only one mark of three
+            // was legible and the off-side pair vanished, which fails "VISIBLE steering kick and short
+            // tire skid" outright. Darkened to roughly half the previous luminance: still unmistakably
+            // turned soil rather than tarmac, and now actually readable against mown green.
+            _matSkid    = Flat(new Color(0.13f, 0.10f, 0.06f), "FXSkid");
 
             for (int i = 0; i < FeatherCount; i++) _feathers[i].t = MakeBit("Feather", _matFeather);
             for (int i = 0; i < GritCount; i++)
@@ -253,7 +256,7 @@ namespace DuckMow
             {
                 for (int i = 0; i < marks; i++)
                 {
-                    float back = 0.25f + i * 0.42f;
+                    float back = 0.22f + i * 0.34f;
                     Vector3 p = pos - travel * back + side * (halfWidth * lane);
                     p.y = 0.015f;
 
@@ -262,7 +265,9 @@ namespace DuckMow
 
                     b.t.position = p;
                     b.t.rotation = Quaternion.LookRotation(travel, Vector3.up);
-                    b.t.localScale = new Vector3(0.17f, 0.02f, Rand(0.30f, 0.46f));
+                    // Wider and longer than the first pass: at this camera distance a 17 cm mark is
+                    // three pixels, and three pixels of dark on green is noise rather than a skid.
+                    b.t.localScale = new Vector3(0.26f, 0.02f, Rand(0.40f, 0.56f));
                     b.vel = Vector3.zero;
                     // Long enough to be noticed after the eye comes back from the impact, short enough
                     // that a rally does not tile the pitch with them.
