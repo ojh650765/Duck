@@ -830,6 +830,13 @@ namespace DuckMow
             // the answer during the frames the hit stop is holding everything still.
             _fx?.Impact(_goosePos, heading,
                         tier == Tier.Perfect ? 1f : tier == Tier.Good ? 0.62f : 0.3f);
+
+            // And the marks where the wheels let go. Laid along the machine's own travel rather than the
+            // launch heading: the skid is where the mower WAS going when it was checked, which is what
+            // makes it read as the machine having been stopped rather than as the goose having been sent.
+            Vector3 roll = _mower.transform.forward;
+            _fx?.Skid(_mower.transform.position, roll, 0.46f,
+                      tier == Tier.Perfect ? 1f : tier == Tier.Good ? 0.6f : 0.35f);
         }
 
         // ------------------------------------------------------------------ the goose

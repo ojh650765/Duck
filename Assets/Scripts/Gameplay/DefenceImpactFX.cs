@@ -33,6 +33,7 @@ namespace DuckMow
     {
         const int FeatherCount = 20;
         const int GritCount    = 14;
+        const int SkidCount    = 16;
         const int RingCount    = 3;
 
         struct Bit
@@ -48,6 +49,7 @@ namespace DuckMow
 
         readonly Bit[] _feathers = new Bit[FeatherCount];
         readonly Bit[] _grit     = new Bit[GritCount];
+        readonly Bit[] _skid     = new Bit[SkidCount];
 
         struct Ring
         {
@@ -57,10 +59,10 @@ namespace DuckMow
         }
         readonly Ring[] _rings = new Ring[RingCount];
 
-        int _nextFeather, _nextGrit, _nextRing;
+        int _nextFeather, _nextGrit, _nextRing, _nextSkid;
 
         Mesh _box, _ring;
-        Material _matFeather, _matDirt, _matGrass, _matRing;
+        Material _matFeather, _matDirt, _matGrass, _matRing, _matSkid;
         System.Random _rng;
 
         // ------------------------------------------------------------------ build
@@ -78,10 +80,14 @@ namespace DuckMow
             _matDirt    = Flat(new Color(0.28f, 0.19f, 0.13f), "FXDirt");
             _matGrass   = Flat(new Color(0.34f, 0.58f, 0.24f), "FXGrass");
             _matRing    = Flat(new Color(1.00f, 0.55f, 0.13f), "FXRing");
+            // Scuffed earth, not rubber: this is a lawn, and a black tyre stripe on grass reads as a
+            // road. Darker than the soil so it registers, warm so it belongs to the ground.
+            _matSkid    = Flat(new Color(0.22f, 0.17f, 0.11f), "FXSkid");
 
             for (int i = 0; i < FeatherCount; i++) _feathers[i].t = MakeBit("Feather", _matFeather);
             for (int i = 0; i < GritCount; i++)
                 _grit[i].t = MakeBit("Grit", i % 3 == 0 ? _matGrass : _matDirt);
+            for (int i = 0; i < SkidCount; i++) _skid[i].t = MakeBit("Skid", _matSkid);
             for (int i = 0; i < RingCount; i++) _rings[i].t = MakeRing();
         }
 
@@ -219,6 +225,57 @@ namespace DuckMow
             if (_rings.Length > 0 && _rings[0].t != null) _rings[0].t.gameObject.SetActive(false);
         }
 
+        /// <summary>
+        /// A short scuff of torn turf where the wheels broke traction.
+        ///
+        /// The last thing on the goal's parry list with nothing behind it. The machine already sheds
+        /// speed, gets shoved and spins on a hit — but it did all of that leaving the ground untouched,
+        /// so the skid existed in the physics and nowhere the player could see it.
+        ///
+        /// Laid as a short row of flat marks along the direction of travel rather than as a continuous
+        /// decal or a TrailRenderer. A trail would need a renderer living on the mower for the whole
+        /// round to produce a mark that lasts a second and a half, and a decal needs a projector; a
+        /// handful of pooled quads costs nothing and is indistinguishable at the size it is seen.
+        ///
+        /// They SHRINK away rather than fading, like everything else here — see the class note on why
+        /// nothing in this file is transparent.
+        /// </summary>
+        public void Skid(Vector3 pos, Vector3 travel, float halfWidth, float strength)
+        {
+            strength = Mathf.Clamp01(strength);
+            travel.y = 0f;
+            if (travel.sqrMagnitude < 1e-4f) return;
+            travel.Normalize();
+            Vector3 side = Vector3.Cross(Vector3.up, travel);
+
+            int marks = Mathf.RoundToInt(3f + 3f * strength);
+            for (int lane = -1; lane <= 1; lane += 2)
+            {
+                for (int i = 0; i < marks; i++)
+                {
+                    float back = 0.25f + i * 0.42f;
+                    Vector3 p = pos - travel * back + side * (halfWidth * lane);
+                    p.y = 0.015f;
+
+                    ref var b = ref _skid[_nextSkid];
+                    _nextSkid = (_nextSkid + 1) % SkidCount;
+
+                    b.t.position = p;
+                    b.t.rotation = Quaternion.LookRotation(travel, Vector3.up);
+                    b.t.localScale = new Vector3(0.17f, 0.02f, Rand(0.30f, 0.46f));
+                    b.vel = Vector3.zero;
+                    // Long enough to be noticed after the eye comes back from the impact, short enough
+                    // that a rally does not tile the pitch with them.
+                    b.life = b.maxLife = Rand(1.1f, 1.6f);
+                    b.gravity = 0f;
+                    b.spin = 0f;
+                    b.spinAxis = Vector3.up;
+                    b.size = 0.02f;
+                    b.t.gameObject.SetActive(true);
+                }
+            }
+        }
+
         void Spawn(ref Bit b, Vector3 pos, Vector3 vel, float life, float gravity, float size, bool flat)
         {
             b.t.position = pos;
@@ -263,6 +320,8 @@ namespace DuckMow
 
             for (int i = 0; i < _feathers.Length; i++) Step(ref _feathers[i], dt, drag: 2.2f);
             for (int i = 0; i < _grit.Length; i++)     Step(ref _grit[i], dt, drag: 1.1f);
+            // Marks do not move; they only run down their clock and shrink out.
+            for (int i = 0; i < _skid.Length; i++) StepStatic(ref _skid[i], dt);
 
             // From 1: slot zero is the timing cue and has no lifetime to tick.
             for (int i = 1; i < _rings.Length; i++)
@@ -279,6 +338,19 @@ namespace DuckMow
                 float thick = r.thickness * (1f - k);
                 r.t.localScale = new Vector3(radius, Mathf.Max(thick, 0.0001f), radius);
                 if (r.life <= 0f) r.t.gameObject.SetActive(false);
+            }
+        }
+
+        static void StepStatic(ref Bit b, float dt)
+        {
+            if (b.life <= 0f) return;
+            b.life -= dt;
+            if (b.life <= 0f) { b.t.gameObject.SetActive(false); return; }
+            float k = b.life / b.maxLife;
+            if (k < 0.4f)
+            {
+                var s = b.t.localScale;
+                b.t.localScale = new Vector3(s.x * 0.94f, s.y, s.z * 0.94f);
             }
         }
 
@@ -321,6 +393,8 @@ namespace DuckMow
             { _feathers[i].life = 0f; if (_feathers[i].t != null) _feathers[i].t.gameObject.SetActive(false); }
             for (int i = 0; i < _grit.Length; i++)
             { _grit[i].life = 0f; if (_grit[i].t != null) _grit[i].t.gameObject.SetActive(false); }
+            for (int i = 0; i < _skid.Length; i++)
+            { _skid[i].life = 0f; if (_skid[i].t != null) _skid[i].t.gameObject.SetActive(false); }
             for (int i = 0; i < _rings.Length; i++)
             { _rings[i].life = 0f; if (_rings[i].t != null) _rings[i].t.gameObject.SetActive(false); }
         }
@@ -392,7 +466,7 @@ namespace DuckMow
         {
             if (_box != null) DestroyImmediate(_box);
             if (_ring != null) DestroyImmediate(_ring);
-            foreach (var mat in new[] { _matFeather, _matDirt, _matGrass, _matRing })
+            foreach (var mat in new[] { _matFeather, _matDirt, _matGrass, _matRing, _matSkid })
                 if (mat != null) DestroyImmediate(mat);
         }
     }
