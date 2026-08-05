@@ -27,14 +27,22 @@ namespace DuckMow.EditorTools
         const string ScenePath = DuckSceneBuilder.ScenePath;
         const string Marker = "Duck.Shoot.Pending";
 
-        /// <summary>Judging and verdict only — the cheap loop for anything after the klaxon.</summary>
-        public static void Judging()
+        /// <summary>Start poses for every picture, plus the numeric audit. Headless.</summary>
+        public static void Starts()
         {
-            _judgingOnly = true;
+            _mode = Mode.Starts;
             Frames();
         }
 
-        static bool _judgingOnly;
+        /// <summary>Judging and verdict only — the cheap loop for anything after the klaxon.</summary>
+        public static void Judging()
+        {
+            _mode = Mode.Judging;
+            Frames();
+        }
+
+        enum Mode { Full, Judging, Starts }
+        static Mode _mode = Mode.Full;
 
         public static void Frames()
         {
@@ -69,8 +77,15 @@ namespace DuckMow.EditorTools
             int code = 0;
             try
             {
-                if (_judgingOnly) DuckSimulator.CaptureJudging();
-                else DuckSimulator.RunRound(ShapeId.Duckling, true, "sheet");
+                switch (_mode)
+                {
+                    case Mode.Judging: DuckSimulator.CaptureJudging(); break;
+                    case Mode.Starts:
+                        DuckMeshAudit.AuditStartPoses();
+                        DuckSimulator.CaptureStarts();
+                        break;
+                    default: DuckSimulator.RunRound(ShapeId.Duckling, true, "sheet"); break;
+                }
                 Debug.Log("[Duck] ===== SHOOT DONE =====");
             }
             catch (System.Exception e)

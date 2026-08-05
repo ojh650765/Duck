@@ -81,7 +81,15 @@ namespace DuckMow.EditorTools
             Application.targetFrameRate = 60;
 
             PlayerSettings.SetGraphicsAPIs(BuildTarget.WebGL, new[] { UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
-            PlayerSettings.stripUnusedMeshComponents = true;
+            // OFF. "Optimize Mesh Data" strips vertex channels it believes no material needs,
+            // and it decides that by looking at meshes paired with a material on a renderer in a
+            // scene. Every character in this game carries its paint in VERTEX COLOURS, and the
+            // portrait meshes are referenced only from a component array — no renderer, no
+            // material pairing — so the analysis concluded their colour channel was dead and
+            // removed it. The Prop shader then read whatever was in that register and drew each
+            // face as a UV rainbow. Editor-only testing cannot catch this: the stripping happens
+            // at build time, so the portraits were correct right up until they shipped.
+            PlayerSettings.stripUnusedMeshComponents = false;
         }
 
         static void ConfigurePhysics()

@@ -46,6 +46,27 @@ namespace DuckMow
         void Awake()
         {
             Instance = this;
+            // Deliberately NOT rendering here. See RenderWhenReady.
+            StartCoroutine(RenderWhenReady());
+        }
+
+        /// <summary>
+        /// Render the portraits once the pipeline is actually up.
+        ///
+        /// These used to be rendered in Awake, which works in the editor — the render pipeline is
+        /// already warm there — and produces garbage in a build, where Awake runs before the first
+        /// frame has been drawn and URP has not finished setting itself up. The symptom is the one
+        /// that showed up in the shipped player: every portrait came out as an uninitialised
+        /// texture rather than a character.
+        ///
+        /// Waiting for the end of the first rendered frame costs nothing anybody can perceive —
+        /// the portraits are not needed until the tour, a minute and a half later — and it is the
+        /// difference between a face and a pattern.
+        /// </summary>
+        System.Collections.IEnumerator RenderWhenReady()
+        {
+            yield return null;                        // let every Awake and Start finish
+            yield return new WaitForEndOfFrame();     // and let one real frame be drawn
             Render();
         }
 
@@ -58,7 +79,12 @@ namespace DuckMow
         }
 
         public Texture Get(string contestant)
-            => contestant != null && _portraits.TryGetValue(contestant, out var rt) ? rt : null;
+        {
+            // If something asks earlier than expected, render on the spot rather than hand back
+            // nothing — a late portrait is better than a missing one.
+            if (!_rendered) Render();
+            return contestant != null && _portraits.TryGetValue(contestant, out var rt) ? rt : null;
+        }
 
         /// <summary>Render every portrait. Safe to call again; it simply redoes them.</summary>
         public void Render()
@@ -78,6 +104,11 @@ namespace DuckMow
             cam.farClipPlane = 6f;
             cam.allowHDR = false;
             cam.allowMSAA = false;
+            cam.cullingMask = ~0;
+            // URP wants its own camera data; without it a camera created from script can render
+            // through a partially configured path.
+            if (camGO.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>() == null)
+                camGO.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
 
             var holder = new GameObject("~ PortraitSubject");
             holder.transform.SetParent(transform, false);
@@ -108,6 +139,14 @@ namespace DuckMow
                     antiAliasing = 1
                 };
                 rt.Create();
+
+                // Clear it explicitly. An uninitialised render texture is exactly what the broken
+                // build was showing, and a target that is cleared cannot show it even if a render
+                // is somehow skipped.
+                var prevActive = RenderTexture.active;
+                RenderTexture.active = rt;
+                GL.Clear(true, true, background);
+                RenderTexture.active = prevActive;
 
                 Vector3 look = spot + s.lookOffset;
                 cam.orthographicSize = Mathf.Max(0.05f, s.framing);

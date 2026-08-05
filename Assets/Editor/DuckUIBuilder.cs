@@ -169,6 +169,7 @@ namespace DuckMow.EditorTools
             BuildRoundHud(root, hud);
             BuildBanner(root, hud);
             BuildTourCard(root, hud);
+            BuildOutroCard(root, hud);
             BuildResults(root, hud);
 
             return hud;
@@ -282,6 +283,30 @@ namespace DuckMow.EditorTools
             var grade = Frac("Grade", gradePlate, 0.1f, 0.08f, 0.9f, 0.92f);
             hud.tourGrade = AddText(grade, "", 34f, TextAlignmentOptions.Center, Ink, 0.12f, false);
             hud.tourGrade.fontStyle = FontStyles.Bold;
+        }
+
+        /// <summary>
+        /// The closing card at the scoreboard: where you came, and what to press next.
+        ///
+        /// Bottom of frame and full width, because by this point the board is the picture and this
+        /// is a caption under it. Without it the game ended on a wall — the results panel is hidden
+        /// at the scoreboard by design, so there was nothing on screen telling the player how they
+        /// had done overall or that there was any way to carry on.
+        /// </summary>
+        static void BuildOutroCard(RectTransform root, HUD hud)
+        {
+            var card = Frac("OutroCard", root, 0.20f, 0.045f, 0.80f, 0.205f);
+            hud.outroGroup = card.gameObject.AddComponent<CanvasGroup>();
+            hud.outroGroup.alpha = 0f;
+            AddImage(card, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+
+            var placing = Frac("Placing", card, 0.04f, 0.46f, 0.96f, 0.94f);
+            hud.outroPlacing = AddText(placing, "", 34f, TextAlignmentOptions.Center, Gold, 0.26f, false);
+            hud.outroPlacing.fontStyle = FontStyles.Bold;
+
+            var prompt = Frac("Prompt", card, 0.04f, 0.08f, 0.96f, 0.42f);
+            hud.outroPrompt = AddText(prompt, "", 20f, TextAlignmentOptions.Center, Cream, 0.22f, false);
+            hud.outroPrompt.fontStyle = FontStyles.Bold;
         }
 
         static void BuildBanner(RectTransform root, HUD hud)

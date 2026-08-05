@@ -506,6 +506,62 @@ namespace DuckMow.EditorTools
             }
         }
 
+        /// <summary>
+        /// One frame of the countdown for every picture, so the start pose can be judged by eye
+        /// rather than only by the numbers the audit prints.
+        /// </summary>
+        [MenuItem("Duck/Sim · Capture every start pose", priority = 16)]
+        public static void CaptureStarts()
+        {
+            if (!EditorApplication.isPlaying) { Debug.LogWarning("[Duck] Enter play mode first."); return; }
+
+            var r = Collect();
+            if (r.director == null) { Debug.LogError("[Duck] No GameDirector in scene."); return; }
+
+            bool wasAutopilot = r.director.autopilotEnabled;
+            BeginScripted();
+            try
+            {
+                r.director.autopilotEnabled = false;
+                foreach (var shape in TargetShapes.All)
+                {
+                    r.director.DebugSetShape(shape);
+                    // Straight past the briefing to the countdown, where the mower is parked on its
+                    // start pose and has not moved yet.
+                    AdvanceUntil(r, () => r.director.State == GameState.Countdown, 12f);
+                    Advance(r, 0.6f);
+                    r.camera?.SnapToCurrent();
+                    Advance(r, 0.2f);
+                    Shot(r.cam, $"start_{shape}");
+
+                    // And straight down, because the chase camera cannot answer the question that
+                    // matters: is the mower inside the outline, or is the outline simply ahead of
+                    // it? From above, both are in the same frame and there is nothing to argue about.
+                    var cam = r.cam;
+                    var prevPos = cam.transform.position;
+                    var prevRot = cam.transform.rotation;
+                    float prevFov = cam.fieldOfView;
+                    Vector3 m = r.mower != null ? r.mower.transform.position : Vector3.zero;
+
+                    cam.transform.SetPositionAndRotation(new Vector3(0f, 78f, 0f),
+                        Quaternion.LookRotation(Vector3.down, Vector3.forward));
+                    cam.fieldOfView = 52f;
+                    Shot(cam, $"start_{shape}_overhead");
+
+                    cam.transform.SetPositionAndRotation(prevPos, prevRot);
+                    cam.fieldOfView = prevFov;
+                    Debug.Log($"[Duck] {shape} start at ({m.x:0.0}, {m.z:0.0})");
+                }
+                Debug.Log("[Duck] Start pose frames written to Captures/.");
+            }
+            finally
+            {
+                r.director.autopilotEnabled = wasAutopilot;
+                if (!wasAutopilot) r.autopilot?.Stop();
+                EndScripted();
+            }
+        }
+
         [MenuItem("Duck/Sim · Mow 20s and capture", priority = 12)]
         public static void QuickMow()
         {

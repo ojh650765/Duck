@@ -61,6 +61,11 @@ namespace DuckMow
         [Tooltip("Face of whoever is being shown. Rendered from the real model at startup.")]
         public RawImage tourPortrait;
 
+        [Header("Outro")]
+        public CanvasGroup outroGroup;
+        public TextMeshProUGUI outroPlacing;
+        public TextMeshProUGUI outroPrompt;
+
         [Header("Feel")]
         public Color timerNormal = new Color(1f, 0.97f, 0.88f);
         public Color timerLow = new Color(1f, 0.42f, 0.32f);
@@ -118,6 +123,7 @@ namespace DuckMow
             UpdateBanner(dt);
             UpdateCountdown(dt);
             UpdateTourCard(dt);
+            UpdateOutro(dt);
             UpdateMinimap();
         }
 
@@ -265,6 +271,10 @@ namespace DuckMow
                 case GameState.Scoreboard:
                     SetGroup(resultsGroup, 0f);
                     SetGroup(tourGroup, 0f);
+                    // The prompt itself is held back until the board has settled — see UpdateOutro.
+                    if (outroGroup != null) outroGroup.alpha = 0f;
+                    if (outroPrompt != null)
+                        outroPrompt.text = "[R]  SAME PICTURE AGAIN          [N]  NEW PICTURE";
                     break;
 
                 case GameState.Verdict:
@@ -306,6 +316,46 @@ namespace DuckMow
             if (_tourCardTimer > 0f) _tourCardTimer -= dt;
             float want = _tourCardTimer > 0f ? 1f : 0f;
             tourGroup.alpha = Mathf.MoveTowards(tourGroup.alpha, want, dt * 3.2f);
+        }
+
+        /// <summary>
+        /// The card that tells the player where they came and what to press.
+        ///
+        /// The results panel is deliberately hidden at the scoreboard so the board itself is the
+        /// only thing on screen — which left the game ending on a wall with no way forward offered
+        /// and no statement of how the player actually did. This is the closing beat: your placing,
+        /// and the two keys.
+        ///
+        /// It waits for the board to finish sorting. Putting "press R" on screen while the rankings
+        /// are still moving steps on the one dramatic moment the round has been building toward.
+        /// </summary>
+        void UpdateOutro(float dt)
+        {
+            if (outroGroup == null || director == null) return;
+
+            bool atBoard = director.State == GameState.Scoreboard;
+            bool settled = atBoard && (director.scoreboard == null || director.scoreboard.Finished);
+
+            if (settled && outroPlacing != null && string.IsNullOrEmpty(outroPlacing.text))
+            {
+                var t = director.tournament;
+                if (t != null)
+                {
+                    int place = t.PlayerPlace;
+                    int of = Mathf.Max(t.Standings.Count, 1);
+                    string ordinal = place switch { 1 => "1st", 2 => "2nd", 3 => "3rd", _ => place + "th" };
+                    outroPlacing.text = place == 1
+                        ? $"YOU WON THE CHAMPIONSHIP"
+                        : $"YOU PLACED {ordinal} OF {of}";
+                    outroPlacing.color = place == 1 ? new Color(1f, 0.85f, 0.45f)
+                                                    : new Color(0.97f, 0.94f, 0.86f);
+                }
+            }
+
+            if (!atBoard && outroPlacing != null) outroPlacing.text = "";
+
+            float want = settled ? 1f : 0f;
+            outroGroup.alpha = Mathf.MoveTowards(outroGroup.alpha, want, dt * 2.2f);
         }
 
         void ClearResults()

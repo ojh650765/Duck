@@ -253,6 +253,59 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
+        /// Check every picture's start pose is genuinely inside it, with room to move.
+        ///
+        /// This is the sort of thing that looks fine on the one shape you happen to test and is
+        /// broken on three others. The previous spawn logic passed on a heart and walked the
+        /// player straight out of a duckling, because it picked a column on one row and then
+        /// stepped north without rechecking. So: measure all of them, report the clearance in
+        /// metres, and say plainly which ones fail.
+        /// </summary>
+        [MenuItem("Duck/Diagnose · Audit round start poses", priority = 53)]
+        public static void AuditStartPoses()
+        {
+            var target = Object.FindFirstObjectByType<RoundTarget>();
+            if (target == null)
+            {
+                Debug.LogError("[Duck] No RoundTarget in the scene — open Main and try again.");
+                return;
+            }
+
+            var sb = new StringBuilder("[Duck] START POSE AUDIT\n");
+            int bad = 0;
+
+            foreach (var shape in TargetShapes.All)
+            {
+                target.Build(shape);
+                target.GetStartPose(out Vector3 pos, out Quaternion rot);
+
+                var sp = new Vector2(pos.x / target.shapeRadius, pos.z / target.shapeRadius);
+                float d = TargetShapes.Sdf(shape, sp);
+                // The SDF is in shape units; convert back to metres for a number that means something.
+                float clearance = -d * target.shapeRadius;
+
+                // How far the mower can drive before leaving the picture, along its start heading.
+                float run = 0f;
+                for (float t = 0.5f; t < target.shapeRadius * 2f; t += 0.5f)
+                {
+                    Vector3 s2 = pos + rot * Vector3.forward * t;
+                    if (TargetShapes.Sdf(shape, new Vector2(s2.x / target.shapeRadius, s2.z / target.shapeRadius)) >= 0f) break;
+                    run = t;
+                }
+
+                bool ok = d < 0f && clearance >= 1.0f;
+                if (!ok) bad++;
+                sb.AppendLine($"    {(ok ? "ok  " : "FAIL")} {shape,-9} at ({pos.x,6:0.0}, {pos.z,6:0.0})  " +
+                              $"clearance {clearance,5:0.00} m   run ahead {run,5:0.0} m");
+            }
+
+            sb.AppendLine(bad == 0
+                ? "  Every picture starts the mower inside itself with at least a metre of clearance."
+                : $"  {bad} pictures start the mower outside or against an edge.");
+            Debug.Log(sb.ToString());
+        }
+
+        /// <summary>
         /// Calibrate the audit against meshes that are known-good.
         ///
         /// Signed volume has a handedness convention, and Unity is left-handed with clockwise

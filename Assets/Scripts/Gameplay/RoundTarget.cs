@@ -171,12 +171,22 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Where the mower starts: just inside the picture, at its southern end, facing up into it.
+        /// Where the mower starts: the point furthest inside the picture, facing along it.
         ///
-        /// Starting outside the shape is a guaranteed loss — the drive in wastes seconds and lays
-        /// a spill line across clean lawn before you have even begun, so every run opened at a
-        /// deficit no skill could recover. Starting on the near edge of the picture means the
-        /// first metre you cut already counts.
+        /// Starting outside the shape is a guaranteed loss. The drive in wastes seconds and lays a
+        /// spill line across clean lawn before the round has really begun, so the run opens at a
+        /// deficit no amount of skill can recover — and under artistry-led scoring that opening
+        /// line is not a small penalty, it is a permanent scar through the middle of the mark.
+        ///
+        /// The previous version took the widest interior run on the lowest interior ROW, then
+        /// nudged the spawn 1.2 m north so the mower's body would clear the edge — without ever
+        /// checking that the nudged position was still inside. Any shape that narrows, curves or
+        /// notches on the way north walked the player straight back out of the picture: the
+        /// duckling's tail, the heart's cleft, the anchor's shank.
+        ///
+        /// So it no longer reasons about rows at all. The signed distance field already knows how
+        /// far every point is from the outline, so the deepest interior point is simply its
+        /// minimum — the one place on the lawn with the most clearance in every direction at once.
         /// </summary>
         public void GetStartPose(out Vector3 position, out Quaternion rotation)
         {
@@ -185,37 +195,56 @@ namespace DuckMow
             rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
             if (Inside == null || InsideCount == 0) return;
 
-            // Walk north from the bottom of the field and take the first row that has enough
-            // clearance for the mower to sit in, then centre on that row's widest span.
-            float clearance = 1.2f;
-            int clearCells = Mathf.CeilToInt(clearance / Field.MetresPerCell);
+            float deepest = 0f;
+            int bestX = -1, bestZ = -1;
 
             for (int gz = 0; gz < Field.GridRes; gz++)
             {
-                int bestStart = -1, bestLen = 0, runStart = -1, runLen = 0;
                 int row = gz * Field.GridRes;
-
                 for (int gx = 0; gx < Field.GridRes; gx++)
                 {
-                    if (Inside[row + gx])
-                    {
-                        if (runStart < 0) { runStart = gx; runLen = 0; }
-                        runLen++;
-                        if (runLen > bestLen) { bestLen = runLen; bestStart = runStart; }
-                    }
-                    else { runStart = -1; runLen = 0; }
+                    if (!Inside[row + gx]) continue;
+                    Vector3 w = Field.GridToWorld(gx, gz);
+                    float d = TargetShapes.Sdf(Shape, new Vector2(w.x / shapeRadius, w.z / shapeRadius));
+                    // Inside is negative, so the most negative sample is the furthest in.
+                    if (d >= deepest) continue;
+                    deepest = d;
+                    bestX = gx;
+                    bestZ = gz;
                 }
-
-                if (bestLen < clearCells * 2) continue;
-
-                int centreX = bestStart + bestLen / 2;
-                // Nudge north so the mower's body is fully inside rather than straddling the edge.
-                int startZ = Mathf.Min(gz + clearCells, Field.GridRes - 1);
-                Vector3 w = Field.GridToWorld(centreX, startZ);
-                position = new Vector3(w.x, 0.4f, w.z);
-                rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
-                return;
             }
+
+            if (bestX < 0) return;
+
+            Vector3 p = Field.GridToWorld(bestX, bestZ);
+            position = new Vector3(p.x, 0.4f, p.z);
+
+            // Face along the picture rather than at its nearest wall: whichever of the four
+            // headings has the most room ahead of it before the outline. A mower pointed at an
+            // edge spends its first move turning around, which is a wasted second and a scuffed
+            // patch right where the player is standing.
+            rotation = Quaternion.LookRotation(BestHeading(position), Vector3.up);
+        }
+
+        /// <summary>The compass direction with the most picture in front of it, from a point inside.</summary>
+        Vector3 BestHeading(Vector3 from)
+        {
+            Vector3[] dirs = { Vector3.forward, Vector3.back, Vector3.right, Vector3.left };
+            Vector3 best = Vector3.forward;
+            float bestRun = -1f;
+
+            foreach (var dir in dirs)
+            {
+                float run = 0f;
+                for (float t = 0.5f; t < shapeRadius * 2f; t += 0.5f)
+                {
+                    Vector3 s = from + dir * t;
+                    if (TargetShapes.Sdf(Shape, new Vector2(s.x / shapeRadius, s.z / shapeRadius)) >= 0f) break;
+                    run = t;
+                }
+                if (run > bestRun) { bestRun = run; best = dir; }
+            }
+            return best;
         }
     }
 }
