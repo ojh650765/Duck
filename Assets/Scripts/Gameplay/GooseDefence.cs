@@ -269,6 +269,7 @@ namespace DuckMow
         MowerController _mower;
         CameraDirector _camera;
         SpectatorCrowd _crowd;
+        JudgePanel _judgePanel;
         DefenceImpactFX _fx;
 
         Vector3 _mowerHomePos;
@@ -1410,6 +1411,12 @@ namespace DuckMow
                 // noticed.
                 float want = Mathf.Clamp01(Rally / 3f) * 0.55f;
                 _voiceRally.volume = Mathf.MoveTowards(_voiceRally.volume, want, dt * 0.9f);
+                // And the PITCH climbs with it. The volume ramp alone made a long rally louder without
+                // making it more urgent, and "escalate through audio pitch" was the one escalation
+                // channel on the goal's list with nothing behind it — the pitch was set once when the
+                // voice was made and never touched again. A fifth up across a full rally is enough to
+                // feel as tightening rather than to hear as a tape speeding up.
+                _voiceRally.pitch = Mathf.Lerp(1f, 1.34f, energy);
                 if (want > 0.01f && !_voiceRally.isPlaying) _voiceRally.Play();
             }
         }
@@ -1501,7 +1508,13 @@ namespace DuckMow
         /// <summary>The bench reacts. Already built for scoring a mark; a rally is the same gesture.</summary>
         void PunchJudges(float amount)
         {
+            // Asked of the director first and FOUND IN THE SCENE otherwise — the seventh time this
+            // exact fault has turned up in this phase. The arena has no GameDirector, so this returned
+            // immediately and the bench never reacted to anything: three judges sitting in frame,
+            // visibly present, watching a rally without moving. Cached because it is hit on every
+            // parry and every crash.
             var panel = GameDirector.Instance != null ? GameDirector.Instance.judges : null;
+            if (panel == null) panel = _judgePanel ??= FindFirstObjectByType<JudgePanel>();
             if (panel == null || panel.judges == null || panel.judges.Length == 0) return;
 
             // One judge, not all three. Three animals applauding in unison on every hit is a chorus
