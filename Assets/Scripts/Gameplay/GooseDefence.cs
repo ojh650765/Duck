@@ -313,6 +313,10 @@ namespace DuckMow
         float _whip;
         /// <summary>Metres flown since the last trail mark, so spacing tracks speed.</summary>
         float _trailRun;
+        /// <summary>Ground touches since launch. A ball is allowed a few skips before it is dead.</summary>
+        int _gooseBounces;
+        /// <summary>Where the bird's own centre sits when it is resting on the pitch.</summary>
+        const float GroundY = 0.32f;
 
         AudioSource _voiceHonk, _voiceLow, _voiceRally;
 
@@ -734,6 +738,13 @@ namespace DuckMow
             if (input == null || !input.HornPressed) return;
 
             Honk();
+            // The shockwave goes out on EVERY press, before the hit test — including a honk during
+            // recovery, which is the one the player most needs to see land. The horn was the phase's
+            // only verb and it had no output of its own: a mistimed press produced nothing at all and
+            // read as a dropped input rather than as a miss. Weaker while recovering, so a mashed horn
+            // still says "not yet" rather than rewarding the mash.
+            _fx?.Shock(_mower.transform.position, _recovery > 0f ? 0.35f : 1f);
+
             if (_recovery > 0f) return;
 
             Tier tier = Judge();
@@ -783,29 +794,44 @@ namespace DuckMow
             if (heading.sqrMagnitude < 1e-4f) heading = _toOpponent;
             heading.Normalize();
 
-            // Only a good or perfect strike gets to PLACE the bird. Aim decides whether, tier decides
-            // whether the aim is honoured, and the arc then simply delivers what was earned — the way
-            // a cleared ball does. Nothing here decides the outcome: see LandLaunched, which reads it
-            // off where the goose actually came down.
-            bool placed = tier != Tier.Normal &&
-                          Vector3.Angle(heading, _toOpponent) <= redirectCone && _arena != null;
+            // A parried goose ALWAYS goes downfield. Tier decides how ACCURATELY, never whether.
+            //
+            // It used to decide whether: a Normal parry was excluded outright and Good/Perfect only
+            // counted if the machine happened to be pointing within 34 degrees of the far goal. So most
+            // successful parries flung the bird sideways or back over the player's own beds, and the one
+            // thing the exchange is about — sending it to the opponent — was the exception rather than
+            // the rule. From the seat that reads as the goose charging at you and being swatted away,
+            // not as a rally.
+            //
+            // Now the launch is aimed at the opponent's garden and the player's heading only BENDS it.
+            // A perfect hit with good aim lands on a bed; a normal hit sprays wide and may fall short in
+            // the open. Skill still decides the outcome — LandLaunched reads it off where the bird
+            // actually comes down, exactly as before — but the SILHOUETTE of the exchange is now always
+            // "it went that way", which is what makes the pitch read as having two ends.
+            Vector3 target = _arena != null
+                ? (_arena.AnyAlive(_rng, playerSide: false)?.position ?? _arena.OpponentGardenCentre)
+                : _goosePos + _toOpponent * 40f;   // no arena bound: still throw downfield
 
-            if (placed)
-            {
-                var bed = _arena.AnyAlive(_rng, playerSide: false);
-                Vector3 land = bed != null ? bed.position : _arena.OpponentGardenCentre;
-                _gooseVel = ArcTo(_goosePos, land + Vector3.up * 0.3f,
-                                  launchFlightSeconds, launchGravity);
-            }
-            else
-            {
-                // A scramble. It goes roughly along the heading and lands where the arc puts it, which
-                // may be the open ground and may be the player's own flowers. Both are honest results
-                // of a hit that was not good enough to place.
-                float scatter = ((float)_rng.NextDouble() * 2f - 1f) * scrambleScatter;
-                Vector3 dir = Quaternion.Euler(0f, scatter, 0f) * heading;
-                _gooseVel = (dir + Vector3.up * 0.30f).normalized * launchSpeed;
-            }
+            // How much the player's aim is honoured. A perfect strike places it; a normal one keeps the
+            // direction and loses the address.
+            float placement = tier == Tier.Perfect ? 1f : tier == Tier.Good ? 0.72f : 0.35f;
+            float offAim = Vector3.Angle(heading, _toOpponent) / Mathf.Max(redirectCone, 1f);
+            // Aim outside the cone costs accuracy rather than cancelling the throw.
+            placement *= Mathf.Clamp01(1.2f - offAim * 0.55f);
+
+            // Scatter shrinks as placement rises, and is applied about the DOWNFIELD axis so even the
+            // worst parry still travels toward the far end.
+            float spread = scrambleScatter * (1f - placement);
+            float wobble = ((float)_rng.NextDouble() * 2f - 1f) * spread;
+
+            Vector3 flat = target - _goosePos; flat.y = 0f;
+            float reach = Mathf.Max(flat.magnitude, 6f) * Mathf.Lerp(0.62f, 1f, placement);
+            Vector3 aimed = Quaternion.Euler(0f, wobble, 0f) * (flat.sqrMagnitude > 1e-4f
+                                                                ? flat.normalized : _toOpponent);
+            Vector3 land = _goosePos + aimed * reach;
+            land.y = 0.3f;
+
+            _gooseVel = ArcTo(_goosePos, land, launchFlightSeconds, launchGravity);
 
             _gooseState = GooseState.Launched;
             _gooseTimer = 0f;
@@ -1103,11 +1129,50 @@ namespace DuckMow
                     // height was already under the landing line on the frame it was struck, so it
                     // "landed" instantly beside the player and got credited to whichever garden was
                     // nearest — damage from a throw that never travelled.
-                    if (_gooseTimer > 0.25f && (_goosePos.y <= 0.35f || _gooseTimer > 4f))
+                    // IT BOUNCES. The player asked for "공처럼 튕기는 걸" — like a ball — and the old
+                    // behaviour was the opposite of that: the first time it touched grass it stopped dead,
+                    // scored, and the exchange was over. One touch, one outcome, nothing to chase.
+                    //
+                    // Now it rebounds with restitution and keeps its downfield momentum, so a good hit
+                    // SKIPS toward the far goal and a weak one dribbles to a halt short of it. That single
+                    // change is what makes the pitch read as a ball game rather than as a throw: the bird
+                    // is live between bounces, it can still be reached, and where it finally settles is
+                    // the result of how hard it was struck rather than of one instant of contact.
+                    if (_goosePos.y <= GroundY && _gooseVel.y < 0f)
                     {
+                        _gooseBounces++;
+                        _goosePos.y = GroundY;
+
+                        // Vertical energy comes back at 52%; horizontal is scrubbed only lightly, so the
+                        // skip carries downfield instead of stalling on the spot.
+                        _gooseVel.y = -_gooseVel.y * 0.52f;
+                        _gooseVel.x *= 0.86f;
+                        _gooseVel.z *= 0.86f;
+
+                        // Each touch is an event: dirt, a thud, and a squash that shrinks as it settles.
+                        float hard = Mathf.Clamp01(_gooseVel.magnitude / Mathf.Max(launchSpeed, 1f));
+                        _fx?.Dirt(_goosePos, hard * 0.5f);
+                        _squash = Mathf.Max(_squash, hard * 0.5f);
+                        LowThud(hard * 0.45f);
+                        if (_gooseBounces == 1) Honk(0.5f);
+
+                        // Settled: too slow to skip again, out of bounces, or out of patience. THEN it
+                        // scores, and it scores where it actually came to rest.
+                        if (_gooseVel.magnitude < 3.2f || _gooseBounces >= 4 || _gooseTimer > 6f)
+                        {
+                            LandLaunched();
+                            _gooseState = GooseState.Returning;
+                            _gooseTimer = 0f;
+                            _gooseBounces = 0;
+                        }
+                    }
+                    else if (_gooseTimer > 6f)
+                    {
+                        // Budgeted, not trusted — the same rule every other beat here is under.
                         LandLaunched();
                         _gooseState = GooseState.Returning;
                         _gooseTimer = 0f;
+                        _gooseBounces = 0;
                     }
                     break;
 
@@ -1394,10 +1459,27 @@ namespace DuckMow
 
             if (_camera != null)
             {
-                bool inPlay = _gooseState == GooseState.Diving || _gooseState == GooseState.Launched;
-                if (inPlay)
+                // The camera does NOT chase the incoming bird.
+                //
+                // This overrides the brief I was working to, which asked for the aim to bias toward the
+                // goose while it closed. On the player's own verdict — "날라올때 카메라가 그걸 안봤으면
+                // 좋겠고" — that framing is unwanted, and they are the authority on how it feels. It also
+                // has a reason behind it: the lens drifting off the machine while a bird converges on you
+                // takes the frame away from the thing you are steering at exactly the moment steering
+                // matters, so the camera fights the player for the last third of a second.
+                //
+                // A LAUNCHED goose still gets followed, because that is the ball travelling and it costs
+                // the player nothing — they are not aiming at anything while it is in the air.
+                if (_gooseState == GooseState.Launched)
                 {
                     _camera.SetDefenceSubject(_goose, energy);
+                }
+                else if (_gooseState == GooseState.Diving)
+                {
+                    // Held on the far goal, as it is between exchanges. The bird is readable in the frame
+                    // because it is skylined against blue, not because the camera turned to look at it.
+                    _camera.SetDefenceSubject(_arena != null ? _arena.OpponentMarker : null,
+                                              energy, biasScale: 0.4f);
                 }
                 else
                 {

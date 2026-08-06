@@ -222,6 +222,23 @@ namespace DuckMow
             r.t.gameObject.SetActive(true);
         }
 
+        /// <summary>
+        /// The horn's shockwave: a ring that leaves the machine when the player honks.
+        ///
+        /// The horn was the phase's only verb and it had NO output of its own. Pressing E either produced
+        /// a parry — in which case the impact's own effects covered it — or produced nothing at all, and
+        /// a mistimed honk therefore felt like a dropped input rather than like a miss. A button that
+        /// looks broken when you use it badly is worse than one with no feedback at all.
+        ///
+        /// Wide, fast and thin: it has to read as a SOUND leaving the mower rather than as an impact, so
+        /// it travels further than a strike ring and carries almost no thickness.
+        /// </summary>
+        public void Shock(Vector3 pos, float strength)
+        {
+            strength = Mathf.Clamp01(strength);
+            EmitRing(pos, 0.6f, 4.5f + 2.5f * strength, 0.09f + 0.05f * strength, 0.34f);
+        }
+
         /// <summary>Take the cue down — the exchange is over, one way or the other.</summary>
         public void ClearTimingRing()
         {

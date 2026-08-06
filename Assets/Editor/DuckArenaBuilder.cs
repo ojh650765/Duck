@@ -41,8 +41,16 @@ namespace DuckMow.EditorTools
         // ---- dimensions. Every one of these is reasoned about in DefenceArena's own comments; the
         // ---- numbers live here because this is what writes them into the world.
 
-        /// <summary>Half a garden's frontage. Small: the garden is the GOAL, not the playing space.</summary>
-        const float GardenHalf = 5f;
+        /// <summary>
+        /// Half a garden's frontage. Widened from 5 m to 8 m.
+        ///
+        /// Five metres made the goal narrower than the machine's own turning circle, so defending it was
+        /// standing still rather than covering ground — and it made the garden read as a flowerbox at the
+        /// end of a large field instead of as a garden worth a championship. Sixteen metres of frontage is
+        /// still comfortably a GOAL against a 30 m pitch, but it is now wide enough that where you choose
+        /// to sit inside it is a real decision and a goose can beat you by going around you.
+        /// </summary>
+        const float GardenHalf = 8f;
         /// <summary>
         /// Centre to centre between the goals. The number the whole feel rests on.
         ///
@@ -74,6 +82,7 @@ namespace DuckMow.EditorTools
             BuildPitch(root, playerCentre, toward);
             Lanes(root, playerCentre, toward, side);
             Crowd(root, playerCentre, toward, side);
+            Dress(root, playerCentre, toward, side);
 
             var playerBeds = new List<Transform>(32);
             var opponentBeds = new List<Transform>(32);
@@ -232,7 +241,7 @@ namespace DuckMow.EditorTools
             // of flowers. That is not a cosmetic complaint: the phase is scored in BEDS LOST, and a
             // player who cannot see where one bed ends and the next begins cannot read "four gone" off
             // the ground. Six leaves 1.7 m centres, which clears the mesh with a gap to spare.
-            const int perRow = 6;
+            const int perRow = 9;
             const float bow = 1.9f;          // how far the arc's middle bulges toward the pitch
             float[] rowDepth = { 1.5f, 3.4f };
 
@@ -475,6 +484,117 @@ namespace DuckMow.EditorTools
 
         /// <summary>A shade off the pitch, not a stripe of paint. Mown grass, not a road marking.</summary>
         static Material LaneMat() => DuckSceneBuilder.EnsureLit("M_ArenaLane", "#5E8F3E");
+
+        /// <summary>
+        /// The set the match is played in: a treeline, a hedge run, tents and a ridge of hills.
+        ///
+        /// The player's verdict on the arena was "스테이지 촌스러움" — the stage looks cheap — and they
+        /// were right for a reason the frames show plainly. The pitch was a flat plane with painted
+        /// stripes meeting the sky in a hard line: no horizon, no enclosure, no depth layers, nothing at
+        /// any distance between the fence and the skybox. The main venue has marquees, hedges, a treeline
+        /// and a ridge; the arena had NONE of it, so the same game looked like a demo scene next door to
+        /// itself.
+        ///
+        /// Four layers, nearest to furthest, because that is what reads as depth rather than as more
+        /// objects: a hedge run just outside the touchline, a scattered treeline behind it, tents beyond
+        /// the crowd, and a low wide ridge on the skyline. Distances are widely separated on purpose —
+        /// props at similar depths read as one cluttered band.
+        ///
+        /// Authored meshes where they exist, and Foliage.fbx has carried Tree_Oak, Tree_Poplar and
+        /// Hedge_Straight all along. Falls back silently when an export is missing, so the arena still
+        /// builds on a clone that has not run Blender.
+        /// </summary>
+        static void Dress(Transform root, Vector3 centre, Vector3 toward, Vector3 side)
+        {
+            var parent = new GameObject("Dressing").transform;
+            parent.SetParent(root, false);
+
+            var propMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/M_PropsAuthored.mat");
+            var rng = new System.Random(90210);
+            float R(float a, float b) => a + (float)rng.NextDouble() * (b - a);
+
+            Vector3 mid = centre + toward * (GoalGap * 0.5f);
+
+            // ---- 1. hedge run, just outside both touchlines ----
+            var hedge = DuckAssetLibrary.GetCombined("Foliage.fbx", "Hedge_Straight", "Hedge_Straight");
+            if (hedge != null && propMat != null)
+            {
+                for (int lane = -1; lane <= 1; lane += 2)
+                {
+                    // Skipped where the crowd stand and the judges' bench stand, so the dressing never
+                    // grows through the things the frame is actually about.
+                    for (float t = -0.5f; t <= 0.52f; t += 0.075f)
+                    {
+                        Vector3 p = mid + toward * (t * (GoalGap + GardenHalf * 3f))
+                                        + side * (lane * (PitchHalfWidth + 6.5f));
+                        if (lane < 0 && t > -0.34f && t < 0.34f) continue;   // crowd stand side
+                        if (lane > 0 && t > -0.16f && t < 0.16f) continue;   // judges' bench side
+                        Place(parent, "Hedge", hedge, propMat, p,
+                              Quaternion.LookRotation(toward, Vector3.up), R(0.95f, 1.15f));
+                    }
+                }
+            }
+
+            // ---- 2. treeline, scattered behind the hedges ----
+            var oak = DuckAssetLibrary.GetCombined("Foliage.fbx", "Tree_Oak", "Tree_Oak");
+            var poplar = DuckAssetLibrary.GetCombined("Foliage.fbx", "Tree_Poplar", "Tree_Poplar");
+            if (propMat != null && (oak != null || poplar != null))
+            {
+                for (int i = 0; i < 34; i++)
+                {
+                    float along = R(-0.75f, 0.75f) * (GoalGap + GardenHalf * 4f);
+                    float across = (rng.Next(2) == 0 ? -1f : 1f) * R(PitchHalfWidth + 11f, PitchHalfWidth + 34f);
+                    var mesh = (poplar != null && rng.Next(3) == 0) ? poplar : (oak ?? poplar);
+                    Place(parent, "Tree", mesh, propMat, mid + toward * along + side * across,
+                          Quaternion.Euler(0f, R(0f, 360f), 0f), R(0.85f, 1.35f));
+                }
+            }
+
+            // ---- 3. tents, beyond the crowd ----
+            var tentA = DuckAssetLibrary.GetCombined("Landmarks.fbx", "Tent_A", "Tent_A");
+            var tentB = DuckAssetLibrary.GetCombined("Landmarks.fbx", "Tent_B", "Tent_B");
+            if (propMat != null && (tentA != null || tentB != null))
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    var mesh = (i % 2 == 0 ? tentA : tentB) ?? tentA ?? tentB;
+                    Vector3 p = mid - side * R(PitchHalfWidth + 9f, PitchHalfWidth + 15f)
+                                    + toward * R(-24f, 24f);
+                    Place(parent, "Tent", mesh, propMat, p,
+                          Quaternion.Euler(0f, R(-25f, 25f), 0f), R(0.95f, 1.2f));
+                }
+            }
+
+            // ---- 4. the ridge, on the skyline ----
+            //
+            // Low and wide and overlapping. Tall mounds at this distance read as domes rather than as
+            // landscape — the venue's own hills comment records the same finding.
+            var hillMat = DuckSceneBuilder.EnsureLit("M_ArenaHills", "#6E8A5C");
+            for (int i = 0; i < 14; i++)
+            {
+                float a = i / 14f * Mathf.PI * 2f + R(-0.16f, 0.16f);
+                float dist = R(240f, 360f);
+                var mesh = DuckPrimitives.Hill(R(70f, 150f), R(9f, 20f), 4, 20, 300 + i);
+                Vector3 p = mid + new Vector3(Mathf.Cos(a) * dist, R(-6f, -2f), Mathf.Sin(a) * dist);
+                Place(parent, $"Hill_{i}", mesh, hillMat, p,
+                      Quaternion.Euler(0f, R(0f, 360f), 0f), 1f);
+            }
+        }
+
+        /// <summary>One dressing prop. Shadow-casting but never collidable — the mower stays drivable.</summary>
+        static void Place(Transform parent, string name, Mesh mesh, Material mat, Vector3 pos,
+                          Quaternion rot, float scale)
+        {
+            if (mesh == null || mat == null) return;
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.SetPositionAndRotation(pos, rot);
+            go.transform.localScale = Vector3.one * scale;
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            mr.receiveShadows = true;
+        }
 
         /// <summary>
         /// A stand down the far touchline, with spectators on it.
