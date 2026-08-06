@@ -257,11 +257,12 @@ namespace DuckMow.EditorTools
         /// <summary>
         /// Auto-parry five in a row, so the escalation can actually be watched.
         ///
-        /// The window has to be widened to fit, and that is a finding rather than a workaround: at the
-        /// tuned dive speeds one exchange costs between three and four seconds, so twelve seconds holds
-        /// about three of them and `rallyEnergyFull = 6` is unreachable in a real round. Five hits need
-        /// roughly eighteen. The tool states what it changed so nobody reads the resulting capture as
-        /// evidence that a default round can rally five times.
+        /// It used to have to WIDEN THE PHASE to fit, and that it no longer does is the clearest single
+        /// measure of what changed. At twelve seconds one exchange cost three to four seconds, so the phase
+        /// held about three of them and `rallyEnergyFull = 6` was arithmetically unreachable — the tool had
+        /// to raise liveSeconds to nineteen and then print a disclaimer saying nobody should read the
+        /// resulting capture as a real round. The raid now runs on a sixty-second budget and ends when a
+        /// garden falls, so five exchanges is an ordinary Tuesday and the capture is of the real thing.
         /// </summary>
         [MenuItem("Duck/Play · Rally: run a 5-hit rally", priority = 43)]
         public static void RunRally()
@@ -270,16 +271,10 @@ namespace DuckMow.EditorTools
             if (p == null) return;
 
             const int hits = 5;
-            float needed = 19f;
-            if (p.liveSeconds < needed)
-            {
-                Debug.Log($"[Duck] widening the phase from {p.liveSeconds:0.#}s to {needed:0.#}s so " +
-                          $"{hits} exchanges fit — a default round has room for about three.");
-                p.liveSeconds = needed;
-            }
             p.DebugArmParries(GooseDefence.Tier.Good, hits);
-            Debug.Log($"[Duck] armed {hits} GOOD parries. Watch the boom, the lens and the music layer " +
-                      "wind up as the dive speed climbs.");
+            Debug.Log($"[Duck] armed {hits} GOOD parries — no widening needed, the raid's budget is " +
+                      $"{p.raidBudgetSeconds:0} s. Watch the boom, the lens and the music layer wind up " +
+                      "as the dive speed climbs, and the two bed counters move.");
         }
 
         [MenuItem("Duck/Play · Rally: force a miss", priority = 44)]
@@ -598,10 +593,9 @@ namespace DuckMow.EditorTools
             if (p == null) { Debug.LogWarning("[Duck] no defence phase to capture."); yield break; }
 
             const int hits = 5;
-            // Widened, and it is a finding rather than a workaround: one exchange costs three to four
-            // seconds at the tuned dive speeds, so a default twelve-second phase holds about three of
-            // them. Nobody should read this capture as evidence that a normal round rallies five times.
-            if (p.liveSeconds < 19f) p.liveSeconds = 19f;
+            // No widening. The raid's own budget is a minute and it ends on a garden falling, so five
+            // exchanges fit inside a perfectly ordinary contest — where the twelve-second version had to
+            // have liveSeconds raised to nineteen here and a disclaimer printed beside the capture.
 
             float guard = 0f;
             while (p.GooseRange < 0f && guard < 12f) { guard += Time.unscaledDeltaTime; yield return null; }
@@ -624,13 +618,145 @@ namespace DuckMow.EditorTools
             }
 
             // The award, with the surviving and flattened beds on the ground beside the verdict.
+            //
+            // Budgeted off the PHASE'S OWN worst case rather than off a hard 14 s. A raid ends when a
+            // garden falls, so how long that takes is a property of the contest and not of this tool — and
+            // a 14 s guard against a sixty-second budget gave up mid-match and photographed a rally as if
+            // it were an award.
             guard = 0f;
-            while (p.State != GooseDefence.Phase.Awarding && guard < 14f)
+            while (p.State != GooseDefence.Phase.Awarding && guard < p.WorstCaseSeconds)
             { guard += Time.unscaledDeltaTime; yield return null; }
             yield return WaitReal(0.6f);
-            shots.Add(Snap("9_award"));
+            shots.Add(Snap($"9_award_{GooseDefence.DescribeResult(p.Result).Replace(' ', '-')}"));
 
             WriteAll(shots, "rally_escalation");
+        }
+
+        // ------------------------------------------------------------------ the result beats
+        //
+        // A win and a loss are now real states this phase can be in, and neither can be reached on demand:
+        // they need a garden reduced to its cap, which takes three geese through one end of a live contest.
+        // That is minutes of driving per frame, and the review loop cannot drive at all.
+        //
+        // So the same trick the scripted parries use — reach in, put the game in the state, photograph it.
+        // GooseDefence.DebugBreakGarden flattens one garden to its cap using the arena's ordinary Damage
+        // call, so the condition fires through exactly the code path a real raid would take.
+
+        [MenuItem("Duck/Capture · Raid: WIN moment", priority = 51)]
+        public static void BurstWin() => RunWhenPlaying(() =>
+        {
+            var p = Phase;
+            if (p == null) return;
+            p.StartCoroutine(ResultBurst(p, playerLoses: false));
+        });
+
+        [MenuItem("Duck/Capture · Raid: LOSS moment", priority = 52)]
+        public static void BurstLoss() => RunWhenPlaying(() =>
+        {
+            var p = Phase;
+            if (p == null) return;
+            p.StartCoroutine(ResultBurst(p, playerLoses: true));
+        });
+
+        /// <summary>
+        /// Let the raid run out of BUDGET, so the ceiling and the points decision can be seen.
+        ///
+        /// The third way a raid can end and by far the hardest to reach on purpose: it needs a full minute
+        /// in which neither garden falls, which is a minute of driving nobody can supply through MCP. So the
+        /// budget is shortened on the live phase — the same reach-in the scripted parries use — and the raid
+        /// is allowed to expire on its own. Everything after that is the real code path: DecideOnBeds picks
+        /// the winner on damage, ConcludeRaid logs the overrun at warning level, and the award pays a
+        /// decision rather than a knockout.
+        /// </summary>
+        [MenuItem("Duck/Capture · Raid: BUDGET expiry (decision)", priority = 53)]
+        public static void BurstBudget() => RunWhenPlaying(() =>
+        {
+            var p = Phase;
+            if (p == null) return;
+            p.StartCoroutine(BudgetBurst(p));
+        });
+
+        static IEnumerator BudgetBurst(GooseDefence p)
+        {
+            Time.timeScale = 1f;
+
+            float guard = 0f;
+            while (p.State != GooseDefence.Phase.Live && guard < 8f)
+            { guard += Time.unscaledDeltaTime; yield return null; }
+
+            // Let a few exchanges actually happen first, so the decision is made on real damage rather than
+            // on a nil-nil that proves only that the timer fires.
+            yield return WaitReal(9f);
+
+            float was = p.raidBudgetSeconds;
+            p.raidBudgetSeconds = 0.01f;
+            Debug.Log($"[Duck] shortening the raid budget from {was:0} s so the ceiling fires now. " +
+                      "Everything after this is the ordinary budget path.");
+
+            var shots = new List<Grab> { Snap("1_before_the_whistle") };
+
+            guard = 0f;
+            while (p.Match == GooseDefence.MatchResult.None && guard < 5f)
+            { guard += Time.unscaledDeltaTime; yield return null; }
+            p.raidBudgetSeconds = was;
+
+            if (p.Match == GooseDefence.MatchResult.None)
+            {
+                Debug.LogWarning("[Duck] the budget expired but no verdict landed; nothing captured.");
+                foreach (var s in shots) if (s.tex != null) Object.DestroyImmediate(s.tex);
+                yield break;
+            }
+
+            string tag = GooseDefence.DescribeResult(p.Result).Replace(' ', '-');
+            yield return WaitReal(0.5f);
+            shots.Add(Snap($"2_decision_{tag}"));
+
+            guard = 0f;
+            while (p.State != GooseDefence.Phase.Awarding && guard < p.WorstCaseSeconds)
+            { guard += Time.unscaledDeltaTime; yield return null; }
+            yield return WaitReal(0.7f);
+            shots.Add(Snap($"3_award_{p.Award:+0;-0;0}_{tag}"));
+
+            WriteAll(shots, "raid_budget");
+        }
+
+        static IEnumerator ResultBurst(GooseDefence p, bool playerLoses)
+        {
+            Time.timeScale = 1f;
+
+            // A frame of the live match first, so the capture shows the two bed counters BEFORE the
+            // banner as well as after. A win frame on its own does not prove the readout was ever there.
+            float guard = 0f;
+            while (p.State != GooseDefence.Phase.Live && guard < 8f)
+            { guard += Time.unscaledDeltaTime; yield return null; }
+            var shots = new List<Grab> { Snap("1_live_counters") };
+
+            p.DebugBreakGarden(playerSide: playerLoses);
+
+            guard = 0f;
+            while (p.Match == GooseDefence.MatchResult.None && guard < 4f)
+            { guard += Time.unscaledDeltaTime; yield return null; }
+            if (p.Match == GooseDefence.MatchResult.None)
+            {
+                Debug.LogWarning("[Duck] the garden was broken but no verdict landed; nothing captured.");
+                foreach (var s in shots) if (s.tex != null) Object.DestroyImmediate(s.tex);
+                yield break;
+            }
+
+            string tag = GooseDefence.DescribeResult(p.Result).Replace(' ', '-');
+            shots.Add(Snap($"2_called_{tag}"));
+            yield return WaitReal(0.5f);
+            shots.Add(Snap($"3_banner_{tag}"));
+            yield return WaitReal(1.4f);
+            shots.Add(Snap($"4_settling_{tag}"));
+
+            guard = 0f;
+            while (p.State != GooseDefence.Phase.Awarding && guard < p.WorstCaseSeconds)
+            { guard += Time.unscaledDeltaTime; yield return null; }
+            yield return WaitReal(0.7f);
+            shots.Add(Snap($"5_award_{p.Award:+0;-0;0}_{tag}"));
+
+            WriteAll(shots, playerLoses ? "raid_loss" : "raid_win");
         }
 
         static IEnumerator WaitReal(float seconds)

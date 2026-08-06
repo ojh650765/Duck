@@ -108,7 +108,45 @@ namespace DuckMow
         [Tooltip("Added per successful parry. This is the escalation, and because the tiers are radii " +
                  "it tightens all three windows at once.")]
         public float diveSpeedPerRally = 3f;
-        public float diveSpeedMax = 34f;
+        /// <summary>
+        /// Added per exchange the RAID has seen, and never given back.
+        ///
+        /// The rally bonus above is the only escalation there was, and it resets to zero the moment a
+        /// goose gets through. Over three exchanges that is invisible; over a match of fifteen it is
+        /// backwards — the player who is struggling, and who has therefore missed, is handed the OPENING
+        /// dive speed again and again, while the player who is clean reaches <see cref="diveSpeedMax"/>
+        /// by the sixth parry and spends the rest of the contest on a plateau. One curve cannot be both
+        /// the combo pressure and the difficulty of the match.
+        ///
+        /// So they are separated. This term is the match ramp: slow, monotonic, and indifferent to how the
+        /// last exchange went, so a raid always gets harder the longer it lasts. The rally bonus stays
+        /// what it was — fast, sharp, and lost with the combo — which is what makes a run of clean parries
+        /// feel like a run.
+        /// </summary>
+        [Tooltip("Added per exchange the raid has seen. Never reset by a miss — this is the MATCH ramp, " +
+                 "where diveSpeedPerRally is the combo. See the summary.")]
+        public float diveSpeedPerExchange = 0.55f;
+        [Tooltip("Metres per second the dive is capped at. Raised from 34 to give a fifteen-exchange " +
+                 "match somewhere to climb to: at 40 the flight is still 1.30 s over the 52 m approach, " +
+                 "which is the side of a second the parry has to stay on to remain a timing test.")]
+        public float diveSpeedMax = 40f;
+        /// <summary>
+        /// Exchanges at which the raid is running at full pace.
+        ///
+        /// Speed CANNOT be the whole escalation, and this is the field that admits it. The parry windows
+        /// are 2r/v, so at the cap the outer one is 0.40 s standing still and 0.26 s driving into the
+        /// bird — push v any further and the timing test becomes a coin flip, which is exactly the line
+        /// approachDistance's note draws. A ceiling on v is therefore not a plateau to be fixed but a
+        /// fairness bound to be respected.
+        ///
+        /// What escalates past it is PACE and READABILITY: the gap between geese closes, the turnaround
+        /// after a return shortens, and the entry bearing spreads wider so the player cannot pre-aim.
+        /// None of the three touches the window itself, so a late exchange is relentless rather than
+        /// unfair, and the contest still tightens after the bird has stopped getting faster.
+        /// </summary>
+        [Tooltip("Exchanges at which the gaps between geese are at their shortest and the entry bearing " +
+                 "at its widest. The escalation that continues after diveSpeedMax binds.")]
+        public int heatFullExchanges = 12;
         [Tooltip("Metres out the goose turns in from. Sized to the pitch: at 52 m it enters from over " +
                  "the OPPONENT'S end and flies the length of the ground, so the player always sees it " +
                  "coming and always has room to get back. Flight is 3.06 s on the first exchange down " +
@@ -161,22 +199,68 @@ namespace DuckMow
         /// <summary>
         /// Most beds one crash can flatten, before the cap is considered.
         ///
-        /// Two rather than three, worked out against the cap rather than picked. A garden holds roughly
-        /// 26 beds, so an 18% ceiling is about five — at three a crash the ceiling is reached after two
-        /// crashes and every later one is free, which is most of a bad run costing nothing. At two it
-        /// takes three crashes, which is about as many as twelve seconds allows.
+        /// Two rather than three, worked out against the cap rather than picked. Against the current
+        /// five-bed cap that is THREE geese through and the garden is finished — the third one only has
+        /// one bed left to take. Three is the right number of chances: two makes a bad opening minute
+        /// fatal, four makes the first two concessions free.
         /// </summary>
         public int bedsPerCrash = 2;
         /// <summary>
-        /// THE CEILING. A phase may flatten at most this fraction of a garden's beds.
+        /// THE MATCH. Whichever garden loses this fraction of its beds first has lost the raid.
         ///
-        /// Counted in beds rather than in cut-mask cells, and that is the payoff of defending a
-        /// garden instead of the mown picture: "four of your twenty-six beds are flat" is a number the
-        /// player reads off the ground, where "the cut mask gained 229 cells" was invisible and turned
-        /// out to be 3% of a cap that was never reached. The cap binds now — four crashes at three
-        /// beds each is twelve, and 18% of a full garden is about five.
+        /// It was a CEILING — a limiter that stopped damage accumulating — and it is now the win and the
+        /// loss condition, which is the whole reshaping of this phase. As a ceiling it was never the thing
+        /// the player was playing toward, so the raid needed a clock to stop it, and a clock is what made
+        /// three geese arrive and the contest halt mid-argument. As a condition it gives the raid a shape:
+        /// defend yours, wreck theirs, and every single exchange moves one of the two numbers.
+        ///
+        /// Raised from 0.18 because 0.18 no longer meant what its own note claimed. That note reasoned
+        /// against "roughly 26 beds", where the widened garden actually holds SEVENTEEN a side — so the
+        /// intended five-bed ceiling had quietly become three, and three at two beds a crash is a match
+        /// decided by the second concession. 0.30 of seventeen is five, which is the number that comment
+        /// was aiming at all along.
+        ///
+        /// Counted in beds rather than in cut-mask cells, and that is the payoff of defending a garden
+        /// instead of the mown picture: "two beds left" is a number the player reads off the ground and
+        /// off the HUD, where "the cut mask gained 229 cells" was invisible.
         /// </summary>
-        [Range(0f, 0.5f)] public float damageCapFraction = 0.18f;
+        [Range(0f, 0.5f)] public float damageCapFraction = 0.30f;
+
+        /// <summary>
+        /// How good the rival is in goal, as the two numbers that decide a save.
+        ///
+        /// The rival needs an attempt of their own because the player asked for one — "핑퐁된 거위는 두번째
+        /// 상대가 튕기거나 튕겨내지 못할때 소멸": a ponged goose is finished when the second party either
+        /// returns it or fails to. Without that, a struck goose simply arrived and scored, so the far end of
+        /// the pitch was a target rather than an opponent and there was nobody over there to beat.
+        ///
+        /// Not a bare dice roll and not a bare radius. The player's own parry is a CONE out of the machine's
+        /// nose — direction decides contact, distance decides grade — and the keeper's analogue of that is
+        /// REACH: they are one capsule standing in a sixteen-metre goalmouth, so a bird put down beside
+        /// them is theirs and a bird put down at the far end of their garden is not. That is a thing the
+        /// player can aim AT, learn, and beat on purpose, which a percentage behind the scenes never is.
+        /// </summary>
+        [Header("The rival in goal")]
+        [Tooltip("Chance the rival returns a goose that comes down within reach of them. Under 1 on " +
+                 "purpose: even a well-placed bird is sometimes saved, so beating them reads as beating " +
+                 "somebody rather than as passing a check.")]
+        [Range(0f, 1f)] public float keeperSkill = 0.72f;
+        /// <summary>
+        /// Metres either side of the rival they can cover against a ball skipped in from the far end.
+        ///
+        /// Four and a half, not six and a half, and the number has to be argued against the GOALMOUTH
+        /// rather than picked for feel. Their garden is sixteen metres across — <c>gardenHalfWidth</c> is
+        /// eight — so a 6.5 m reach covers about four fifths of it and the claim above, that the gap between
+        /// their reach and their frontage is the thing the player aims at, was very nearly false: there was
+        /// hardly any gap to aim into. At 4.5 they hold the middle and the two ends are open, which is a
+        /// shape the player can see from their own garden and play toward.
+        ///
+        /// It applies ONLY to a ball the player punted in. A goose diving at their own beds they watched
+        /// cross the whole pitch, and reach does not enter into it — see <see cref="KeeperAttempt"/>.
+        /// </summary>
+        [Tooltip("Metres either side of the rival they can cover against the player's throws. Well under " +
+                 "their garden's 8 m half-frontage on purpose — that difference IS what the player aims at.")]
+        public float keeperReach = 4.5f;
 
         [Header("Impact")]
         [Tooltip("Seconds of near-frozen time on a normal hit. Below the 70-110 ms band on purpose — " +
@@ -203,6 +287,17 @@ namespace DuckMow
 
         // ------------------------------------------------------------------ result
 
+        /// <summary>
+        /// How the raid ended. The thing a timer could not give it.
+        ///
+        /// Four values rather than two, because a budget finish is a different animal from a garden
+        /// falling and the award is entitled to know which: a KNOCKOUT is a garden reduced to its cap in
+        /// front of the player, and a DECISION is the budget expiring with both gardens still standing, in
+        /// which case the raid goes to whichever side has lost fewer beds. Sport has both and they are not
+        /// worth the same, so <see cref="ComputeAward"/> pays them differently.
+        /// </summary>
+        public enum MatchResult { None, Won, Lost, Draw }
+
         public struct Outcome
         {
             public int parries, perfects, goods, normals;
@@ -211,14 +306,53 @@ namespace DuckMow
             public int hitsOnOpponent;
             /// <summary>Throws that came down on the player's OWN beds. The cost of a scrappy hit.</summary>
             public int ownGoals;
+            /// <summary>Geese the rival returned. How often the far end actually held.</summary>
+            public int keeperSaves;
+            /// <summary>
+            /// Geese that came down in the rival's beds with no help from the player, because a raid
+            /// attacks both ends. Counted apart from <see cref="hitsOnOpponent"/> on purpose: it moves the
+            /// match toward a win but it is not the player's doing, so the award must not pay for it.
+            /// </summary>
+            public int rivalConceded;
             public int myBedsLost, myBedsTotal;
             public int theirBedsLost, theirBedsTotal;
+            /// <summary>Who won, and by what. Set once, in ConcludeRaid.</summary>
+            public MatchResult result;
+            /// <summary>True when the budget stopped the raid rather than a garden falling.</summary>
+            public bool onBudget;
             public string opponent;
         }
 
         public Phase State { get; private set; } = Phase.Idle;
         public bool Finished => State == Phase.Done;
         public Outcome Result => _outcome;
+
+        // ---- the match, for the HUD ----
+        //
+        // Read every frame by DefenceHud, which is the only thing on screen able to answer "how am I
+        // doing" — and the readout the old phase was missing entirely. A timer told the player how long
+        // they had left; these tell them what they are about to win or lose, which is the only number
+        // worth a corner of the frame.
+
+        /// <summary>Who is winning, or None while the raid is still open.</summary>
+        public MatchResult Match => _outcome.result;
+        /// <summary>Beds the player's garden can still lose before the raid is lost. Zero means gone.</summary>
+        public int MyBedsToSpare => Mathf.Max(0, _myCap - (_arena != null ? _arena.PlayerBedsLost : 0));
+        /// <summary>Beds the rival's garden can still lose before the raid is won.</summary>
+        public int TheirBedsToSpare => Mathf.Max(0, _theirCap - (_arena != null ? _arena.OpponentBedsLost : 0));
+        /// <summary>Beds either garden may lose in total. What the two numbers above started at.</summary>
+        public int BedsAtStake => _myCap;
+        public string OpponentName => string.IsNullOrEmpty(_outcome.opponent) ? "THE FIELD" : _outcome.opponent;
+        /// <summary>
+        /// Longest the whole phase can possibly take, for a host that budgets it from OUTSIDE.
+        ///
+        /// GameDirector guards the defence state with a wall-clock of its own, and that guard was a
+        /// hard-coded 30 s sized against a twelve-second raid. A minute-long budget walks straight through
+        /// it, and the failure would have looked like the phase abandoning itself. Derived rather than
+        /// re-typed, so the two can never drift again.
+        /// </summary>
+        public float WorstCaseSeconds =>
+            briefSeconds + raidBudgetSeconds + settleMaxSeconds + awardHoldSeconds + 2f;
 
         /// <summary>
         /// The marks the bench adds to the round for how the defence went. Survives until the next
@@ -240,25 +374,92 @@ namespace DuckMow
         /// <summary>
         /// What the bench makes of the defence, as one small integer.
         ///
-        /// Every term is something the phase already counts, and each is one legible sentence:
-        /// a perfect strike is worth two and a good one is worth one (skill), a goose put down on the
-        /// leader's flowers is worth one (aggression that paid off), a rally of three or more earns one
-        /// (showmanship), and every goose that got through or was punted into the duck's own beds costs
-        /// one (failure). A normal parry scores nothing: surviving is not an achievement.
+        /// REWEIGHTED FOR A MATCH, and the old weights are worth recording because they were reasoned
+        /// correctly for a phase that no longer exists. They were: two for a perfect, ONE FOR EVERY GOOD
+        /// PARRY, one for a goose put on the leader's flowers, one for a rally of three, less one per
+        /// crash and per own goal. Sound arithmetic over three exchanges — and arithmetic that pins the
+        /// award to the +8 ceiling every single time over fifteen. A raid now contains ten or twelve good
+        /// parries because parrying is how you survive it, so paying a mark for each one pays a mark for
+        /// breathing, and once the clamp saturates the award stops distinguishing anything at all.
+        ///
+        /// So the parry count comes out and the CONSEQUENCE goes in. Under the new loop a parried goose
+        /// travels to a real opponent who tries to keep it out, which means a good parry is already paid
+        /// for — by reaching them. Every remaining term is scarce and none of them is available by
+        /// surviving:
+        ///
+        ///   * the RESULT, which is the whole point of there being one: ±3 for a garden actually broken,
+        ///     ±1 when the budget expired and the raid went on beds. Nothing else in the formula can say
+        ///     "you won", and a match with a winner has to say so.
+        ///   * TWO for every goose put down in the rival's beds past their keeper. The decisive act of the
+        ///     phase, capped at three or four by the damage cap, and the only term the player can build
+        ///     a plan around.
+        ///   * ONE for a perfect strike, down from two. There can be a dozen now.
+        ///   * one for a rally of four or more (showmanship), raised from three — three is a Tuesday in
+        ///     a match this long.
+        ///   * less one per goose that got through, and less TWO per own goal. Punting a bird into your
+        ///     own flowers is a worse thing than being beaten by one, and it was priced the same.
+        ///
+        /// Then two gates the sum cannot express, which are the honest half of having a result at all: a
+        /// win always pays at least a mark, and a LOSS CAN NEVER PAY. A defence that ended with the duck's
+        /// garden flat is not a positive contribution to the round however many perfects were in it, and
+        /// before this it very comfortably could be.
         ///
         /// Static and pure so the formula is one readable place rather than something assembled across
         /// a method — this number goes on a scorecard the player is entitled to be able to predict.
         /// </summary>
         public static int ComputeAward(Outcome o, int floor, int ceiling)
         {
-            int raw = o.perfects * 2
-                    + o.goods
-                    + o.hitsOnOpponent
-                    + (o.longestRally >= 3 ? 1 : 0)
+            int result = o.result switch
+            {
+                MatchResult.Won => o.onBudget ? 1 : 3,
+                MatchResult.Lost => o.onBudget ? -1 : -3,
+                _ => 0
+            };
+
+            int raw = result
+                    + o.hitsOnOpponent * 2
+                    + o.perfects
+                    + RallyMark(o.longestRally)
                     - o.crashes
-                    - o.ownGoals;
-            return Mathf.Clamp(raw, floor, ceiling);
+                    - o.ownGoals * 2;
+
+            int award = Mathf.Clamp(raw, floor, ceiling);
+            // The gates. Applied after the clamp and then re-clamped, so they can never push the award
+            // outside the range the bench is allowed to hand out.
+            if (o.result == MatchResult.Won) award = Mathf.Max(award, 1);
+            else if (o.result == MatchResult.Lost) award = Mathf.Min(award, -1);
+            return Mathf.Clamp(award, floor, ceiling);
         }
+
+        /// <summary>
+        /// What a sustained rally is worth, as a ladder rather than a flag.
+        ///
+        /// This is where DEFENDING WELL is paid, and it has to be a ladder because the alternative failed
+        /// both ways. Paying a mark per good parry saturated the +8 clamp inside ten exchanges, so the award
+        /// stopped distinguishing a great raid from an adequate one; paying a single mark for "a rally of
+        /// three or more" was the opposite failure — three is a Tuesday in a match of fifteen exchanges, so
+        /// the term was a participation prize that everybody collected once and nobody could improve on.
+        ///
+        /// A ladder is volume-insensitive: it cannot inflate with the length of the raid, because it counts
+        /// the LONGEST unbroken run rather than the total. Four parries in a row is a mark, six is two,
+        /// nine is three — and a run of nine means nine consecutive geese met at climbing dive speeds
+        /// without one getting through, which is the best thing a defender can do and is worth saying so.
+        /// </summary>
+        static int RallyMark(int longest) => longest >= 9 ? 3
+                                          : longest >= 6 ? 2
+                                          : longest >= 4 ? 1 : 0;
+
+        /// <summary>
+        /// The result as the bench would say it out loud. One place, because the HUD, the console log and
+        /// the readout must never disagree about who won.
+        /// </summary>
+        public static string DescribeResult(Outcome o) => o.result switch
+        {
+            MatchResult.Won => o.onBudget ? "WON ON BEDS" : "GARDEN TAKEN",
+            MatchResult.Lost => o.onBudget ? "LOST ON BEDS" : "GARDEN LOST",
+            MatchResult.Draw => "HELD",
+            _ => "OPEN"
+        };
         /// <summary>Successful parries in the rally currently running. The combo.</summary>
         public int Rally { get; private set; }
 
@@ -276,8 +477,21 @@ namespace DuckMow
         public bool HitStopActive => _hitStop > 0f;
         public bool SlowMotionActive => _slowMo > 0f;
         public bool GooseInPlay => _gooseState == GooseState.Diving || _gooseState == GooseState.Launched;
-        /// <summary>Metres from the mower to a diving goose, or -1 when none is diving.</summary>
-        public float GooseRange => _gooseState == GooseState.Diving && _mower != null
+        /// <summary>
+        /// True while the bird in the air is one the player can be beaten by. Half the geese now dive at
+        /// the RIVAL'S garden, and the tell, the timing ring and every capture tool exist to watch the
+        /// other half — so this is what tells them apart.
+        /// </summary>
+        public bool GooseComingAtMe => _gooseState == GooseState.Diving && _diveAtPlayer;
+        /// <summary>
+        /// Metres from the mower to a goose diving AT THE PLAYER, or -1 when there is none.
+        ///
+        /// Deliberately blind to a goose on its way to the rival's end. Every caller means "is there
+        /// something I have to deal with, and how long have I got" — the tell, the anticipation pose, and
+        /// the four capture bursts that wait on it — and reporting a bird attacking somebody else would
+        /// wind all of them up for an exchange the player is not in.
+        /// </summary>
+        public float GooseRange => GooseComingAtMe && _mower != null
             ? Vector3.Distance(_goosePos, _mower.transform.position) : -1f;
 
         // ------------------------------------------------------------------ state
@@ -289,6 +503,28 @@ namespace DuckMow
         RivalContestant _opponent;
         Vector3 _toOpponent = Vector3.forward;
         int _myCap, _theirCap;
+
+        // ---- the stream ----
+        //
+        // "계속 나랑 상대방 방향으로 번갈아가면서 새로운 거위가 나한테 날라오고" — new geese keep coming,
+        // alternating between my direction and the opponent's. That is what turns three throws into a
+        // raid: the pitch has two ends under attack, the rival's garden falls whether or not the player
+        // touches it, and no exchange is the last one because another bird is always on its way.
+
+        /// <summary>Which garden the goose in play is diving at. Flips every fresh bird.</summary>
+        bool _diveAtPlayer = true;
+        /// <summary>Dives sent so far this raid. The match ramp and the pace ramp both read it.</summary>
+        int _exchanges;
+        /// <summary>
+        /// Returns the bird in play has left, and the reason it cannot ping-pong forever.
+        ///
+        /// One per goose. A bird struck at the rival gets ONE keeper attempt; if they return it, it comes
+        /// back at the player, and whatever happens to it next is final — struck again it lands in their
+        /// beds unopposed, missed it comes down in the player's. So an exchange is at most two of the
+        /// player's touches and always terminates, which is exactly the "소멸" the player asked for: the
+        /// ponged goose is finished once the second party has had its go.
+        /// </summary>
+        int _keeperAttemptsLeft;
 
         System.Random _rng;
         MowerController _mower;
@@ -400,6 +636,13 @@ namespace DuckMow
             Rally = 0;
             _recovery = 0f;
             _regroup = 0f;
+            _exchanges = 0;
+            // The first goose is the player's. A raid that opened on the rival's end would spend its first
+            // four seconds showing the player something happening to somebody else.
+            _diveAtPlayer = true;
+            // One life for the first bird too — Brief starts it directly rather than through NextInStream,
+            // and a zero here would have quietly denied the rival any attempt on the opening exchange.
+            _keeperAttemptsLeft = 1;
 
             _opponent = PickOpponent();
             _outcome.opponent = _opponent != null ? _opponent.displayName : "THE FIELD";
@@ -444,8 +687,11 @@ namespace DuckMow
 
             SetPhase(Phase.Brief);
 
-            Debug.Log($"[Duck] rally: garden {_outcome.myBedsTotal} beds (cap {_myCap}), " +
-                      $"{_outcome.opponent} {_outcome.theirBedsTotal} beds (cap {_theirCap}), " +
+            Debug.Log($"[Duck] raid ON: first to break a garden wins. " +
+                      $"Mine {_outcome.myBedsTotal} beds, {_myCap} may fall; " +
+                      $"{_outcome.opponent} {_outcome.theirBedsTotal} beds, {_theirCap} may fall. " +
+                      $"{bedsPerCrash} beds a goose, so about {Mathf.CeilToInt(_myCap / (float)Mathf.Max(bedsPerCrash, 1))} " +
+                      $"through either end decides it. Budget {raidBudgetSeconds:0} s, " +
                       $"goals {_arena.GardenGap:0} m apart.");
         }
 
@@ -579,7 +825,15 @@ namespace DuckMow
                     StepGoose(dt);
                     UpdateCameraEnergy(dt);
                     UpdateTell();
-                    if (_stateTime >= liveSeconds) SetPhase(Phase.Settle);
+
+                    // The CONDITION first, the ceiling second, and the order is the whole point of the
+                    // rewrite: a raid ends because a garden fell, and only falls back on the clock if
+                    // nothing did.
+                    {
+                        MatchResult verdict = TestGardens();
+                        if (verdict != MatchResult.None) ConcludeRaid(verdict, onBudget: false);
+                        else if (_stateTime >= raidBudgetSeconds) ConcludeRaid(DecideOnBeds(), onBudget: true);
+                    }
                     break;
 
                 case Phase.Settle:
@@ -599,6 +853,111 @@ namespace DuckMow
             }
         }
 
+        // ------------------------------------------------------------------ the match
+
+        /// <summary>
+        /// Has a garden fallen? The condition that replaced the twelve-second clock.
+        ///
+        /// The player's loss is tested FIRST. Both caps can only be reached in the same frame if one of
+        /// them was already reached and had somehow not been noticed, so the order is very nearly academic
+        /// — but if it ever is not, the raid the player lost is the raid that happened. A phase that
+        /// awarded a win on the frame the duck's own garden went flat would be lying about the ground
+        /// everyone can see.
+        /// </summary>
+        MatchResult TestGardens()
+        {
+            if (_arena == null) return MatchResult.None;
+            if (_arena.PlayerBedsLost >= _myCap) return MatchResult.Lost;
+            if (_arena.OpponentBedsLost >= _theirCap) return MatchResult.Won;
+            return MatchResult.None;
+        }
+
+        /// <summary>
+        /// Who was ahead when the budget ran out. A raid that goes the distance is decided on damage.
+        ///
+        /// The alternative was to call a budget finish "no result", and that is unfair in a way worth
+        /// spelling out: a player four beds up with the rival's garden one goose from collapse would have
+        /// been given exactly the same nothing as a player who parked in a corner. Sport decides on points
+        /// when nobody is knocked out; so does this. <see cref="ComputeAward"/> pays a decision less than
+        /// a knockout, which is the honest gap between the two.
+        /// </summary>
+        MatchResult DecideOnBeds()
+        {
+            int mine = _arena != null ? _arena.PlayerBedsLost : 0;
+            int theirs = _arena != null ? _arena.OpponentBedsLost : 0;
+            if (theirs > mine) return MatchResult.Won;
+            if (mine > theirs) return MatchResult.Lost;
+            return MatchResult.Draw;
+        }
+
+        /// <summary>
+        /// Call the raid, on the frame it is decided, and make the call legible where it happens.
+        ///
+        /// The result is announced HERE rather than at the award, and that gap is deliberate. A garden
+        /// falling is the dramatic event; the award is the paperwork two seconds later. If the only place
+        /// the player were told were the scorecard, the moment they actually won would pass in silence with
+        /// a goose still bouncing across the grass.
+        ///
+        /// It does not stop the phase dead either. Settle already exists to let a bird mid-flight finish
+        /// what it was doing, and cutting a crash short would make the final damage depend on which frame
+        /// the condition happened to land in — so the raid is CALLED here and comes to rest on its own.
+        /// </summary>
+        void ConcludeRaid(MatchResult verdict, bool onBudget)
+        {
+            _outcome.result = verdict;
+            _outcome.onBudget = onBudget;
+            _outcome.myBedsLost = _arena != null ? _arena.PlayerBedsLost : 0;
+            _outcome.theirBedsLost = _arena != null ? _arena.OpponentBedsLost : 0;
+
+            bool won = verdict == MatchResult.Won;
+
+            // The budget ending a raid is a finding, not a result, so it says so at warning level exactly
+            // as GameDirector does when a beat overruns. Anybody reading a console and seeing this knows
+            // the contest did not resolve itself and that the numbers below are a points decision.
+            if (onBudget)
+                Debug.LogWarning($"[Duck] raid hit its {raidBudgetSeconds:0} s BUDGET with both gardens " +
+                                 $"still standing — the condition did not end it, the ceiling did. " +
+                                 $"Decided on beds: mine {_outcome.myBedsLost}/{_myCap}, theirs " +
+                                 $"{_outcome.theirBedsLost}/{_theirCap} over {_exchanges} exchanges " +
+                                 $"→ {DescribeResult(_outcome)}.");
+            else
+                Debug.Log($"[Duck] raid decided on exchange {_exchanges} at {_stateTime:0.0} s: " +
+                          $"{DescribeResult(_outcome)} — mine {_outcome.myBedsLost}/{_myCap} flat, " +
+                          $"{_outcome.opponent} {_outcome.theirBedsLost}/{_theirCap} flat.");
+
+            // Sold with the vocabulary the phase already owns rather than with anything new: the camera
+            // punch and shake that a perfect strike gets, the crowd, the bench, and the rival's own body
+            // language. A win draws the rival up short; a loss is their good news.
+            _camera?.AddPunch(won ? 1f : 0.5f);
+            _camera?.AddShake(won ? 0.9f : 0.7f);
+            // A beat of slow motion on a knockout, and none on a decision. The clock bending is this
+            // phase's strongest punctuation and it is reserved for the moment a garden actually goes.
+            if (!onBudget) _slowMo = slowMotionSeconds * 1.6f;
+
+            var audio = AudioDirector.Instance;
+            if (audio != null)
+            {
+                if (won)
+                {
+                    audio.CrowdCheer(1f, applaud: true);
+                    audio.PlayOne(audio.quackProud, 0.8f);
+                }
+                else if (verdict == MatchResult.Lost)
+                {
+                    audio.CrowdGroan(0.9f);
+                    audio.PlayOne(audio.quackPanic, 0.7f);
+                }
+            }
+            _crowd?.Excite(won ? 1f : 0.3f);
+            PunchJudges(won ? 0.9f : -0.8f);
+            ReactOpponent(1f, inTheirFavour: !won);
+
+            // Let it come to rest. Settle sends no fresh geese — see the Returning and Crashing cases in
+            // StepGoose, both of which only re-arm while Live — so the stream stops here without the stream
+            // needing to know about the match at all.
+            SetPhase(Phase.Settle);
+        }
+
         /// <summary>
         /// The award beat, delivered here on the pitch rather than after the player has been moved.
         ///
@@ -612,6 +971,16 @@ namespace DuckMow
         {
             _outcome.myBedsLost = _arena != null ? _arena.PlayerBedsLost : 0;
             _outcome.theirBedsLost = _arena != null ? _arena.OpponentBedsLost : 0;
+            // Belt and braces. Settle is only ever entered from ConcludeRaid, so the result is already
+            // set — but an unmarked raid would silently score as a draw, and an award that quietly says
+            // nothing about who won is the exact failure this rewrite exists to remove.
+            if (_outcome.result == MatchResult.None)
+            {
+                _outcome.result = DecideOnBeds();
+                _outcome.onBudget = true;
+                Debug.LogWarning("[Duck] the raid reached its award with no verdict set; decided on beds. " +
+                                 "Something reached Settle without going through ConcludeRaid.");
+            }
             Award = ComputeAward(_outcome, awardFloor, awardCeiling);
 
             // Boris is the one who enjoys a rally — he marks on coverage and style and applauds
@@ -637,10 +1006,11 @@ namespace DuckMow
             // delivered over an empty pitch.
             _camera?.ClearDefenceSubject();
 
-            Debug.Log($"[Duck] defence award {(Award >= 0 ? "+" : "")}{Award} " +
+            Debug.Log($"[Duck] {DescribeResult(_outcome)} — defence award {Award:+0;-0;0} " +
                       $"({_outcome.perfects}P {_outcome.goods}G {_outcome.normals}N, " +
-                      $"longest x{_outcome.longestRally}, {_outcome.hitsOnOpponent} on them, " +
-                      $"{_outcome.crashes} through, {_outcome.ownGoals} own goals).");
+                      $"longest x{_outcome.longestRally}, {_outcome.hitsOnOpponent} past their keeper, " +
+                      $"{_outcome.keeperSaves} saved by them, {_outcome.rivalConceded} they lost on their " +
+                      $"own, {_outcome.crashes} through, {_outcome.ownGoals} own goals).");
 
             SetPhase(Phase.Awarding);
         }
@@ -648,17 +1018,22 @@ namespace DuckMow
         void EndPhase()
         {
 
-            Debug.Log($"[Duck] rally over: {_outcome.parries} parries ({_outcome.perfects}P " +
-                      $"{_outcome.goods}G {_outcome.normals}N), longest x{_outcome.longestRally}, " +
-                      $"{_outcome.crashes} crashes, {_outcome.whiffs} wasted honks, " +
-                      $"{_outcome.hitsOnOpponent} landed on them, {_outcome.ownGoals} own goals. " +
-                      $"My beds {_outcome.myBedsLost}/{_outcome.myBedsTotal} flat (cap {_myCap}), " +
-                      $"theirs {_outcome.theirBedsLost}/{_outcome.theirBedsTotal} (cap {_theirCap}). " +
-                      $"AWARD {(Award >= 0 ? "+" : "")}{Award}.");
+            Debug.Log($"[Duck] raid over — {DescribeResult(_outcome)} in {_exchanges} exchanges" +
+                      $"{(_outcome.onBudget ? " (on the budget)" : "")}: {_outcome.parries} parries " +
+                      $"({_outcome.perfects}P {_outcome.goods}G {_outcome.normals}N), longest " +
+                      $"x{_outcome.longestRally}, {_outcome.crashes} crashes, {_outcome.whiffs} wasted " +
+                      $"honks, {_outcome.hitsOnOpponent} past their keeper ({_outcome.keeperSaves} saved), " +
+                      $"{_outcome.rivalConceded} they lost unaided, {_outcome.ownGoals} own goals. " +
+                      $"My beds {_outcome.myBedsLost}/{_outcome.myBedsTotal} flat (of {_myCap} allowed), " +
+                      $"theirs {_outcome.theirBedsLost}/{_outcome.theirBedsTotal} (of {_theirCap}). " +
+                      $"AWARD {Award:+0;-0;0}.");
 
             var audio = AudioDirector.Instance;
-            audio?.PlayOne(_outcome.myBedsLost <= _outcome.theirBedsLost
-                               ? audio.fanfareGood : audio.fanfareBad, 0.7f);
+            // The fanfare follows the RESULT rather than a bed comparison. The old test was
+            // "myBedsLost <= theirBedsLost", which handed out the good fanfare for a nil-nil raid in which
+            // nothing happened at all — and, worse, for a raid the player had just lost on the budget by
+            // an equal number of beds.
+            audio?.PlayOne(_outcome.result == MatchResult.Lost ? audio.fanfareBad : audio.fanfareGood, 0.7f);
 
             ReleaseClock();
 
@@ -796,7 +1171,11 @@ namespace DuckMow
         /// </summary>
         Tier Judge()
         {
-            if (_gooseState != GooseState.Diving || _mower == null) return Tier.Miss;
+            // And only a goose diving AT THE DUCK. Half of them are attacking the rival's garden now, and
+            // a bird crossing the player's end on its way there is somebody else's problem — letting the
+            // horn touch it would let the player defend their opponent's flowers, which is nonsense, and
+            // would credit them a parry for a bird that was never a threat.
+            if (_gooseState != GooseState.Diving || !_diveAtPlayer || _mower == null) return Tier.Miss;
 
             // A CONE out of the machine's nose, not a bubble around it.
             //
@@ -894,7 +1273,18 @@ namespace DuckMow
             // bird reaches the far beds on its second or third contact while a weak one dies in midfield
             // — which is a far better read of how well it was hit than the landing point of a single arc.
             Vector3 flat = target - _goosePos; flat.y = 0f;
-            float reach = Mathf.Max(flat.magnitude, 6f) * Mathf.Lerp(0.34f, 0.55f, placement);
+            // Carry, measured rather than guessed. A diagnostic run over four Good strikes put the ball
+            // down at 40.1 / 41.4 / 41.4 / 41.7 m and a Perfect at 46.6 m — against a garden whose near
+            // edge is at 42 m. So a GOOD strike stopped two metres short of the target every single time,
+            // which made hitsOnOpponent a Perfect-only event and quietly deleted the middle rung of the
+            // tier ladder: the difference between Normal and Good was "short" versus "slightly less
+            // short", both landing on open grass.
+            //
+            // Raised so the ladder reads the way it is scored — Normal falls short in the open, Good
+            // REACHES the beds, Perfect goes deep enough to test their keeper's reach rather than their
+            // reflex. Tuned at the low end as well as the high one, because the gap between the two ends
+            // is what separates the tiers and the first pass had it far too narrow.
+            float reach = Mathf.Max(flat.magnitude, 6f) * Mathf.Lerp(0.40f, 0.58f, placement);
             Vector3 aimed = Quaternion.Euler(0f, wobble, 0f) * (flat.sqrMagnitude > 1e-4f
                                                                 ? flat.normalized : _toOpponent);
             Vector3 land = _goosePos + aimed * reach;
@@ -1047,28 +1437,65 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Send a goose in at the flowerbed nearest the mower.
+        /// Send the next goose in — and it goes at whichever garden is next in the stream.
         ///
-        /// Nearest to the player rather than anywhere in the garden, and that is a fairness rule
-        /// rather than a convenience. The phase is a timing test, so the bird has to be reachable and
-        /// visible from where the player already is; picking a bed at random would turn every dive
-        /// into a drive across the garden, and beds would be lost to travel time instead of to bad
-        /// timing. What the 18 m frontage is for is CHOOSING which part of the garden to stand in
-        /// between exchanges, which is a decision — not a sprint the player cannot win.
+        /// ALTERNATING is the change that turns three throws into a raid. The player asked for it in as
+        /// many words: "계속 나랑 상대방 방향으로 번갈아가면서 새로운 거위가 나한테 날라오고" — geese keep
+        /// coming, alternating between my direction and the opponent's. Before this the flock only ever
+        /// attacked the duck, so the far end of the pitch was a wall to aim at and the rival was a capsule
+        /// with nothing at stake; the only way their beds could ever be touched was by the player putting a
+        /// bird there personally. Now both gardens are under attack from the start, both counters move
+        /// whether or not the player does anything, and the raid is a contest the player is IN rather than
+        /// a target range they are shooting at.
+        ///
+        /// The two sides pick their bed by different rules, and the difference is fairness in both
+        /// directions:
+        ///
+        ///   * At the PLAYER, the nearest living bed to the mower. The phase is a timing test, so the bird
+        ///     has to be reachable and visible from where the player already is; a random bed would turn
+        ///     every dive into a drive across the garden and beds would be lost to travel time rather than
+        ///     to bad timing. The 16 m frontage is for CHOOSING where to stand between exchanges.
+        ///   * At the RIVAL, a living bed at random. They are one capsule who does not move, so which bed
+        ///     is picked is exactly what decides whether they can reach it — see
+        ///     <see cref="KeeperAttempt"/>. Picking the bed nearest them would make their end a formality;
+        ///     picking at random makes their end a genuine second front the player can watch and count.
         /// </summary>
-        void StartDive()
+        void StartDive() => StartDive(_diveAtPlayer);
+
+        void StartDive(bool atPlayer)
         {
             if (_arena == null || _mower == null) { _gooseState = GooseState.Gone; return; }
 
-            var bed = _arena.NearestAlive(_mower.transform.position, playerSide: true);
-            // Nothing left to defend. Aim at the middle so the phase still plays out rather than
-            // stopping dead on a technicality.
-            _diveTarget = bed != null ? bed.position : _arena.PlayerGardenCentre;
+            _diveAtPlayer = atPlayer;
+            _exchanges++;
 
-            // Comes in over the opponent's side, give or take, so "back the way it came" is a
-            // direction the player can see rather than a rule to learn.
-            float spread = ((float)_rng.NextDouble() * 2f - 1f) * 25f;
-            Vector3 azimuth = Quaternion.Euler(0f, spread, 0f) * _toOpponent;
+            if (atPlayer)
+            {
+                var bed = _arena.NearestAlive(_mower.transform.position, playerSide: true);
+                // Nothing left to defend. Aim at the middle so the phase still plays out rather than
+                // stopping dead on a technicality.
+                _diveTarget = bed != null ? bed.position : _arena.PlayerGardenCentre;
+            }
+            else
+            {
+                var bed = _arena.AnyAlive(_rng, playerSide: false);
+                _diveTarget = bed != null ? bed.position : _arena.OpponentGardenCentre;
+            }
+
+            // Comes in over the OTHER garden's side, give or take, so "back the way it came" is a
+            // direction the player can see rather than a rule to learn — and so a bird attacking the
+            // rival passes over the player's head on its way, which is what makes the second front
+            // something the player watches rather than something they are told about.
+            //
+            // The spread WIDENS with the raid: pre-aiming a bearing that is always within 25 degrees of
+            // downfield is most of what makes a late exchange easy, and widening it costs the player
+            // nothing in reaction time — the window is still 2r/v — while making a fifteenth goose a
+            // genuinely harder read than a second one. This is the escalation channel that keeps working
+            // after diveSpeedMax has bound.
+            float arc = Mathf.Lerp(25f, 42f, MatchHeat);
+            float spread = ((float)_rng.NextDouble() * 2f - 1f) * arc;
+            Vector3 from = atPlayer ? _toOpponent : -_toOpponent;
+            Vector3 azimuth = Quaternion.Euler(0f, spread, 0f) * from;
             Vector3 dir = (azimuth + Vector3.up * Mathf.Tan(diveElevation * Mathf.Deg2Rad)).normalized;
 
             _goosePos = _diveTarget + dir * approachDistance;
@@ -1076,13 +1503,132 @@ namespace DuckMow
             _gooseVel = -dir * CurrentDiveSpeed();
             _gooseState = GooseState.Diving;
             _gooseTimer = 0f;
+            _gooseBounces = 0;
 
             SetGooseHot(false);
             _goose.gameObject.SetActive(true);
             PlaceGoose();
         }
 
-        public float CurrentDiveSpeed() => Mathf.Min(diveSpeedMax, diveSpeed + diveSpeedPerRally * Rally);
+        /// <summary>
+        /// Hand the stream on to the other end and send the next bird.
+        ///
+        /// One place, because "whose turn is it" is the kind of bookkeeping that goes wrong quietly: a
+        /// flip missed on one of the four paths that end an exchange would leave the raid attacking the
+        /// same garden forever, and the symptom would be a contest that looks fine and is one-sided.
+        /// </summary>
+        void NextInStream()
+        {
+            _keeperAttemptsLeft = 1;
+            StartDive(!_diveAtPlayer);
+        }
+
+        /// <summary>
+        /// How far into the raid we are, 0 to 1. Everything that escalates past the speed cap reads this.
+        /// </summary>
+        public float MatchHeat => Mathf.Clamp01(_exchanges / (float)Mathf.Max(heatFullExchanges, 1));
+
+        /// <summary>
+        /// Dive speed: the match ramp plus the combo, capped.
+        ///
+        /// Two terms rather than one. <see cref="diveSpeedPerExchange"/> never goes backwards, so the raid
+        /// gets harder the longer it runs whoever is winning; <see cref="diveSpeedPerRally"/> is lost with
+        /// the combo, so a clean run of parries feels like one. Before this the rally term was the only
+        /// escalation there was, which meant a missed goose handed the player the opening speed back — the
+        /// difficulty curve ran backwards for exactly the player who was struggling.
+        /// </summary>
+        public float CurrentDiveSpeed() => Mathf.Min(diveSpeedMax,
+            diveSpeed + diveSpeedPerExchange * Mathf.Max(0, _exchanges - 1) + diveSpeedPerRally * Rally);
+
+        /// <summary>
+        /// Seconds of dead air between exchanges, shrinking as the raid heats up.
+        ///
+        /// The other half of the escalation the speed cap cannot provide. A shorter gap does not narrow the
+        /// parry window by a millisecond — it removes the time to breathe, reposition and look at the far
+        /// end between windows, which is the thing that actually makes a late exchange feel relentless.
+        /// Floored at 45% so the raid never becomes a continuous stream with no pulse to it.
+        /// </summary>
+        float PacedGap(float baseSeconds) => baseSeconds * Mathf.Lerp(1f, 0.45f, MatchHeat);
+
+        /// <summary>
+        /// The rival's one attempt on a goose arriving at their garden, and the answer to "who is over
+        /// there".
+        ///
+        /// True if they keep it out. What decides it is REACH, not a hidden dice roll: they are a single
+        /// capsule planted in a sixteen-metre goalmouth, so a bird that comes down beside them is theirs
+        /// and one put down at the far end of their garden is past them before they have moved. That makes
+        /// their end a thing the player can read off the pitch and beat ON PURPOSE — aim away from the
+        /// rival — which is the same shape as the player's own cone, where direction decides contact.
+        /// <see cref="keeperSkill"/> then keeps even a reachable bird from being an automatic save, so
+        /// beating them reads as beating somebody rather than as clearing a threshold.
+        ///
+        /// Their body language runs on both branches. They stood in their garden through the entire old
+        /// phase without moving, and a keeper who does not visibly react to a save is not a keeper.
+        /// </summary>
+        bool KeeperAttempt(Vector3 where, bool watchedItComeIn)
+        {
+            if (_keeperAttemptsLeft <= 0) return false;
+            _keeperAttemptsLeft--;
+
+            // Two situations, and they are NOT the same save. The first measured raid proved it: with reach
+            // applied to everything, the rival conceded both of their own dives and a player who never
+            // touched the horn came within one bed of winning. Their end has to be defended by somebody,
+            // or the alternating stream is a coin flip about whose garden collapses first.
+            //
+            //   * A goose DIVING at their own garden, they watched cross the whole pitch — the same three
+            //     seconds of warning the player gets, and they are free to walk to it. Reach cannot bind,
+            //     so the save is their skill and nothing else. That is why a passive player now loses: the
+            //     far end holds itself.
+            //   * A bird the PLAYER punted in arrives low, fast and skipping off the turf from fifty
+            //     metres, with a fraction of that warning. Here reach binds hard, and where the ball came
+            //     to rest relative to where they are standing is what decides it. That is the shot the
+            //     player is being asked to make, and it is the only way their garden can be broken quickly.
+            float chance = keeperSkill;
+            float d = 0f;
+            if (!watchedItComeIn)
+            {
+                Vector3 post = _arena != null && _arena.opponentNpc != null
+                    ? _arena.opponentNpc.position
+                    : (_arena != null ? _arena.OpponentGardenCentre : where);
+                Vector3 flat = where - post; flat.y = 0f;
+                d = flat.magnitude;
+                chance *= 1f - Mathf.Clamp01(d / Mathf.Max(keeperReach, 0.5f));
+            }
+
+            bool saved = chance > 0f && _rng.NextDouble() < chance;
+
+            // Drawn up and forward on a save, tipped back on a concession. Same call the phase already
+            // used for their reaction to a strike, so the vocabulary stays one vocabulary.
+            ReactOpponent(saved ? 0.9f : 0.7f, inTheirFavour: saved);
+
+            // Gated on the greybox flag, like the IMGUI readout: while this phase is being tuned, "what did
+            // their keeper do and why" is the single hardest thing to see from a frame, because it happens
+            // fifty metres away and resolves in one tick.
+            if (showReadout)
+                Debug.Log($"[Duck] keeper: {(watchedItComeIn ? "dive at their beds" : $"my ball {d:0.0} m from them")}" +
+                          $" — {(saved ? "SAVED" : "beaten")} (chance {chance:0.00})");
+            return saved;
+        }
+
+        /// <summary>
+        /// The rival returns it: the same bird comes straight back at the duck.
+        ///
+        /// Sent as a DIVE rather than as a thrown ball, and that asymmetry is deliberate. Everything that
+        /// comes at the player is a dive so it arrives with the whole readable apparatus — the anticipation
+        /// pose, the timing ring, the cone, the tiers — while everything the player hits is a launched ball
+        /// that arcs and bounces. From the seat, geese attack and struck geese travel; there is never a
+        /// thing coming at you that the horn does not know how to meet.
+        ///
+        /// It does NOT reset the rally. The bird being alive is the rally, and the exchange the player is
+        /// in the middle of is the one thing here that should feel continuous.
+        /// </summary>
+        void KeeperReturn()
+        {
+            _outcome.keeperSaves++;
+            AudioDirector.Instance?.CrowdCheer(0.4f);
+            LowThud(0.35f);
+            StartDive(atPlayer: true);
+        }
 
         // ------------------------------------------------------------------ scripted parries
         //
@@ -1101,6 +1647,39 @@ namespace DuckMow
 
         /// <summary>How many scripted parries are still queued. Shown in the readout.</summary>
         public int DebugArmedRemaining => _armedRemaining;
+
+        /// <summary>
+        /// Flatten one garden to its cap, so the WIN and the LOSS beats can be reached on demand.
+        ///
+        /// The same argument as the scripted parries, one level up. A result now needs three geese through
+        /// one end of a live contest, which is minutes of driving per captured frame, and the review loop
+        /// cannot drive — so the two most important frames the phase can produce would have had no capture
+        /// path at all, exactly as the tiers had none before DebugArmParries existed.
+        ///
+        /// It does NOT set the result itself, and that distinction is the whole reason this is safe: it does
+        /// the damage through the arena's ordinary Damage call and then lets the raid notice, so the
+        /// condition fires through precisely the code path a real raid takes. A capture taken this way is
+        /// evidence about the real rule rather than about a shortcut.
+        /// </summary>
+        public void DebugBreakGarden(bool playerSide)
+        {
+            if (_arena == null || State != Phase.Live)
+            {
+                Debug.LogWarning("[Duck] no live raid to decide. Press play in Assets/Scenes/Arena.unity.");
+                return;
+            }
+
+            int cap = playerSide ? _myCap : _theirCap;
+            int already = playerSide ? _arena.PlayerBedsLost : _arena.OpponentBedsLost;
+            Vector3 centre = playerSide ? _arena.PlayerGardenCentre : _arena.OpponentGardenCentre;
+
+            // One sweep of the whole garden, limited to what the cap still allows.
+            int killed = _arena.Damage(centre, _arena.gardenHalfWidth * 3f, playerSide,
+                                       cap - already, cap - already);
+            _fx?.Dirt(centre, 0.9f);
+            Debug.Log($"[Duck] DEBUG flattened {killed} {(playerSide ? "player" : "opponent")} beds to the " +
+                      $"cap of {cap}. The raid should call itself on the next frame.");
+        }
 
         /// <summary>
         /// Queue <paramref name="count"/> automatic parries at <paramref name="tier"/>.
@@ -1137,7 +1716,11 @@ namespace DuckMow
         /// </summary>
         bool TryArmedParry(bool aboutToLand)
         {
-            if (_armedRemaining <= 0 || _armedTier == Tier.Miss || _mower == null) return false;
+            // Same rule as Judge: a scripted parry waits for a goose that is actually coming at the duck.
+            // Without this the arm was spent on the frame a rival-bound bird reached the far garden, and
+            // every burst would have photographed a strike fifty metres off camera.
+            if (_armedRemaining <= 0 || _armedTier == Tier.Miss || _mower == null || !_diveAtPlayer)
+                return false;
 
             float d = Vector3.Distance(_goosePos, _mower.transform.position);
             if (d > RadiusFor(_armedTier) && !aboutToLand) return false;
@@ -1153,7 +1736,7 @@ namespace DuckMow
             if (_regroup > 0f)
             {
                 _regroup -= dt;
-                if (_regroup <= 0f && State == Phase.Live) StartDive();
+                if (_regroup <= 0f && State == Phase.Live) NextInStream();
                 return;
             }
 
@@ -1169,6 +1752,22 @@ namespace DuckMow
                     // goose on a long frame cannot tunnel through and orbit forever.
                     bool landing = Vector3.Dot(_goosePos - _diveTarget, _gooseVel) >= 0f ||
                                    _goosePos.y <= 0.3f;
+
+                    // A goose diving at the RIVAL'S garden is not the player's problem, and the horn
+                    // cannot reach it — it crosses the player's end at eighteen metres up. Their keeper
+                    // meets it instead, and the raid's second front resolves without the player being
+                    // involved at all. That is the point of it: their counter moves whether or not the
+                    // duck does anything, so there are two gardens falling rather than one target range.
+                    if (!_diveAtPlayer)
+                    {
+                        if (landing)
+                        {
+                            if (KeeperAttempt(_diveTarget, watchedItComeIn: true)) KeeperReturn();
+                            else RivalConcedes();
+                        }
+                        break;
+                    }
+
                     if (TryArmedParry(landing)) break;
                     if (landing) Crash();
                     break;
@@ -1228,33 +1827,26 @@ namespace DuckMow
                         // Settled: too slow to skip again, out of bounces, or out of patience. THEN it
                         // scores, and it scores where it actually came to rest.
                         if (_gooseVel.magnitude < 3.2f || _gooseBounces >= 4 || _gooseTimer > 6f)
-                        {
-                            LandLaunched();
-                            _gooseState = GooseState.Returning;
-                            _gooseTimer = 0f;
-                            _gooseBounces = 0;
-                        }
+                            SettleLaunched();
                     }
                     else if (_gooseTimer > 6f)
                     {
                         // Budgeted, not trusted — the same rule every other beat here is under.
-                        LandLaunched();
-                        _gooseState = GooseState.Returning;
-                        _gooseTimer = 0f;
-                        _gooseBounces = 0;
+                        SettleLaunched();
                     }
                     break;
 
                 case GooseState.Returning:
-                    // Up and round for another go. A short pause so the rally has a pulse rather than
-                    // being a continuous stream — trimmed from 0.55 s for the same reason the throw
-                    // was: at three exchanges a phase, a fifth of a second of dead air each is a
-                    // luxury.
+                    // This bird is SPENT. It had its one extra life, somebody has had the last touch on
+                    // it, and the stream hands over to the other garden — "핑퐁된 거위는 두번째 상대가
+                    // 튕기거나 튕겨내지 못할때 소멸". A short pause so the raid has a pulse rather than
+                    // being a continuous stream, and the pause SHRINKS as the raid heats up, which is
+                    // escalation the speed cap cannot supply.
                     _gooseTimer += dt;
-                    if (_gooseTimer >= 0.35f)
+                    if (_gooseTimer >= PacedGap(0.35f))
                     {
                         _goose.gameObject.SetActive(false);
-                        if (State == Phase.Live) StartDive();
+                        if (State == Phase.Live) NextInStream();
                         else _gooseState = GooseState.Gone;
                     }
                     break;
@@ -1265,7 +1857,7 @@ namespace DuckMow
                     {
                         _goose.gameObject.SetActive(false);
                         _gooseState = GooseState.Gone;
-                        if (State == Phase.Live) _regroup = regroupSeconds;
+                        if (State == Phase.Live) _regroup = PacedGap(regroupSeconds);
                     }
                     break;
             }
@@ -1472,44 +2064,128 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Work out what a thrown goose hit, from where it came down.
+        /// A struck goose has come to rest. Resolve it, then either hand the stream on or send it back.
+        ///
+        /// One place for the end of a launch because there are two ways into it — settled after its
+        /// bounces, or out of airtime — and they used to duplicate four lines each. The bird ALWAYS leaves
+        /// play from here unless the rival returned it, which is the rule that stops the ping-pong: a
+        /// goose gets one keeper attempt, and after that the exchange is over however it went.
+        /// </summary>
+        void SettleLaunched()
+        {
+            if (LandLaunched()) return;   // returned by their keeper: it is already diving at the duck
+
+            _gooseState = GooseState.Returning;
+            _gooseTimer = 0f;
+            _gooseBounces = 0;
+        }
+
+        /// <summary>
+        /// Work out what a thrown goose hit, from where it came down. True if the rival returned it.
         ///
         /// By position, never by intention. A throw that falls short lands in the open ground between
         /// the gardens and harms nobody; one sent into the player's own flowers harms the player. That
         /// second case is the real cost of a scrappy hit, and it is why the tiers matter beyond the
         /// noise they make — only a good or perfect strike gets to choose where the bird goes.
+        ///
+        /// THE RIVAL NOW STANDS IN THE WAY. A bird that reaches their garden used to score on arrival, so
+        /// the far end was a wall with a hit-box; now it gets one attempt from whoever is defending it, and
+        /// how well the player placed the bird is what decides whether that attempt has a chance. Reaching
+        /// their garden is no longer the same thing as beating them, and the difference between the two is
+        /// the skill the phase is actually about.
         /// </summary>
-        void LandLaunched()
+        bool LandLaunched()
         {
-            if (_arena == null) return;
+            if (_arena == null) return false;
             Vector3 flat = new Vector3(_goosePos.x, 0f, _goosePos.z);
+
+            // WHERE IT ACTUALLY CAME DOWN, said out loud. Gated on the greybox flag like the readout.
+            //
+            // This exists because the first measured raid reported five good parries and zero geese on the
+            // rival's beds, and nothing on screen or in the log could say why: a throw that lands on open
+            // pitch resolves to no damage, no sound and no counter moving, so it is indistinguishable from
+            // a throw that scored and from one that never happened. The one number that explains it — how
+            // far up the fifty metres the bird got — was the one number nobody could see.
+            if (showReadout)
+            {
+                float up = Vector3.Dot(flat - _arena.PlayerGardenCentre, _toOpponent);
+                Debug.Log($"[Duck] ball down {up:0.0} m upfield of {_arena.GardenGap:0} " +
+                          $"({(_arena.IsInsideGarden(flat, false) ? "IN THEIR GARDEN" : _arena.IsInsideGarden(flat, true) ? "in my own" : "open pitch")})" +
+                          $" after a {LastStrikeTier} strike.");
+            }
 
             if (_arena.IsInsideGarden(flat, playerSide: false))
             {
+                // Their attempt, before any damage. Saved and the bird is on its way back at the duck with
+                // nothing broken; beaten and it comes down in their flowers.
+                if (KeeperAttempt(flat, watchedItComeIn: false))
+                {
+                    KeeperReturn();
+                    return true;
+                }
+
                 var bed = _arena.NearestAlive(flat, false);
                 int killed = _arena.Damage(bed != null ? bed.position : flat, crashRadius, false,
                                            bedsPerCrash, _theirCap - _arena.OpponentBedsLost);
-                if (killed <= 0) return;
+                if (killed <= 0) return false;
 
                 _outcome.hitsOnOpponent++;
                 AudioDirector.Instance?.CrowdCheer(0.75f);
                 _crowd?.Excite(0.7f);
                 PunchJudges(0.7f);
-                return;
+                _fx?.Dirt(bed != null ? bed.position : flat, 0.8f);
+                ReactOpponent(0.9f, inTheirFavour: false);
+                return false;
             }
 
-            if (!_arena.IsInsideGarden(flat, playerSide: true)) return;
+            if (!_arena.IsInsideGarden(flat, playerSide: true)) return false;
 
             var mine = _arena.NearestAlive(flat, true);
             int lost = _arena.Damage(mine != null ? mine.position : flat, crashRadius, true,
                                      bedsPerCrash, _myCap - _arena.PlayerBedsLost);
-            if (lost <= 0) return;
+            if (lost <= 0) return false;
 
             _outcome.ownGoals++;
             var audio = AudioDirector.Instance;
             audio?.CrowdGroan(0.6f);
             audio?.PlayOne(audio.quackAnnoyed, 0.6f);
             PunchJudges(-0.5f);
+            return false;
+        }
+
+        /// <summary>
+        /// A goose the RIVAL failed to keep out. Their beds, their fault, and none of the player's doing.
+        ///
+        /// Counted apart from <see cref="Outcome.hitsOnOpponent"/> and deliberately quieter than one the
+        /// player put there: it still moves the match toward a win, because the rule is simply whichever
+        /// garden falls first, but the award must not pay a mark for something that happened at the far end
+        /// while the duck was parked. The crowd notices; the bench does not credit it.
+        /// </summary>
+        void RivalConcedes()
+        {
+            int killed = _arena != null
+                ? _arena.Damage(_diveTarget, crashRadius, false, bedsPerCrash,
+                                _theirCap - _arena.OpponentBedsLost) : 0;
+
+            _outcome.rivalConceded += killed > 0 ? 1 : 0;
+
+            _goosePos = new Vector3(_diveTarget.x, 0.35f, _diveTarget.z);
+            PlaceGoose();
+            _gooseState = GooseState.Crashing;
+            _gooseTimer = 0f;
+
+            // No hit stop, no bonk, no shake. Fifty metres away and nothing touched the machine — freezing
+            // the clock for it would give a far-end event the punctuation reserved for contact.
+            _fx?.Dirt(_diveTarget, killed > 0 ? 0.8f : 0.45f);
+            LowThud(0.3f);
+
+            var audio = AudioDirector.Instance;
+            if (audio != null)
+            {
+                audio.PlayOne(Pick(audio.bonks), 0.3f);
+                if (killed > 0) audio.CrowdCheer(0.5f);
+            }
+            _crowd?.Excite(killed > 0 ? 0.45f : 0.2f);
         }
 
         /// <summary>
@@ -1790,36 +2466,47 @@ namespace DuckMow
                 _readout.normal.textColor = Color.white;
             }
 
-            float left = State == Phase.Live ? Mathf.Max(0f, liveSeconds - _stateTime) : 0f;
+            // Budget REMAINING, labelled as a budget. It used to be the phase's whole clock and it is now
+            // only the ceiling, so the readout says which it is — a reviewer watching this number tick down
+            // needs to know that reaching zero is a diagnostic, not the design.
+            float budgetLeft = State == Phase.Live ? Mathf.Max(0f, raidBudgetSeconds - _stateTime) : 0f;
             Tier now = Judge();
-            float dist = _gooseState == GooseState.Diving && _mower != null
+            float dist = GooseComingAtMe && _mower != null
                 ? Vector3.Distance(_goosePos, _mower.transform.position) : -1f;
             float v = CurrentDiveSpeed();
 
-            GUI.Box(new Rect(12f, 12f, 400f, 244f), GUIContent.none);
-            Line(0, $"RALLY (greybox)   {State}   {left:0.0} s");
-            Line(1, $"WASD drive · E honk    goose {_gooseState}");
-            Line(2, $"rally x{Rally}   dive {v:0.0} m/s   " +
+            GUI.Box(new Rect(12f, 12f, 430f, 290f), GUIContent.none);
+            Line(0, $"RAID (greybox)   {State}   budget {budgetLeft:0.0} s left");
+            Line(1, $"WASD drive · E honk    goose {_gooseState} " +
+                    $"→ {(_diveAtPlayer ? "AT ME" : "AT THEM")}   exchange {_exchanges}");
+            Line(2, $"rally x{Rally}   dive {v:0.0} m/s   heat {MatchHeat:0.00}   " +
                     (_recovery > 0f ? "RECOVERING" : now != Tier.Miss ? now.ToString().ToUpper() : "—") +
                     (_armedRemaining > 0 ? $"   [armed {_armedTier} x{_armedRemaining}]" : ""));
             Line(3, $"range {(dist >= 0f ? dist.ToString("0.0") + " m" : "—")}   " +
-                    $"P<{perfectRadius:0.0} G<{goodRadius:0.0} N<{parryRadius:0.0}");
+                    $"P<{perfectRadius:0.0} G<{goodRadius:0.0} N<{parryRadius:0.0}   " +
+                    $"their keeper {(_keeperAttemptsLeft > 0 ? "has a go left" : "spent")}");
             // The windows are not settings, they are 2r/v — so print them, because they are the thing
             // being judged and they change every exchange.
             Line(4, $"windows  P {2f * perfectRadius / v:0.00}s  G {2f * goodRadius / v:0.00}s  " +
                     $"N {2f * parryRadius / v:0.00}s");
             Line(5, $"parries {_outcome.parries} ({_outcome.perfects}P {_outcome.goods}G " +
                     $"{_outcome.normals}N)   best x{_outcome.longestRally}");
-            Line(6, $"my beds {(_arena != null ? _arena.PlayerBedsLost : 0)}/{_outcome.myBedsTotal} " +
-                    $"flat (cap {_myCap})");
-            Line(7, $"{_outcome.opponent} beds {(_arena != null ? _arena.OpponentBedsLost : 0)}/" +
-                    $"{_outcome.theirBedsTotal} flat (cap {_theirCap})");
+            // THE MATCH, and the two lines the phase is actually played on. Beds TO SPARE rather than beds
+            // lost: what the player needs is how close each garden is to falling, and "2 left" is a number
+            // that means something where "3/17 flat" needs arithmetic doing on it first.
+            Line(6, $"MY GARDEN   {MyBedsToSpare} of {_myCap} beds to spare" +
+                    $"   ({(_arena != null ? _arena.PlayerBedsLost : 0)}/{_outcome.myBedsTotal} flat)");
+            Line(7, $"{_outcome.opponent}   {TheirBedsToSpare} of {_theirCap} to spare" +
+                    $"   ({(_arena != null ? _arena.OpponentBedsLost : 0)}/{_outcome.theirBedsTotal} flat)");
             Line(8, $"crashes {_outcome.crashes}   wasted honks {_outcome.whiffs}   " +
-                    $"on them {_outcome.hitsOnOpponent}   own goals {_outcome.ownGoals}");
-            Line(9, State == Phase.Awarding
-                        ? $"AWARD  {(Award >= 0 ? "+" : "")}{Award}   (added to this round's score)"
-                        : $"award so far  {(ComputeAward(_outcome, awardFloor, awardCeiling) >= 0 ? "+" : "")}" +
-                          $"{ComputeAward(_outcome, awardFloor, awardCeiling)}");
+                    $"past keeper {_outcome.hitsOnOpponent}   they saved {_outcome.keeperSaves}   " +
+                    $"they conceded {_outcome.rivalConceded}   own goals {_outcome.ownGoals}");
+            Line(9, _outcome.result != MatchResult.None
+                        ? $"RESULT  {DescribeResult(_outcome)}"
+                        : "result  — still open —");
+            Line(10, State == Phase.Awarding
+                        ? $"AWARD  {Award:+0;-0;0}   (added to this round's score)"
+                        : $"award so far  {ComputeAward(_outcome, awardFloor, awardCeiling):+0;-0;0}");
         }
 
         void Line(int row, string text)

@@ -695,11 +695,19 @@ namespace DuckMow
                     // Budgeted, not trusted — the same rule the opening story is under. A phase that
                     // never reports itself over would strand the round one beat short of the reveal,
                     // with a finished picture nothing on screen is able to show.
-                    if (defence == null || defence.Finished || _stateTime > 30f)
+                    //
+                    // Read off the PHASE rather than hard-coded, which it was: a flat 30 s, sized against a
+                    // twelve-second raid. The raid now runs to a sixty-second budget and ends when a garden
+                    // falls, so a fixed 30 would have guillotined a perfectly healthy match at the halfway
+                    // point — and the warning below would have blamed the phase for it. GooseDefence adds up
+                    // its own beats in WorstCaseSeconds so the two can never drift apart again.
+                    float allowed = defence != null ? defence.WorstCaseSeconds : 30f;
+                    if (defence == null || defence.Finished || _stateTime > allowed)
                     {
                         if (defence != null && !defence.Finished)
                             Debug.LogWarning($"[Duck] defence phase did not finish within " +
-                                             $"{_stateTime:0.0}s; going to the reveal without it.");
+                                             $"{_stateTime:0.0}s of its {allowed:0.0}s allowance; " +
+                                             $"going to the reveal without it.");
                         SetState(GameState.Reveal);
                     }
                     break;
