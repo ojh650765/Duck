@@ -76,10 +76,17 @@ TAIL_COL  = "56514E"     # tail fan, darkest of the body tones
 RUMP_COL  = "8E867B"     # the goose's pale uppertail band. Deliberately mid, not white:
                          # a white rump would compete with the bill for "which end is
                          # which", and the bill has to win that.
-CHIN_COL  = "E8DFCB"     # the chinstrap. Small, on the throat, and it points forward.
+CHIN_COL  = "BCB3A0"     # the chinstrap: throat and lower cheek, and it points forward.
+                         # Held at mid value on purpose. At cream (E8DFCB) it out-shone the
+                         # bill, and the bill has to hold the brightest edge on the animal.
 EYE_COL   = "17130F"
-COVERT    = "7A7470"     # inner wing
+SECOND    = "645F5B"     # mid wing
 PRIMARY   = "4E4946"     # outer wing — darkest, so the beat reads as a dark arc on sky
+                         # The INNER wing is deliberately the plain body tone. It was a
+                         # lighter covert grey for one pass and the wing root read as a
+                         # shoulder pad bolted to the flank — a lighter value on a raised
+                         # surface is exactly how "applied panel" looks, which is the read
+                         # this whole rebuild exists to get rid of.
 LEG_COL   = "605A56"     # legs stay dark: they are anatomy, not signal
 BILL_TOP  = "FFC24A"
 BILL_LOW  = "F2A03D"     # duck_orange, so the goose's bill belongs to the same set
@@ -92,11 +99,13 @@ ROT0  = -15.0            # so vertex j sits at -15 + 30j degrees: column 0 strad
 # ------------------------------------------------------------------------- the spine
 # (y, z, rx, rz_up, rz_down, e)   forward is -Y.  Ring 0 is the tail tip.
 BODY = [
-    ( 0.760,  0.190, 0.030, 0.011, 0.010, 2.00),   # 0  tail tip
-    ( 0.665,  0.170, 0.105, 0.018, 0.015, 3.40),   # 1  tail fan — wide and flat, not a cube
-    ( 0.565,  0.142, 0.142, 0.027, 0.023, 3.20),   # 2
-    ( 0.475,  0.112, 0.132, 0.050, 0.042, 2.80),   # 3  tail root
-    ( 0.392,  0.080, 0.122, 0.084, 0.074, 2.50),   # 4  rump
+    ( 0.782,  0.166, 0.058, 0.014, 0.013, 2.60),   # 0  tail tip — BLUNT, not a spike: the
+                                                   #    first pass tapered to 30 mm and read
+                                                   #    as a dorsal fin from the side
+    ( 0.690,  0.158, 0.130, 0.019, 0.016, 3.60),   # 1  tail fan — wide and flat, not a cube
+    ( 0.585,  0.140, 0.168, 0.028, 0.024, 3.40),   # 2  widest point of the fan, 336 mm
+    ( 0.482,  0.112, 0.145, 0.052, 0.044, 2.90),   # 3  tail root
+    ( 0.392,  0.080, 0.124, 0.086, 0.076, 2.50),   # 4  rump
     ( 0.310,  0.048, 0.142, 0.122, 0.114, 2.40),   # 5  leg socket
     ( 0.230,  0.025, 0.163, 0.150, 0.150, 2.30),   # 6  leg socket
     ( 0.150,  0.008, 0.182, 0.170, 0.172, 2.25),   # 7  leg socket
@@ -108,22 +117,26 @@ BODY = [
     (-0.330,  0.022, 0.166, 0.166, 0.176, 2.20),   # 13
     (-0.405,  0.042, 0.140, 0.145, 0.162, 2.25),   # 14
     (-0.465,  0.072, 0.112, 0.118, 0.142, 2.30),   # 15 breast
+    # THE NECK IS THE SPECIES. The first pass ran the skull to y = -0.785 and the bird read
+    # as a duck: breast straight into head, no neck to speak of, and nothing for the strike
+    # to whip. It is now 370 mm from throat to nape and 20% thinner, which is what makes the
+    # head a separate mass in silhouette instead of a bulge on the chest.
     (-0.512,  0.100, 0.090, 0.094, 0.112, 2.30),   # 16 throat
-    (-0.545,  0.140, 0.076, 0.078, 0.086, 2.25),   # 17 neck base
-    (-0.580,  0.180, 0.068, 0.070, 0.072, 2.20),   # 18
-    (-0.620,  0.212, 0.064, 0.065, 0.066, 2.20),   # 19
-    (-0.662,  0.235, 0.062, 0.062, 0.062, 2.20),   # 20 mid neck
-    (-0.705,  0.250, 0.062, 0.062, 0.060, 2.20),   # 21
-    (-0.745,  0.259, 0.068, 0.070, 0.062, 2.20),   # 22 nape
-    (-0.785,  0.262, 0.072, 0.074, 0.064, 2.20),   # 23 skull
-    (-0.822,  0.256, 0.062, 0.058, 0.056, 2.40),   # 24 brow
-    (-0.852,  0.247, 0.052, 0.036, 0.038, 2.70),   # 25 bill base
-    (-0.905,  0.240, 0.046, 0.026, 0.030, 2.90),   # 26 bill
-    (-0.955,  0.235, 0.036, 0.019, 0.022, 3.00),   # 27 bill
-    (-0.988,  0.232, 0.020, 0.011, 0.013, 3.00),   # 28 bill tip
+    (-0.560,  0.146, 0.072, 0.074, 0.082, 2.25),   # 17 neck base
+    (-0.612,  0.192, 0.062, 0.063, 0.064, 2.20),   # 18
+    (-0.668,  0.230, 0.058, 0.059, 0.060, 2.20),   # 19
+    (-0.722,  0.258, 0.056, 0.056, 0.056, 2.20),   # 20 mid neck
+    (-0.778,  0.276, 0.056, 0.056, 0.055, 2.20),   # 21
+    (-0.828,  0.286, 0.064, 0.066, 0.058, 2.20),   # 22 nape
+    (-0.872,  0.288, 0.070, 0.072, 0.062, 2.20),   # 23 skull
+    (-0.910,  0.281, 0.060, 0.056, 0.054, 2.40),   # 24 brow
+    (-0.940,  0.271, 0.050, 0.035, 0.037, 2.70),   # 25 bill base
+    (-0.992,  0.263, 0.044, 0.025, 0.029, 2.90),   # 26 bill
+    (-1.040,  0.257, 0.034, 0.018, 0.021, 3.00),   # 27 bill
+    (-1.072,  0.254, 0.019, 0.011, 0.012, 3.00),   # 28 bill tip
 ]
-POLE_TAIL = Vector((0.0,  0.792, 0.198))
-POLE_BILL = Vector((0.0, -1.010, 0.231))
+POLE_TAIL = Vector((0.0,  0.800, 0.168))
+POLE_BILL = Vector((0.0, -1.094, 0.253))
 
 WING_RINGS = [8, 9, 10, 11, 12]      # which body rings the shoulder patch spans
 WING_COLS  = {"L": (1, 2), "R": (6, 5)}   # (lower row, upper row) — mirror pair
@@ -135,16 +148,17 @@ LEG_COLS   = {"L": (10, 11), "R": (9, 8)}
 # The leading edge runs nearly straight to the wrist and then sweeps hard back, which is
 # what makes a bird wing a bird wing in silhouette rather than a paddle.
 WING = [
-    (0.285, -0.100, 0.115, 0.312, 0.088, 1.0),
-    (0.375, -0.085, 0.126, 0.328, 0.070, 2.0),
-    (0.495, -0.045, 0.130, 0.312, 0.054, 3.5),    # 2 = wrist
-    (0.595,  0.010, 0.126, 0.272, 0.040, 5.0),
-    (0.675,  0.070, 0.117, 0.216, 0.029, 6.5),
+    (0.225, -0.098, 0.104, 0.318, 0.100, 0.5),    # hugs the flank: the shoulder needs two
+    (0.300, -0.096, 0.116, 0.316, 0.086, 1.0),    # short steps to become an aerofoil, or it
+    (0.392, -0.082, 0.126, 0.328, 0.068, 2.0),    # reads as a plate bolted to the side
+    (0.500, -0.045, 0.130, 0.312, 0.053, 3.5),    # 3 = wrist
+    (0.598,  0.010, 0.126, 0.272, 0.040, 5.0),
+    (0.676,  0.070, 0.117, 0.216, 0.029, 6.5),
     (0.740,  0.125, 0.104, 0.156, 0.021, 8.0),
     (0.782,  0.170, 0.090, 0.092, 0.013, 9.0),
     (0.805,  0.196, 0.080, 0.032, 0.006, 10.0),
 ]
-WRIST_M = 2
+WRIST_M = 3
 # chord stations, as a fraction of chord: +0.5 trailing edge .. -0.5 leading edge
 CHORD_T = (0.50, 0.22, -0.04, -0.28, -0.50)
 FLAT_H  = (0.50, 0.50, 0.50, 0.50, 0.50)
@@ -157,13 +171,13 @@ AIR_HD  = (0.07, 0.24, 0.30, 0.26, 0.10)
 # last three stations are the webbed foot: the section frame turns almost horizontal at
 # the ankle, so widening laterally and pinching vertically produces a flat paddle.
 LEG = [
-    (0.098, 0.268, -0.212, 0.030, 0.058),
-    (0.107, 0.312, -0.290, 0.021, 0.038),
-    (0.111, 0.360, -0.336, 0.015, 0.026),
-    (0.113, 0.402, -0.368, 0.013, 0.022),    # 3 = ankle
-    (0.113, 0.442, -0.379, 0.030, 0.014),
-    (0.113, 0.492, -0.386, 0.048, 0.010),
-    (0.113, 0.536, -0.390, 0.030, 0.008),
+    (0.098, 0.268, -0.212, 0.032, 0.060),
+    (0.107, 0.312, -0.290, 0.023, 0.040),
+    (0.111, 0.360, -0.336, 0.017, 0.028),
+    (0.113, 0.402, -0.368, 0.015, 0.024),    # 3 = ankle
+    (0.113, 0.444, -0.380, 0.036, 0.015),
+    (0.113, 0.496, -0.388, 0.056, 0.011),    # 112 mm across, 11 mm thick: a web
+    (0.113, 0.542, -0.392, 0.034, 0.009),
 ]
 ANKLE_M = 3
 
@@ -240,6 +254,21 @@ def grid_loft(mb, rings, col):
     return F, vr
 
 
+def fill_untagged(mb, tag):
+    """Give any vertex an operator created behind our back — an inset's rim, say — the
+    weighting tag of its nearest neighbour. Cheap at this vertex count and it means a
+    later detail pass cannot silently ship a vertex weighted to nothing."""
+    known = [(v, tag[v]) for v in mb.bm.verts if v in tag]
+    new = [v for v in mb.bm.verts if v not in tag]
+    for v in new:
+        src = min(known, key=lambda p: (p[0].co - v.co).length_squared)[1]
+        # a COPY: the socket passes append to tag[v]["limbs"], and a shared list would
+        # hand one vertex's wing influence to an unrelated one
+        tag[v] = dict(src, limbs=list(src["limbs"]))
+    if new:
+        print("  tagged %d generated vertices from their nearest neighbour" % len(new))
+
+
 def pole_fan(mb, ring, apex, col):
     p = mb.v(apex)
     n = len(ring)
@@ -283,7 +312,9 @@ def build():
         for v in row:
             tag[v] = {"k": float(k), "limbs": []}
     pole_fan(mb, vr[0], POLE_TAIL, TAIL_COL)
-    pole_fan(mb, vr[-1], POLE_BILL, BILL_TOP)
+    bill_faces = pole_fan(mb, vr[-1], POLE_BILL, BILL_TOP)
+    for k in range(25, 28):
+        bill_faces += [F[k][i] for i in range(NSIDE)]
     for v in mb.bm.verts:
         if v not in tag:      # the two apex vertices, nothing deleted yet so this is safe
             tag[v] = {"k": 0.0 if v.co.y > 0 else float(len(BODY) - 1), "limbs": []}
@@ -303,10 +334,21 @@ def build():
     paint(range(5, 16), (2, 3, 4), BACK_COL)
     paint(range(4, 17), (8, 9, 10), BELLY_COL)
     paint(range(19, 24), (2, 3, 4), BACK_COL)          # crown
-    paint(range(21, 24), (8, 9, 10), CHIN_COL)         # the chinstrap
-    paint([22], (0, 6), EYE_COL)                       # one facet an eye, both sides
+    paint(range(21, 22), (8, 9, 10), CHIN_COL)         # the chinstrap: throat...
+    paint(range(22, 24), (7, 8, 9, 10, 11), CHIN_COL)  # ...wrapping up both cheeks
     paint(range(25, 28), range(NSIDE), BILL_LOW)
     paint(range(25, 28), (2, 3, 4), BILL_TOP)
+
+    # THE EYE, as an inset rather than a painted facet. Colouring the whole quad put a
+    # 40 x 37 mm black rectangle on the side of the head — legible, and legible as a slot
+    # cut in a box. Insetting first gives a 20 mm patch with a rim of skin around it, and
+    # sinking it 3.5 mm lets the AO bake do the rest. Done here, BEFORE any face is
+    # deleted, so the inset's new vertices are created while nothing has been freed.
+    for c in (0, 6):
+        f = F[22][c]
+        if f and f.is_valid:
+            L.recess(mb, [f], 0.011, -0.0035, col=EYE_COL)
+    fill_untagged(mb, tag)
 
     # ---- wings.  Socket first: lift a one-column patch out of the flank and loft the
     #      wing from the vertices that are left.  The wing IS the body's skin.
@@ -330,7 +372,7 @@ def build():
             R = Matrix.Rotation(math.radians(tw), 3, 'X')
             cdir = R @ Vector((0, 1, 0))
             udir = R @ Vector((0, 0, 1))
-            b = min(1.0, m / 2.0)
+            b = min(1.0, m / 3.5)
             hu = [FLAT_H[c] + (AIR_HU[c] - FLAT_H[c]) * b for c in range(5)]
             hd = [FLAT_H[c] + (AIR_HD[c] - FLAT_H[c]) * b for c in range(5)]
             ctr = Vector((sx * x, yc, zc))
@@ -342,7 +384,7 @@ def build():
         print("  wing %s socket: root=(%.3f %.3f %.3f) pairing cost %.4f"
               % (side, root.x, root.y, root.z, dist))
         seq = [[wring(m)[p] for p in perm] for m in range(len(WING))]
-        rows, newv = extend(mb, loop, seq, COVERT)
+        rows, newv = extend(mb, loop, seq, BODY_COL)
 
         # Spanwise and chordwise parameters come from the RING INDICES the vertex was
         # built at, not from measuring its position back out again. perm is a rotation or
@@ -358,9 +400,11 @@ def build():
                 tag[v] = {"k": None, "home": "Chest",
                           "limbs": [("wing", side, max(0.0, min(1.0, s)),
                                      (4 - c) / 4.0, 1.0)]}
-        # colour by span: coverts, then the dark primaries that draw the beat on the sky
+        # Value darkens monotonically outboard — body tone, secondaries, primaries. Three
+        # feather groups, and the darkest is at the tip, which is the part that travels
+        # furthest during a beat and therefore does the most to draw the motion on the sky.
         for m, row in enumerate(rows):
-            c = COVERT if m <= 1 else (BODY_COL if m <= 3 else PRIMARY)
+            c = BODY_COL if m <= 3 else (SECOND if m <= 5 else PRIMARY)
             for f in row:
                 if f and f.is_valid:
                     f[mb.lay] = mb.cid(c)
@@ -460,6 +504,14 @@ def build():
     #      its remove_doubles would renumber vertices and silently invalidate every
     #      weight below, and this mesh has nothing to weld — every shared vertex is
     #      shared by construction.
+    # Which faces are the bill, decided by IDENTITY rather than by a y threshold. The
+    # threshold version worked until the neck was lengthened, at which point -0.845 quietly
+    # swallowed the whole skull and put the head on the bill's material slot — so the
+    # strike flash would have stopped at the neck. bmesh preserves face order into the
+    # Mesh, so recording indices here is exact.
+    mb.bm.faces.index_update()
+    bill_idx = {f.index for f in bill_faces if f and f.is_valid}
+
     mb.bm.verts.index_update()
     tags = {}
     for v in mb.bm.verts:
@@ -473,12 +525,12 @@ def build():
     # ---- the bill gets its own material slot.  This is the whole reason it can keep its
     #      colour through a strike: SetGooseHot swaps slot 0 and slot 1 is untouched.
     ob.data.materials.append(get_mat(MAT_BILL))
-    nbill = 0
     for p in ob.data.polygons:
-        if p.center.y < -0.845:
+        if p.index in bill_idx:
             p.material_index = 1
-            nbill += 1
-    print("  bill submesh: %d faces on slot 1" % nbill)
+    ys = [p.center.y for p in ob.data.polygons if p.index in bill_idx]
+    print("  bill submesh: %d faces on slot 1, y from %.3f to %.3f"
+          % (len(bill_idx), min(ys), max(ys)))
     return ob, tags, wing_bones, leg_bones
 
 
@@ -506,10 +558,10 @@ def build_rig(wing_bones, leg_bones):
     root = add_bone(eb, "Root", (0, 0, 0), (0, 0, 0.09))
     spine = add_bone(eb, "Spine", (0, 0.340, 0.055), (0, 0.020, -0.005), root)
     chest = add_bone(eb, "Chest", (0, 0.020, -0.005), (0, -0.420, 0.045), spine, True)
-    n1 = add_bone(eb, "Neck1", (0, -0.500, 0.092), (0, -0.600, 0.192), chest)
-    n2 = add_bone(eb, "Neck2", (0, -0.600, 0.192), (0, -0.712, 0.252), n1, True)
-    add_bone(eb, "Head", (0, -0.712, 0.252), (0, -1.000, 0.231), n2, True)
-    add_bone(eb, "Tail", (0, 0.440, 0.095), (0, 0.790, 0.196), spine)
+    n1 = add_bone(eb, "Neck1", (0, -0.505, 0.090), (0, -0.665, 0.228), chest)
+    n2 = add_bone(eb, "Neck2", (0, -0.665, 0.228), (0, -0.822, 0.284), n1, True)
+    add_bone(eb, "Head", (0, -0.822, 0.284), (0, -1.086, 0.253), n2, True)
+    add_bone(eb, "Tail", (0, 0.440, 0.095), (0, 0.798, 0.170), spine)
 
     for side in ("L", "R"):
         rt, wr, tp = wing_bones[side]
@@ -552,9 +604,9 @@ def skin(rig, ob, tags):
         step functions, so they partition to exactly 1 for every k by construction."""
         c1 = ss(1.5, 5.5, k)
         c2 = ss(8.0, 13.5, k)
-        c3 = ss(14.5, 17.5, k)
-        c4 = ss(17.5, 20.0, k)
-        c5 = ss(20.5, 22.5, k)
+        c3 = ss(14.5, 17.0, k)
+        c4 = ss(17.5, 20.5, k)
+        c5 = ss(20.5, 22.8, k)
         return {"Tail": 1 - c1, "Spine": c1 - c2, "Chest": c2 - c3,
                 "Neck1": c3 - c4, "Neck2": c4 - c5, "Head": c5}
 
@@ -763,19 +815,37 @@ def clip_struck(rig):
 
     The legs kick out of their tuck on the impact frame and drift back — the one part of
     the animal that says "this was involuntary".
+
+    WHY THE WINGS GO UP AND BACK AND NOT ALL THE WAY BACK. The first pass swept the inner
+    bone 62 degrees rearward with another 52 on the hand, on the reasoning that a struck
+    bird folds. Rendered, that put the wingtip behind the tail and folded the hand back
+    across the forearm: the wing self-intersected and the frames read as crumpled paper.
+    A wing that is 640 mm of one continuous skin cannot be folded like a real one without
+    the wrist tucking sideways, which this two-bone rig deliberately cannot do. Up and
+    back reads as a bird knocked out of the air, holds a clean silhouette, and — the point
+    of the pose — is STILL, which is what makes the absence of the beat readable.
     """
     act = new_action(rig, "Struck")
     wing = [
         (1,  22,  -6,  -8,  10, -10, -16),
-        (2,  30, -16, -18,  16, -22, -26),   # the check: wings still trying
-        (4, -12,  56,  22, -22,  46,  30),   # collapsed rearward
-        (9,  -6,  62,  18, -16,  52,  26),
-        (16, -2,  58,  14, -12,  46,  22),
-        (24,  4,  50,  10,  -8,  40,  18),
+        (2,  34, -18, -20,  20, -24, -28),   # the check: wings still trying
+        (4,  40,  28,  16,  22,  22,  24),   # flung up and back, and held
+        (9,  34,  28,  12,  18,  22,  20),   # sweep HOLDS from here: letting it wander
+        (16, 28,  28,  10,  14,  22,  18),   # made the settle read as a second event
+        (24, 24,  28,   8,  12,  22,  16),
     ]
+    # Peak dihedral is 40 + 22 and not 52 + 30. The taller version put the two wings
+    # nearly vertical and converging over the back, and from three quarters the pair read
+    # as one shell rather than as two wings. The struck bird is also the thing the player
+    # is tracking across the garden for up to four seconds, so its silhouette has to stay
+    # WIDE — a folded bird is a dot.
+    # The two wings do NOT do the same thing. A symmetrical collapse reads as a machine
+    # switching state; a bird that has been hit on one side goes over. The right wing runs
+    # a frame late and a fifth shallower, which with the neck's yaw is enough to make the
+    # whole event look like it happened TO the animal.
     for f, u, sw, tw, u2, sw2, tw2 in wing:
-        for side in ("L", "R"):
-            flap(rig, side, f, u, sw, tw, u2, sw2, tw2)
+        flap(rig, "L", f, u, sw, tw, u2, sw2, tw2)
+        flap(rig, "R", min(f + 1, 24), u * 0.80, sw * 1.15, tw, u2 * 0.80, sw2 * 1.15, tw2)
     neck = [(1, 0, 0), (3, 26, -10), (8, -30, 12), (13, 14, -7),
             (18, -7, 3), (24, 0, 0)]
     for f, up, yaw in neck:
@@ -851,7 +921,7 @@ def export(objs, filepath):
     bpy.ops.export_scene.fbx(
         filepath=filepath, use_selection=True, apply_unit_scale=True,
         apply_scale_options='FBX_SCALE_UNITS', axis_forward='-Z', axis_up='Y',
-        bake_space_transform=False, mesh_smooth_type='FACE', use_mesh_modifiers=False,
+        bake_space_transform=False, mesh_smooth_type='FACE', use_mesh_modifiers=True,
         colors_type='SRGB', path_mode='COPY',
         object_types={'MESH', 'EMPTY', 'ARMATURE'},
         add_leaf_bones=False, primary_bone_axis='Y', secondary_bone_axis='X',

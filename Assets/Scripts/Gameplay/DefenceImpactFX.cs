@@ -35,6 +35,7 @@ namespace DuckMow
         const int GritCount    = 14;
         const int SkidCount    = 16;
         const int RingCount    = 3;
+        const int ShockCount   = 3;
 
         struct Bit
         {
@@ -58,21 +59,29 @@ namespace DuckMow
             public float radius0, radius1, thickness;
         }
         readonly Ring[] _rings = new Ring[RingCount];
+        readonly Ring[] _shocks = new Ring[ShockCount];
 
-        int _nextFeather, _nextGrit, _nextRing, _nextSkid;
+        int _nextFeather, _nextGrit, _nextRing, _nextSkid, _nextShock;
 
-        Mesh _box, _ring;
+        Mesh _box, _ring, _wedge;
         Material _matFeather, _matDirt, _matGrass, _matRing, _matSkid;
         System.Random _rng;
 
         // ------------------------------------------------------------------ build
 
-        public void Setup(System.Random rng)
+        public void Setup(System.Random rng, float coneHalfAngle = 60f)
         {
             _rng = rng ?? new System.Random(7);
 
             _box  = BuildBox();
             _ring = BuildRing(28);
+            // The cue is a WEDGE, not a ring, because the rule it describes is a cone.
+            //
+            // A full ring around the machine says "anywhere inside this counts", and once contact became
+            // directional that was simply false — the tell would have been teaching the player the wrong
+            // rule, which is worse than no tell. It is built to the same half-angle the strike test uses,
+            // so if that number is retuned the indicator follows it instead of drifting out of agreement.
+            _wedge = BuildWedge(28, coneHalfAngle);
 
             // Cream feathers against a dark goose and pale sage ground; the ring takes the same hot
             // orange the struck goose flares to, so the two halves of the impact read as one event.
@@ -92,6 +101,16 @@ namespace DuckMow
                 _grit[i].t = MakeBit("Grit", i % 3 == 0 ? _matGrass : _matDirt);
             for (int i = 0; i < SkidCount; i++) _skid[i].t = MakeBit("Skid", _matSkid);
             for (int i = 0; i < RingCount; i++) _rings[i].t = MakeRing();
+            // Slot zero shows the cue and therefore wears the wedge; the impact slots stay rings.
+            if (_rings.Length > 0 && _rings[0].t != null)
+                _rings[0].t.GetComponent<MeshFilter>().sharedMesh = _wedge;
+
+            for (int i = 0; i < ShockCount; i++)
+            {
+                _shocks[i].t = MakeRing();
+                _shocks[i].t.name = "HornShock";
+                _shocks[i].t.GetComponent<MeshFilter>().sharedMesh = _wedge;
+            }
         }
 
         Transform MakeBit(string name, Material mat)
@@ -208,7 +227,7 @@ namespace DuckMow
         /// Held rather than emitted: called every frame with a fresh radius while the bird is inbound, so
         /// it tracks the machine instead of being left behind at the point it was spawned.
         /// </summary>
-        public void TimingRing(Vector3 centre, float radius, float strength)
+        public void TimingRing(Vector3 centre, float radius, float strength, Quaternion facing)
         {
             if (_rings.Length == 0) return;
 
@@ -217,7 +236,8 @@ namespace DuckMow
             ref var r = ref _rings[0];
             r.life = 0f;                        // never ticked; this one is driven from outside
             r.t.position = new Vector3(centre.x, 0.07f, centre.z);
-            r.t.rotation = Quaternion.identity;
+            // Turned with the machine, so the wedge points where the horn will actually reach.
+            r.t.rotation = facing;
             r.t.localScale = new Vector3(radius, Mathf.Lerp(0.06f, 0.20f, strength), radius);
             r.t.gameObject.SetActive(true);
         }
@@ -233,10 +253,30 @@ namespace DuckMow
         /// Wide, fast and thin: it has to read as a SOUND leaving the mower rather than as an impact, so
         /// it travels further than a strike ring and carries almost no thickness.
         /// </summary>
-        public void Shock(Vector3 pos, float strength)
+        public void Shock(Vector3 pos, Quaternion facing, float strength)
         {
+            if (_shocks.Length == 0) return;
             strength = Mathf.Clamp01(strength);
-            EmitRing(pos, 0.6f, 4.5f + 2.5f * strength, 0.09f + 0.05f * strength, 0.34f);
+
+            // DIRECTIONAL, on the same wedge the strike cone uses.
+            //
+            // The first version was a full ring, and once contact became a forward cone that ring was
+            // teaching the wrong rule: it said the honk goes out in every direction when it does not. The
+            // player asked for it plainly — "E 현재 방향으로 소리 파장" — and it is also the only version
+            // that is honest. A cue whose shape disagrees with the hit test is worse than no cue.
+            ref var r = ref _shocks[_nextShock];
+            _nextShock = (_nextShock + 1) % ShockCount;
+
+            r.t.position = new Vector3(pos.x, 0.09f, pos.z);
+            r.t.rotation = facing;
+            r.radius0 = 0.7f;
+            // Reaches beyond the strike cone on purpose: sound carries further than the swing, and a
+            // wave that stopped exactly at the hit radius would read as a hitbox rather than as a noise.
+            r.radius1 = 5.5f + 3f * strength;
+            r.thickness = 0.10f + 0.06f * strength;
+            r.life = r.maxLife = 0.30f;
+            r.t.localScale = new Vector3(r.radius0, r.thickness, r.radius0);
+            r.t.gameObject.SetActive(true);
         }
 
         /// <summary>Take the cue down — the exchange is over, one way or the other.</summary>
@@ -345,10 +385,16 @@ namespace DuckMow
             // Marks do not move; they only run down their clock and shrink out.
             for (int i = 0; i < _skid.Length; i++) StepStatic(ref _skid[i], dt);
 
-            // From 1: slot zero is the timing cue and has no lifetime to tick.
-            for (int i = 1; i < _rings.Length; i++)
+            StepRings(_rings, dt, from: 1);   // slot zero is the held cue and has no lifetime
+            StepRings(_shocks, dt, from: 0);
+        }
+
+        /// <summary>Expand-and-thin, shared by the impact rings and the horn's wave.</summary>
+        void StepRings(Ring[] set, float dt, int from)
+        {
+            for (int i = from; i < set.Length; i++)
             {
-                ref var r = ref _rings[i];
+                ref var r = ref set[i];
                 if (r.life <= 0f) continue;
                 r.life -= dt;
                 float k = 1f - Mathf.Clamp01(r.life / r.maxLife);
@@ -462,6 +508,36 @@ namespace DuckMow
         /// A flat annulus in the XZ plane, unit outer radius. Scaled non-uniformly at runtime: X and Z
         /// carry the radius, Y carries the thickness that collapses as it fades.
         /// </summary>
+        /// <summary>
+        /// An annulus SECTOR — the ring above, cut down to the arc the strike cone covers, centred on
+        /// local +Z so it can be turned with the machine's nose.
+        /// </summary>
+        static Mesh BuildWedge(int segments, float halfAngleDeg)
+        {
+            var m = new Mesh { name = "FXWedge", hideFlags = HideFlags.DontSave };
+            const float inner = 0.72f;
+            float half = Mathf.Clamp(halfAngleDeg, 5f, 179f) * Mathf.Deg2Rad;
+
+            var verts = new Vector3[(segments + 1) * 2];
+            var tris = new int[segments * 6];
+            for (int i = 0; i <= segments; i++)
+            {
+                // From -half to +half about +Z.
+                float a = Mathf.PI * 0.5f - (-half + (i / (float)segments) * half * 2f);
+                float ca = Mathf.Cos(a), sa = Mathf.Sin(a);
+                verts[i * 2] = new Vector3(ca * inner, 0f, sa * inner);
+                verts[i * 2 + 1] = new Vector3(ca, 0f, sa);
+            }
+            for (int i = 0; i < segments; i++)
+            {
+                int o = i * 6, n = i + 1;
+                tris[o] = i * 2; tris[o + 1] = i * 2 + 1; tris[o + 2] = n * 2 + 1;
+                tris[o + 3] = i * 2; tris[o + 4] = n * 2 + 1; tris[o + 5] = n * 2;
+            }
+            m.vertices = verts; m.triangles = tris; m.RecalculateNormals(); m.RecalculateBounds();
+            return m;
+        }
+
         static Mesh BuildRing(int segments)
         {
             var m = new Mesh { name = "FXRing", hideFlags = HideFlags.DontSave };
@@ -488,6 +564,7 @@ namespace DuckMow
         {
             if (_box != null) DestroyImmediate(_box);
             if (_ring != null) DestroyImmediate(_ring);
+            if (_wedge != null) DestroyImmediate(_wedge);
             foreach (var mat in new[] { _matFeather, _matDirt, _matGrass, _matRing, _matSkid })
                 if (mat != null) DestroyImmediate(mat);
         }

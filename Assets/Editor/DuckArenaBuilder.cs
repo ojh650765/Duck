@@ -74,15 +74,48 @@ namespace DuckMow.EditorTools
 
             var root = new GameObject("~ Arena").transform;
 
-            Vector3 playerCentre = Vector3.zero;
+            // Centred on the venue's field and split along its long axis, so both gardens sit on mown
+            // ground and the judges' bench keeps the position the venue already gives it.
             Vector3 toward = Vector3.forward;
-            Vector3 opponentCentre = playerCentre + toward * GoalGap;
             Vector3 side = Vector3.Cross(Vector3.up, toward).normalized;
+            Vector3 playerCentre = -toward * (GoalGap * 0.5f);
+            Vector3 opponentCentre = playerCentre + toward * GoalGap;
 
-            BuildPitch(root, playerCentre, toward);
-            Lanes(root, playerCentre, toward, side);
-            Crowd(root, playerCentre, toward, side);
-            Dress(root, playerCentre, toward, side);
+            // THE VENUE'S OWN LEVEL DESIGN, not a pitch built here.
+            //
+            // The player's verdict on the hand-built version was "레벨 디자인이 쥬시하지 않음", followed
+            // by "레벨을 이전 아레나 레벨 디자인 가져오고 정원만 재배치해" — and that is the right call
+            // rather than a shortcut. This project has spent weeks art-directing the venue: ground with
+            // its own detail, a hedge ring, the authored stands, the awning, tents, the pond, foliage,
+            // landmarks, the cardinal ring, the judges' backdrop, field props and a seated crowd. The
+            // arena reproduced none of it and could not, because every one of those passes is tuned
+            // against the venue's own coordinates.
+            //
+            // So the arena IS the venue now, with two gardens placed in it. Everything I built by hand —
+            // a flat pitch, painted lane stripes, a three-tier stand, a hedge run, a treeline, five tents
+            // and a hill ridge — is gone, and it should be: it was a worse copy of what already existed
+            // twenty metres away in the same project.
+            //
+            // The gardens straddle the field's long axis. Field.Half is 32 m, so a 50 m goal separation
+            // fits inside the mown area with room at both ends for the mower to overshoot and recover.
+            DuckEnvironmentBuilder.Build();
+
+            // GRASS, AND THE GROUND ITSELF.
+            //
+            // Removing my hand-built pitch took the arena's floor with it: the venue's ground pass only
+            // colliders the outer apron ring, and the mown centre is built by the lawn instead — so the
+            // middle of the field was a hole and the mower fell through it forever. "계속 떨어짐" was
+            // exactly that, and it was my doing.
+            //
+            // GrassField is the right fix rather than a bare plane, because it supplies both halves of
+            // the problem at once: the blade layer that stops the ground reading as a flat matte sheet
+            // ("잔디 깎기는 안되는걸로 다 매트해서 이상해서"), and its own BoxCollider across the whole
+            // field. No CutMask here on purpose — nothing is mowable in the arena, so the grass simply
+            // stands uncut, which is what a finished garden's lawn should look like anyway.
+            var lawn = new GameObject("Lawn").transform;
+            var grass = lawn.gameObject.AddComponent<GrassField>();
+            grass.groundMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/M_GrassGround.mat");
+            grass.bladeMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/M_GrassBlades.mat");
 
             var playerBeds = new List<Transform>(32);
             var opponentBeds = new List<Transform>(32);
@@ -242,6 +275,18 @@ namespace DuckMow.EditorTools
             // player who cannot see where one bed ends and the next begins cannot read "four gone" off
             // the ground. Six leaves 1.7 m centres, which clears the mesh with a gap to spare.
             const int perRow = 9;
+
+            // A gravel apron under the whole planting, and edging around it.
+            //
+            // "각 정원 블록이 연결될만한 느낌을 주는 그런거 없냐" — and the answer a real garden gives is
+            // that beds are never loose objects on a lawn: they sit in a bed of gravel or bark, inside a
+            // kerb, with paths between them. Without that the eye reads N separate trays; with it, it
+            // reads ONE garden containing N plantings, which is also what makes losing four of them feel
+            // like damage to a thing rather than the removal of four things.
+            //
+            // Laid before the beds so the beds sit on top of it, and inset from the fence so the kerb is
+            // visibly inside the enclosure rather than doubling it.
+            GardenFloor(parent, centre, facing, side);
             const float bow = 1.9f;          // how far the arc's middle bulges toward the pitch
             float[] rowDepth = { 1.5f, 3.4f };
 
@@ -261,9 +306,59 @@ namespace DuckMow.EditorTools
                     float curve = (1f - Mathf.Abs(t * 2f - 1f)) * bow;
                     Vector3 p = centre + side * across + facing * (rowDepth[row] - curve);
 
-                    into.Add(PlantBed(parent, p, facing, mat, i + row * perRow));
+                    // Turned and jittered per bed. The authored flowerbed has a rectangular tray, and
+                    // laid on a strict grid at a shared angle forty of them read as "네모 블록" — a car
+                    // park of boxes rather than a garden. Rotation is what breaks that: a bed at nine
+                    // degrees off its neighbour stops the eye finding the rows, and it costs nothing
+                    // because the bed root carries no non-uniform scale for a rotation to shear.
+                    var jitterRng = new System.Random((i + row * 31) * 7717 + 5);
+                    float J(float a, float b) => a + (float)jitterRng.NextDouble() * (b - a);
+                    Vector3 jittered = p + side * J(-0.35f, 0.35f) + facing * J(-0.5f, 0.5f);
+                    Quaternion turned = Quaternion.LookRotation(facing, Vector3.up)
+                                      * Quaternion.Euler(0f, J(-26f, 26f), 0f);
+                    into.Add(PlantBed(parent, jittered, turned * Vector3.forward, mat, i + row * perRow));
                 }
             }
+        }
+
+        /// <summary>
+        /// The ground the planting sits in: a gravel apron, a kerb around it, and paths between the rows.
+        ///
+        /// This is what turns a scatter of trays into a garden. The apron gives every bed a common
+        /// surface to belong to, the kerb draws a boundary the eye can close, and the two cross paths
+        /// break the apron into quarters so it reads as laid out rather than as a slab.
+        /// </summary>
+        static void GardenFloor(Transform parent, Vector3 centre, Vector3 facing, Vector3 side)
+        {
+            var gravel = DuckSceneBuilder.EnsureLit("M_ArenaGravel", "#9C9385");
+            var kerb = DuckSceneBuilder.EnsureLit("M_ArenaKerb", "#B8AE9C");
+            var path = DuckSceneBuilder.EnsureLit("M_ArenaPath", "#8A8073");
+
+            float halfW = GardenHalf * 0.94f;
+            float halfD = 2.9f;
+            Vector3 mid = centre + facing * 2.45f;
+            var rot = Quaternion.LookRotation(facing, Vector3.up);
+
+            // The apron. Barely above the grass so blades still break its edge.
+            Box(parent, "GardenFloor", gravel, new Vector3(halfW * 2f, 0.04f, halfD * 2f),
+                mid + Vector3.up * 0.02f, rot, keepCollider: false, castShadows: false);
+
+            // Kerb: four low rails framing it. Two long, two short, so the corners meet.
+            foreach (int s in new[] { -1, 1 })
+            {
+                Box(parent, "GardenKerb", kerb, new Vector3(halfW * 2f + 0.3f, 0.13f, 0.15f),
+                    mid + facing * (halfD * s) + Vector3.up * 0.065f, rot,
+                    keepCollider: false, castShadows: true);
+                Box(parent, "GardenKerb", kerb, new Vector3(0.15f, 0.13f, halfD * 2f),
+                    mid + side * (halfW * s) + Vector3.up * 0.065f, rot,
+                    keepCollider: false, castShadows: true);
+            }
+
+            // Two paths across it, so the apron is quartered rather than blank.
+            Box(parent, "GardenPath", path, new Vector3(halfW * 2f, 0.05f, 0.55f),
+                mid + Vector3.up * 0.03f, rot, keepCollider: false, castShadows: false);
+            Box(parent, "GardenPath", path, new Vector3(0.55f, 0.05f, halfD * 2f),
+                mid + Vector3.up * 0.03f, rot, keepCollider: false, castShadows: false);
         }
 
         /// <summary>

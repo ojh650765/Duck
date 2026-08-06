@@ -59,8 +59,28 @@ namespace DuckMow
 
         [Header("Shape of the phase")]
         public float briefSeconds = 1.4f;
-        [Tooltip("The contested window.")]
-        public float liveSeconds = 12f;
+        /// <summary>
+        /// THE BUDGET, NOT THE LENGTH. The raid ends when a garden falls; this only stops it running
+        /// forever if nothing ever does.
+        ///
+        /// It replaces `liveSeconds = 12f`, which was the single worst thing in this phase. Twelve
+        /// seconds is about three exchanges at the tuned dive speeds, so the contest stopped mid-argument
+        /// for no reason the player could see — the player's own verdict was "왜 거위는 3번만 오고 끝남?
+        /// 게임스럽지 않아": why do only three geese come and then it ends, that is not game-like. They
+        /// were right, and a stopwatch is simply the wrong shape for this beat. A raid on a clock has no
+        /// win, no loss, and no reason for any single exchange to matter; nothing the player does can
+        /// bring it closer to an end, so every exchange is worth exactly the same as every other one.
+        ///
+        /// So the clock stops being the condition and becomes the ceiling — the same rule every other
+        /// beat here is under, and it is generous on purpose: a minute holds fourteen or fifteen
+        /// exchanges, four times what the old timer allowed, and reaching it at all means neither garden
+        /// was breaking. When it IS reached the raid is decided on beds and said so plainly in the log,
+        /// so a budget finish is never mistaken for a real result.
+        /// </summary>
+        [Tooltip("Ceiling on the whole contest, in seconds. NOT the length — the raid normally ends when " +
+                 "a garden reaches its damage cap. This only stops it running forever if the geese stop " +
+                 "arriving or the player parks.")]
+        public float raidBudgetSeconds = 60f;
         [Tooltip("Ceiling on the tail, so a goose mid-crash when the clock runs out still finishes. " +
                  "A cap rather than a duration: cutting a crash short would make the damage depend " +
                  "on when the timer happened to land.")]
@@ -69,6 +89,11 @@ namespace DuckMow
         [Header("The parry")]
         [Tooltip("Metres. Outside this the horn does nothing.")]
         public float parryRadius = 8f;
+        [Tooltip("Half-angle of the strike cone, in degrees, measured from the machine's nose on the " +
+                 "horizontal. Direction decides whether the horn connects at all; distance decides the " +
+                 "grade. 60 is forgiving enough to be fun and tight enough that facing the wrong way is " +
+                 "a real mistake — a full 180 would be the old bubble with extra steps.")]
+        [Range(20f, 120f)] public float parryHalfAngle = 60f;
         [Tooltip("Metres for a GOOD hit — honours the aim, so it can reach the opponent.")]
         public float goodRadius = 4.6f;
         [Tooltip("Metres for a PERFECT hit. Slow motion, the hardest launch, the loudest crowd.")]
@@ -723,7 +748,7 @@ namespace DuckMow
             if (_fx == null)
             {
                 _fx = GetComponent<DefenceImpactFX>() ?? gameObject.AddComponent<DefenceImpactFX>();
-                _fx.Setup(_rng);
+                _fx.Setup(_rng, parryHalfAngle);
             }
             _fx.Clear();
         }
@@ -743,7 +768,12 @@ namespace DuckMow
             // only verb and it had no output of its own: a mistimed press produced nothing at all and
             // read as a dropped input rather than as a miss. Weaker while recovering, so a mashed horn
             // still says "not yet" rather than rewarding the mash.
-            _fx?.Shock(_mower.transform.position, _recovery > 0f ? 0.35f : 1f);
+            // Turned with the nose, so the wave shows the cone the horn actually reaches through.
+            Vector3 nose = Vector3.ProjectOnPlane(_mower.transform.forward, Vector3.up);
+            _fx?.Shock(_mower.transform.position,
+                       Quaternion.LookRotation(nose.sqrMagnitude > 1e-4f ? nose.normalized : _toOpponent,
+                                               Vector3.up),
+                       _recovery > 0f ? 0.35f : 1f);
 
             if (_recovery > 0f) return;
 
@@ -768,11 +798,39 @@ namespace DuckMow
         {
             if (_gooseState != GooseState.Diving || _mower == null) return Tier.Miss;
 
-            float d = Vector3.Distance(_goosePos, _mower.transform.position);
-            if (d <= perfectRadius) return Tier.Perfect;
-            if (d <= goodRadius) return Tier.Good;
-            if (d <= parryRadius) return Tier.Normal;
-            return Tier.Miss;
+            // A CONE out of the machine's nose, not a bubble around it.
+            //
+            // The test used to be distance alone, so the horn connected with a goose directly behind the
+            // mower as readily as one in front of it. Aim changed only how accurately the bird was
+            // returned — never whether it was hit — which is why the phase read as swatting rather than
+            // as striking: there was no wrong way to be facing.
+            //
+            // Now direction decides contact and distance decides grade. Pointing at the bird is the
+            // skill; being close to it is the reward.
+            //
+            // Measured on the HORIZONTAL only. A diving goose arrives from twenty metres up, so a true
+            // 3D cone from a ground-level forward vector would exclude the very bird the player is
+            // plainly aiming at — the player reads this as "am I facing it", and facing is a compass
+            // question, not a spherical one.
+            Vector3 toGoose = _goosePos - _mower.transform.position;
+            float d = toGoose.magnitude;
+            if (d > parryRadius) return Tier.Miss;
+
+            Vector3 flatTo = toGoose; flatTo.y = 0f;
+            Vector3 nose = _mower.transform.forward; nose.y = 0f;
+            // Directly overhead: no meaningful bearing, so the cone cannot reject it. Treat a bird on
+            // top of the machine as in front of it rather than as a miss nobody could explain.
+            bool overhead = flatTo.sqrMagnitude < 0.36f;
+            float bearing = overhead ? 0f : Vector3.Angle(nose, flatTo);
+            if (bearing > parryHalfAngle) return Tier.Miss;
+
+            // Grade on distance as before, but tightened by how square the hit was: a bird at the edge
+            // of the cone cannot be a PERFECT even from point blank. That is what stops the widened cone
+            // from being strictly more generous than the bubble it replaced.
+            float square = 1f - Mathf.Clamp01(bearing / Mathf.Max(parryHalfAngle, 1f));
+            if (d <= perfectRadius && square > 0.55f) return Tier.Perfect;
+            if (d <= goodRadius && square > 0.25f) return Tier.Good;
+            return Tier.Normal;
         }
 
         void Strike(Tier tier)
@@ -824,8 +882,19 @@ namespace DuckMow
             float spread = scrambleScatter * (1f - placement);
             float wobble = ((float)_rng.NextDouble() * 2f - 1f) * spread;
 
+            // AIMED AT MID-PITCH, not at the far goal.
+            //
+            // "E로 튕겼을 때 상대방쪽으로 날라가서 사라지는게 아니라. 한번 중앙 바닥에 튕겨서 상대방한테
+            // 가는거지." — it should touch down once in the middle and travel on from there, not sail the
+            // whole way and vanish. That is the difference between a clearance and a ball: one leaves the
+            // pitch, the other uses it.
+            //
+            // So the arc is thrown roughly HALF the distance and the bounces carry the rest. The skip
+            // retains 86% of its horizontal speed per touch (see the Launched case), so a well-struck
+            // bird reaches the far beds on its second or third contact while a weak one dies in midfield
+            // — which is a far better read of how well it was hit than the landing point of a single arc.
             Vector3 flat = target - _goosePos; flat.y = 0f;
-            float reach = Mathf.Max(flat.magnitude, 6f) * Mathf.Lerp(0.62f, 1f, placement);
+            float reach = Mathf.Max(flat.magnitude, 6f) * Mathf.Lerp(0.34f, 0.55f, placement);
             Vector3 aimed = Quaternion.Euler(0f, wobble, 0f) * (flat.sqrMagnitude > 1e-4f
                                                                 ? flat.normalized : _toOpponent);
             Vector3 land = _goosePos + aimed * reach;
@@ -1286,7 +1355,12 @@ namespace DuckMow
 
             if (_mower != null && _tell > 0.02f)
                 _fx?.TimingRing(_mower.transform.position,
-                                Mathf.Lerp(parryRadius * 2.2f, parryRadius, _tell), _tell);
+                                Mathf.Lerp(parryRadius * 2.2f, parryRadius, _tell), _tell,
+                                Quaternion.LookRotation(
+                                    Vector3.ProjectOnPlane(_mower.transform.forward, Vector3.up)
+                                        .sqrMagnitude > 1e-4f
+                                    ? Vector3.ProjectOnPlane(_mower.transform.forward, Vector3.up).normalized
+                                    : _toOpponent, Vector3.up));
             else
                 _fx?.ClearTimingRing();
         }
