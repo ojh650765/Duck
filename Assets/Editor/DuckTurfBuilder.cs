@@ -44,6 +44,40 @@ namespace DuckMow.EditorTools
         /// </summary>
         const float AuthoredPlazaRadius = 13f;
 
+        /// <summary>
+        /// How far the fountain reaches out from its own axis, at the size it was MODELLED.
+        ///
+        /// Read off <c>plaza_fountain()</c> in <c>Art/Blender/build_turf_props.py</c> rather than
+        /// guessed: the lower basin is the widest thing in the piece at <c>rim_out_r = 2.45</c>, and
+        /// its rings are drawn with <c>ring_z(..., e=2.2)</c>, a superellipse that bulges about 3%
+        /// past a circle on the diagonals. 2.45 x 1.03 is 2.52, and 2.52 is the number a sight line
+        /// has to clear rather than the one on the page.
+        ///
+        /// This is here because the fountain is not decoration to anything trying to see past it. It
+        /// is the only obstacle inside the core, it stands on the world Y axis, and <see
+        /// cref="FountainRadius"/> is the radius every shot aimed across the middle of this arena has
+        /// to stay outside of. Re-model the prop and this moves; re-scale the plaza and
+        /// <see cref="FountainRadius"/> moves on its own, which is the point of deriving it.
+        /// </summary>
+        const float AuthoredFountainRadius = 2.52f;
+
+        /// <summary>
+        /// The fountain's outer radius as it actually stands: 3.68 m, because BuildPlaza grows the
+        /// prop by <c>PlazaRadius / AuthoredPlazaRadius</c> and nothing else in the core does.
+        /// </summary>
+        static float FountainRadius => AuthoredFountainRadius * (TurfArena.PlazaRadius / AuthoredPlazaRadius);
+
+        /// <summary>
+        /// Clear air between the fountain's rim and the judges' line, in metres.
+        ///
+        /// The bench's origin IS roughly the judges' line — <c>BuildJudgeBench</c> stands them at
+        /// local z between -0.10 and +0.05 and puts the desk in FRONT of them — so this is the gap
+        /// behind three animals' backs, not a gap to a piece of furniture. Just under a metre: enough
+        /// that the basin is behind them rather than against them, small enough that the bench stays
+        /// well inside the core wall and the lens stays as close to that wall as it can get.
+        /// </summary>
+        const float BenchFountainGap = 0.92f;
+
         static Material Mat(string n) => AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{n}.mat");
 
         [MenuItem("Duck/4 · Build bloom rush scene", priority = 4)]
@@ -150,7 +184,8 @@ namespace DuckMow.EditorTools
             // verdict in the game is three animals at a desk; a stage that ended on centred text
             // was speaking a language the rest of it does not.
             //
-            // IN THE MIDDLE, on the fountain island, facing the player's start.
+            // ON THE ISLAND, ON ITS +Z FACE — the NEAR side, the side everything that looks at this
+            // bench already stands on.
             //
             // It stood nine metres beyond the barrier — outside the fence, behind the crowd, fifty
             // metres from anywhere the match was actually driven. That is a bench nobody sees during
@@ -159,10 +194,58 @@ namespace DuckMow.EditorTools
             // screens. On the island it is inside the arena, visible over the core wall from every
             // lap, and the closing camera moves are short because the machines park in front of it.
             //
+            // Then it stood on the island's FAR face, at (0, 0, -4.6), and the fountain ate the
+            // ending. Three separate things aim themselves at this bench along world +Z and every
+            // one of them was aiming through seven and a half metres of stone standing five high:
+            //
+            //   · the wide judges shot puts its lens at bench + (0.45, 1.74, +7.6), which from a
+            //     bench at z = -4.6 is z = +3.0 — 3.03 m from the world Y axis, INSIDE a basin whose
+            //     rim reaches 3.68. A screenshot from that exact mark is fountain and nothing else:
+            //     column up the middle, basin across the bottom, upper bowl hanging into the top.
+            //   · the per-judge push-in (judgeCloseDistance 3.3) landed at z = -1.3, further inside
+            //     the same bowl.
+            //   · TurfDirector.ParkForVerdict lines all four machines up on the core's +Z face
+            //     facing -Z "at the desk" — with the whole fountain between them and it.
+            //
+            // Mirroring the bench to +Z answers all three at once, and it is the only move that
+            // can. The proof is short. The shot is a 7.6 m segment from the bench to the lens; the
+            // fountain blocks a disc of radius 3.68 about the origin; the bench has to stay on the
+            // island. With both ends of that segment on the SAME side of the middle, the segment's
+            // closest approach to the axis is the bench's own standoff — 4.60 m here, clear by
+            // 0.92 — and with them on opposite sides the segment runs straight through the middle at
+            // any bench position the core can hold. There is no z on this line that works from the
+            // far face: to clear a 7.37 m obstacle the whole 7.6 m segment would have to sit beyond
+            // z = +3.68 or beyond z = -11.28, and the second is nearly four metres outside the
+            // island with the core wall across the sight line.
+            //
+            // MOVING THE FOUNTAIN was the other candidate and it is worse than merely ugly, it does
+            // not fit: pushed far enough off the centre line to clear this shot (about 3.9 m of x)
+            // its rim reaches 7.58 m, which is the inner face of its own core wall, and the 96 m
+            // reveal then photographs a perfectly centred ring with the landmark shoved against one
+            // side of it. SHRINKING it does not work either, and for a reason worth writing down:
+            // the thing standing on the sight line at eye height is not the basin, it is the CENTRE
+            // COLUMN, 0.44 m across and on the axis. Any fountain has one. The only fountain that
+            // clears a 1.26-to-1.74 m sight line is one under 1.26 m tall, which is a fountain that
+            // can no longer be seen over the hedge — the one job it was scaled up to do.
+            //
             // The plaza stands this bench on a plinth and carrying that height across by hand is how
             // the rally ended up with three judges hovering a metre over the lawn — this arena is
             // flat, so they stand on it.
-            var bench = DuckSceneBuilder.BuildJudgeBench();
+            //
+            // THE PRICE, recorded rather than discovered later: with the bench on the near face the
+            // lens sits at z = +12.2, which is 3.85 m outside the core wall, so the wall's 0.95 m top
+            // edge crosses the judging shot about three quarters of the way down and the bottom
+            // quarter of that frame is pale stone. Nothing that carries information is behind it —
+            // the grazing line over the wall clears the bench at y = 0.42, under the desk top at
+            // 0.83 and under every card that stands on it — and what it reads as is the island's own
+            // parapet in the foreground of a shot taken from the plaza, which is exactly what it is.
+            // If it ever reads as the camera being stuck behind a wall, the knob is BenchFountainGap:
+            // smaller pulls the lens in toward the wall and shrinks the band.
+            //
+            // They watch the PLAYER's machine while the match runs — see BuildJudgeBench for why
+            // that and not the leader.
+            var bench = DuckSceneBuilder.BuildJudgeBench(
+                playerMower != null ? playerMower.transform : null);
             if (bench != null)
             {
                 // FACING +Z, and that is not an arbitrary choice.
@@ -173,10 +256,32 @@ namespace DuckMow.EditorTools
                 // and the camera lands behind three judges' heads, which is exactly what "the
                 // judges are not visible" looked like. Facing the bench up +Z makes the round's own
                 // shot correct here for free, rather than needing a fourth camera mode.
+                //
+                // The POSITION is measured off the fountain rather than off the wall, because the
+                // fountain is what constrains it. Written as "wall minus 3.4" it was a number that
+                // happened to be clear on the day somebody typed it and would silently stop being
+                // clear the next time the hub is re-scaled — which is the failure this whole comment
+                // is about, one sign earlier.
+                float benchZ = FountainRadius + BenchFountainGap;
                 bench.transform.SetPositionAndRotation(
-                    new Vector3(0f, 0f, -(TurfArena.CoreRadius - 3.4f)),
+                    new Vector3(0f, 0f, benchZ),
                     Quaternion.identity);
                 bench.transform.SetParent(root, true);
+
+                // Printed every build, because the two clearances this position is balanced between
+                // are invisible in the Inspector and both of them are one constant away from being
+                // violated by somebody who was changing something else. The bench's own back corners
+                // are the far ones: it is 6 m wide, so at x = +-3.0 with the desk 0.83 m deep the
+                // outermost point is sqrt(3^2 + (z + 0.83)^2) from the middle, and that has to stay
+                // inside the core wall's inner face.
+                float benchReach = Mathf.Sqrt(9f + (benchZ + 0.83f) * (benchZ + 0.83f));
+                float wallInner = TurfArena.CoreRadius - 0.35f;
+                Debug.Log($"[Bloom] bench at z {benchZ:0.00} — {BenchFountainGap:0.00} m clear of a " +
+                          $"{FountainRadius:0.00} m fountain, corners at {benchReach:0.00} m inside a " +
+                          $"{wallInner:0.00} m wall; judges lens lands at z {benchZ + 7.6f:0.00}.");
+                if (benchReach > wallInner)
+                    Debug.LogError($"[Bloom] the judges' bench is through the core wall by " +
+                                   $"{benchReach - wallInner:0.00} m. Reduce BenchFountainGap or widen the core.");
 
                 // The wire that was missing. Without it the shot aims at the venue's bench mark,
                 // (0, 0, -39.5), which in this arena is a patch of turf outside the hedge.

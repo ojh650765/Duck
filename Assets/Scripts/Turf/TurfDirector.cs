@@ -609,22 +609,38 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Leave the overhead and settle the results board.
+        /// How far outside the core wall the machines line up, in metres.
         ///
-        /// The board is the venue's own — the same object the championship posts to — so the four
-        /// rows the player reads here are laid out exactly like the rows they will read after the
-        /// judges. A second board with its own layout would be a second answer to the same
-        /// question, and this stage is not entitled to one: it reports, the panel rules.
+        /// EIGHT, not the 4.6 it was, and the number is set by the camera rather than by taste. The
+        /// judges' bench now stands on the core's near face at z = +4.60 (see DuckTurfBuilder, which
+        /// explains at length why it had to move), and CameraDirector puts the judging lens 7.6 m in
+        /// front of it in world space — at z = +12.2, which at a 4.6 m standoff is 1.2 m from the
+        /// winner's parked machine. The lens was inside a mower.
         ///
-        /// The percentage goes in the RANK column rather than the marks column, because the marks
-        /// column is out of thirty and belongs to the judges. What this stage knows is how much
-        /// ground somebody covered, and that is what it says.
+        /// At 8.0 the arc sits at a 16 m radius and its nearest machine is at z = +15.2 — three
+        /// metres BEHIND the lens, 3.9 m from it, and therefore out of the judging frame entirely
+        /// rather than in the middle of it. The whole lineup still stands inside the painted plaza
+        /// edge (the outermost nose reaches 16.95 against a line at 18.70), so the parc ferme is on
+        /// the crown the match was fought over rather than parked off it. The cost is that the
+        /// lineup is eleven metres from the desk instead of seven; that is only ever seen from the
+        /// 96 m overhead, where it reads as a paddock, and the alternative was a lens in a bonnet.
         /// </summary>
         [Header("Parc ferme")]
-        [Tooltip("How far outside the core wall the machines are parked for the verdict.")]
-        public float parkStandoff = 4.6f;
-        [Tooltip("Degrees between parked machines, measured around the core.")]
-        public float parkSpread = 15f;
+        [Tooltip("How far outside the core wall the machines are parked for the verdict. Must keep " +
+                 "the arc behind the judging lens, which sits 7.6 m in front of the bench.")]
+        public float parkStandoff = 8.0f;
+
+        /// <summary>
+        /// Degrees between parked machines, measured around the core.
+        ///
+        /// Twelve rather than fifteen, purely to hold the spacing still while the radius grew: 15
+        /// degrees at 12.6 m put the machines 3.3 m apart along the arc, and 15 degrees at 16 m puts
+        /// them 4.2 m apart, which turns a lineup into four things left in a field. Twelve at 16 m is
+        /// 3.35 m — the spacing the tableau was composed at.
+        /// </summary>
+        [Tooltip("Degrees between parked machines, measured around the core. Set with parkStandoff: " +
+                 "what matters is the metres between them, not the angle.")]
+        public float parkSpread = 12f;
 
         /// <summary>
         /// Park all four in an arc in front of the bench, facing it.
@@ -636,9 +652,13 @@ namespace DuckMow
         /// </summary>
         void ParkForVerdict()
         {
-            // The bench stands on the core's -Z face looking up +Z — see DuckTurfBuilder, where
-            // that heading is forced so the round's own judges shot frames correctly. So the mark
-            // is the +Z side of the core, and the machines face back down -Z at the desk.
+            // The bench stands on the core's NEAR face — z = +4.60, looking further up +Z, out of
+            // the island and across the plaza. See DuckTurfBuilder, where that heading is forced so
+            // the round's own judges shot frames correctly and where the move from the far face is
+            // argued out. So the mark is the +Z side of the core and the machines face back down -Z
+            // at the desk, which they now actually SEE: parked on the far face the desk was on the
+            // other side of a five-metre fountain from them, and four machines solemnly facing a
+            // stone basin was the same bug the judging camera had.
             const float baseDeg = 0f;      // world +Z
             float radius = TurfArena.CoreRadius + parkStandoff;
             int n = competitors != null ? competitors.Length : 0;
@@ -682,6 +702,21 @@ namespace DuckMow
             cameraDirector?.SetMode(CameraMode.Verdict, 1.6f);
         }
 
+        /// <summary>
+        /// Leave the overhead and settle the results board.
+        ///
+        /// The board is the venue's own — the same object the championship posts to — so the four
+        /// rows the player reads here are laid out exactly like the rows they will read after the
+        /// judges. A second board with its own layout would be a second answer to the same
+        /// question, and this stage is not entitled to one: it reports, the panel rules.
+        ///
+        /// The percentage goes in the RANK column rather than the marks column, because the marks
+        /// column is out of thirty and belongs to the judges. What this stage knows is how much
+        /// ground somebody covered, and that is what it says.
+        ///
+        /// (This comment lived above the parc-ferme fields for a while, describing a board they have
+        /// nothing to do with. Put back on the method it is about.)
+        /// </summary>
         void ShowBoard()
         {
             OnBoard = true;

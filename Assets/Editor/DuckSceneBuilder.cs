@@ -1242,8 +1242,39 @@ namespace DuckMow.EditorTools
             return dir;
         }
 
-        /// <summary>Internal: the menu stands the same three judges at the same bench.</summary>
-        internal static JudgePanel BuildJudgeBench()
+        /// <summary>
+        /// Internal: the menu stands the same three judges at the same bench.
+        ///
+        /// <paramref name="lookTarget"/> is what their heads follow while they are sitting there. It
+        /// is a parameter rather than a lookup because the lookup was WRONG everywhere except the
+        /// venue: this used to call <c>GameObject.Find("Mower")</c>, which is the round's machine's
+        /// name and nobody else's. Bloom Rush names its four machines "Mower — HORACE" and so on, so
+        /// the find returned null, no judge was ever given a target, and <c>JudgeCharacter.ApplyLook</c>
+        /// held wantYaw at 0 for the whole match — three animals staring rigidly through the arena
+        /// while four mowers fought over it. Passing null still does the venue's find, so Main, the
+        /// rally, the arena and the menu are untouched.
+        ///
+        /// WHAT a four-way match should hand in is a real question and the answer is THE PLAYER'S
+        /// MACHINE. Three candidates and only one of them says anything:
+        ///
+        ///   · The LEADER is the diegetically correct answer and the useless one. A head turned in
+        ///     some direction is only readable at all from a chase camera forty metres out if the
+        ///     reader can tell WHO it is turned toward, and across an eighty-four metre arena with
+        ///     four identical machines on it nobody can. It would come across as heads drifting.
+        ///   · The NEAREST machine makes them a weathervane. Bloom Rush is a roundabout and the
+        ///     bench is on the island in the middle of it, so "nearest" changes several times a lap
+        ///     and each change is a hard target switch that lookLag whips through in a fifth of a
+        ///     second.
+        ///   · THE PLAYER carries the one signal the player can actually read: they are looking at
+        ///     ME. That is the same thing the venue's panel does, it is what makes the bench feel
+        ///     occupied rather than decorated, and it is the reading the closing verdict then pays
+        ///     off — a panel that has watched this duck all match is a panel with something to say
+        ///     about them.
+        ///
+        /// Null degrades to a judge who simply faces front, which is what the whole game did until
+        /// this was noticed.
+        /// </summary>
+        internal static JudgePanel BuildJudgeBench(Transform lookTarget = null)
         {
             var root = new GameObject("Judges");
             root.transform.position = new Vector3(0f, 0f, -Field.Half - 7.5f);
@@ -1253,6 +1284,16 @@ namespace DuckMow.EditorTools
             string[] names = { "Mildred", "Boris", "Priscilla" };
             float[] xs = { -1.45f, 0f, 1.45f };
             bool anyAuthored = false;
+
+            // The venue's fallback, resolved ONCE and outside the loop. It used to run inside it,
+            // three times, which was harmless and also the shape that hid the bug: a Find that
+            // silently returns null looks identical to a Find that works when the result is
+            // consumed three lines later and never checked.
+            if (lookTarget == null)
+            {
+                var mowerGO = GameObject.Find("Mower");
+                if (mowerGO != null) lookTarget = mowerGO.transform;
+            }
 
             for (int i = 0; i < names.Length; i++)
             {
@@ -1279,10 +1320,9 @@ namespace DuckMow.EditorTools
                 inst.transform.localRotation = Quaternion.Euler(0f, -xs[i] * 3.5f, 0f);
                 var jc = inst.GetComponent<JudgeCharacter>();
                 if (panel.judges[i] != null) panel.judges[i].character = jc;
-                // They watch the mower while it works, which is most of what makes the stand
+                // They watch the machine while it works, which is most of what makes the stand
                 // feel occupied rather than decorated.
-                var mowerGO = GameObject.Find("Mower");
-                if (jc != null && mowerGO != null) jc.lookTarget = mowerGO.transform;
+                if (jc != null) jc.lookTarget = lookTarget;
             }
 
             if (!anyAuthored) DuckMeshLibrary.BuildJudgeProxies(root.transform, panel);
