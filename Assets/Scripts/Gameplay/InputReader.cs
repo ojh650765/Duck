@@ -21,7 +21,6 @@ namespace DuckMow
     ///   boost         Shift                 RB / R1                        DrivingEnabled
     ///   horn          E, Q                  X / Square                     RoundActionsEnabled
     ///   air check     F                     LB / L1                        RoundActionsEnabled
-    ///   skip          N                     — (confirm covers it)          RoundActionsEnabled
     ///   glance back   C (held)              right stick click (held)       nothing, on purpose
     ///   retry         R                     Y / Triangle                   nothing
     ///   confirm       Enter, Space          A / Cross                      nothing
@@ -62,7 +61,6 @@ namespace DuckMow
         /// <summary>Held to look over the machine's shoulder. C on the keyboard, right stick click.</summary>
         public bool LookBack { get; private set; }
         public bool RetryPressed { get; private set; }
-        public bool NextPressed { get; private set; }
         /// <summary>
         /// Escape, or the pad's MENU / OPTIONS button. What opens the pause board — see
         /// <see cref="DuckMow.UI.PopupStack"/>, which reads this latch and owns the key from the
@@ -81,8 +79,8 @@ namespace DuckMow
         public bool DrivingEnabled { get; set; } = true;
 
         /// <summary>
-        /// Whether the ROUND's own verbs are live: the horn on E, the overhead check on F, and skip
-        /// on N. True everywhere by default, so nothing about the mowing round changes.
+        /// Whether the ROUND's own verbs are live: the horn on E and the overhead check on F. True
+        /// everywhere by default, so nothing about the mowing round changes.
         ///
         /// It exists because a stage played in its own scene keeps the player's real input pipeline
         /// — that is the point of it, so the machine handles identically wherever they are driving —
@@ -125,7 +123,7 @@ namespace DuckMow
 
             float steerRaw = 0f, throttleRaw = 0f;
             bool handbrake = false, boost = false, boostDown = false;
-            bool horn = false, retry = false, next = false, confirm = false, aerial = false;
+            bool horn = false, retry = false, confirm = false, aerial = false;
             bool menu = false;
             bool lookBack = false;
 
@@ -141,7 +139,6 @@ namespace DuckMow
                 boostDown = kb.leftShiftKey.wasPressedThisFrame || kb.rightShiftKey.wasPressedThisFrame;
                 horn = kb.eKey.wasPressedThisFrame || kb.qKey.wasPressedThisFrame;
                 retry = kb.rKey.wasPressedThisFrame;
-                next = kb.nKey.wasPressedThisFrame;
                 menu = kb.escapeKey.wasPressedThisFrame;
                 confirm = kb.enterKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame;
                 aerial = kb.fKey.wasPressedThisFrame;
@@ -280,7 +277,6 @@ namespace DuckMow
             // The round's own verbs, gated together. Escape and retry stay live whatever stage is
             // running — a player must always be able to get out — and driving is untouched.
             HornPressed = horn && RoundActionsEnabled;
-            NextPressed = next && RoundActionsEnabled;
             // Read before the DrivingEnabled gate above would matter — the lift is not a driving
             // input, and it is deliberately still available in the moment the guide dissolves.
             AerialPressed = aerial && RoundActionsEnabled;

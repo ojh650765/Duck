@@ -715,13 +715,35 @@ namespace DuckMow.EditorTools
                                                   size * (0.85f + (float)rng.NextDouble() * 0.5f));
             go.isStatic = true;
 
-            // A sphere, so a machine that runs at the edge is stopped by something it can SEE
-            // rather than by an invisible rule. Geese are moved by script and never consult the
-            // physics scene, so they still walk straight over — which is the point: the stones
-            // are the machines' boundary and nobody else's.
-            var col = go.AddComponent<SphereCollider>();
-            col.radius = 0.44f;
-            col.center = new Vector3(0f, 0.06f, 0f);
+            // PAINT, NOT KERB — no collider, deliberately.
+            //
+            // These used to carry a SphereCollider, on the reasoning that a machine should be
+            // stopped by something it can SEE rather than by an invisible rule. Sound instinct,
+            // wrong remedy, and it produced the exact complaint it was meant to prevent: "there is
+            // an invisible wall, but when you turn or hit it you stop immediately."
+            //
+            // The arithmetic is why. Confine holds the machine's HULL at DriveHalfWidth — the same
+            // line these stones are laid on — but a stone's body straddles that line and reaches
+            // some 0.55m inboard of it at the fattest. So the collider was met FIRST, half a
+            // machine before the rule, and the two disagreed by that margin all the way along. Then
+            // Run() skips 12% of the stones on purpose, so it is laid with 1.3m gaps and the mower
+            // is 0.92m wide: drive at one stretch of edge and you are stopped hard by a boulder,
+            // drive at the next and you slide through the gap and are caught by the rule instead.
+            // Two boundaries, half a machine apart, alternating along a single edge. No amount of
+            // tuning either one fixes a player being taught two different edges.
+            //
+            // So the rule is the only boundary now, and the stones do what a marked line does:
+            // they say where it is. They keep their mesh, their shadow and their jitter — a
+            // boundary the player cannot see is the fault this whole thread started from, and the
+            // marking has to survive the collider going away.
+            //
+            // Precedent, and it is the same fix: commit 380bbb8 ("The plaza edge is paint now, not
+            // a kerb to hit") replaced Bloom Rush's collidable plaza kerb with a flat uncollidable
+            // painted ring. DuckTurfBuilder's Box(...) takes a keepCollider flag for this reason,
+            // and so does the copy at the bottom of THIS file, whose comment already states the
+            // house rule outright: colliders come off everything but the ground. These stones were
+            // the one thing in the arena that ignored it — note that BuildBandEdging's own summary
+            // has claimed "No colliders" the whole time. The doc was right; the code had drifted.
 
             go.AddComponent<MeshFilter>().sharedMesh = StoneMesh(rng.Next(0, StoneVariants));
             var mr = go.AddComponent<MeshRenderer>();
