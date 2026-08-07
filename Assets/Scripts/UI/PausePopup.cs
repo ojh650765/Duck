@@ -68,6 +68,16 @@ namespace DuckMow.UI
         /// </summary>
         protected virtual void OnComposed() { }
 
+        /// <summary>
+        /// Anything a popup did to the rest of the game on the way in, undone.
+        ///
+        /// Called from OnPop, which the stack guarantees is the only teardown call there is: a popup
+        /// can be pushed and popped inside one frame with no Tick between, and PopAll runs OnPop
+        /// top-first and never calls OnRevealed. So this is the ONLY place a global may be put back —
+        /// anything that waits for a tick, or for the popup to be uncovered, is a global left stuck.
+        /// </summary>
+        protected virtual void OnClosed() { }
+
         // ------------------------------------------------------------------ the palette
         //
         // Taken as NUMBERS from what is already on screen rather than eyeballed against it, which is
@@ -144,6 +154,10 @@ namespace DuckMow.UI
         /// So a popup swallows input for the frame it was pushed or revealed on, and then for a short
         /// unscaled hold on top — long enough that a key held down across the boundary cannot cascade
         /// through two menus, short enough that nobody waiting to press RESUME ever notices.
+        ///
+        /// This is the WHOLE defence, not half of it. Being covered stops nothing, because a covered
+        /// popup is not ticked in the first place; the entire hazard lives in the single frame on
+        /// which a popup becomes the top one again, and that frame is this field.
         /// </summary>
         int _swallowFrame = -1;
         float _inputHold;
@@ -167,9 +181,22 @@ namespace DuckMow.UI
             ApplyCover();
         }
 
+        /// <summary>
+        /// The only teardown there is.
+        ///
+        /// The stack makes exactly one guarantee about a popup's end and this is it: OnPop runs, once,
+        /// whatever happened in between. A popup may be pushed and popped inside a single frame
+        /// without ever being ticked, and PopAll runs OnPop from the top down without calling
+        /// OnRevealed on anything. So the canvas is destroyed here and nowhere else — a teardown that
+        /// waited for a tick would leak a full-screen canvas on top of the game every time a
+        /// confirmation was answered on the frame it appeared.
+        /// </summary>
         public void OnPop()
         {
             _disposed = true;
+            // The subclass's globals go back BEFORE the view goes away, so that anything it hands
+            // control to next — a scene load, a transition — starts from a restored world.
+            OnClosed();
             if (_root != null) UnityEngine.Object.Destroy(_root);
             _root = null;
             _canvas = null;
@@ -177,14 +204,19 @@ namespace DuckMow.UI
         }
 
         /// <summary>
-        /// A popup has opened on top of us: sink back, and stop listening.
+        /// A popup has opened on top of us: sink back.
         ///
-        /// Both halves matter. The dim is what says WHICH board the player is being asked about — it
-        /// is the emphasis idiom ComicSequence settled on for exactly this problem ("settled panels
-        /// sink back and the hero holds the light"), and without it two boards of equal brightness
-        /// stack up and the question on the top one reads as decoration on the bottom one.
+        /// The dim is what says WHICH board the player is being asked about. It is the emphasis idiom
+        /// ComicSequence settled on for exactly this problem ("settled panels sink back and the hero
+        /// holds the light"), and without it two boards of equal brightness stack up and the question
+        /// on the top one reads as decoration on the bottom one.
         ///
-        /// The deafening is what stops one keypress being read by two menus. See <see cref="_swallowFrame"/>.
+        /// It is only a VISUAL change, and that is because the stack ticks its top popup and nothing
+        /// else. Being covered already means not being ticked, so there is no input here to gate and
+        /// no animation here to run — a covered board is a still image, which is exactly what a
+        /// sunk-back board should be. The _covered flag below is kept anyway, as a cheap assertion
+        /// rather than a mechanism: if the stack ever starts ticking the whole pile, this popup goes
+        /// quiet instead of answering the same keypress as the one on top of it.
         /// </summary>
         public void OnCovered()
         {
@@ -214,10 +246,11 @@ namespace DuckMow.UI
         /// <summary>
         /// The covered look, applied at once rather than eased toward.
         ///
-        /// Deliberate: the stack is only required to tick its TOP popup, so a covered popup may not
-        /// be given a single frame of time between OnCovered and OnRevealed. A dim that animated
-        /// would simply never happen. Snapping is honest about that; it also happens to read fine,
-        /// because the thing arriving on top of us is itself animating in and carries the eye.
+        /// Not a shortcut — the only thing that can work. The stack ticks its TOP popup and nothing
+        /// else, so a covered popup is handed no time at all between OnCovered and OnRevealed and an
+        /// animated dim would simply never advance a frame. Snapping is honest about that, and it
+        /// reads fine anyway, because the board arriving on top is itself animating in and is where
+        /// the eye already is.
         /// </summary>
         void ApplyCover()
         {
@@ -241,6 +274,9 @@ namespace DuckMow.UI
             AnimateBoard();
             TickPlates(dt);
 
+            // Belt and braces. The stack does not tick a covered popup, so this cannot fire today —
+            // and if that ever changes, this is the line that stops one Enter being answered by two
+            // boards. See OnCovered.
             if (_covered) return false;
             // The swallow, in the order the two halves expire.
             if (Time.frameCount <= _swallowFrame) return false;
@@ -914,6 +950,19 @@ namespace DuckMow.UI
         /// with no symptom other than a dead key. So it is deliberately trivial: no scene lookups, no
         /// FindObjectOfType, no assumptions about anything having been created yet. Assigning a
         /// closure cannot fail.
+        ///
+        /// Two rules the factory itself has to obey, both of which a "cheaper" version breaks:
+        ///
+        ///   IT MUST BUILD A NEW ONE EVERY TIME. A cached static instance would be handed back on
+        ///   the second play session pointing at a canvas Unity destroyed with the first, and the
+        ///   pause menu would open as nothing at all. The stack deliberately does not clear
+        ///   PauseFactory at session reset, because Unity gives no ordering guarantee between two
+        ///   RuntimeInitializeOnLoadMethods and a clear that ran after this assignment would be the
+        ///   dead-key failure above. So the closure must be safe to call at any age, which a
+        ///   constructor is and a cache is not.
+        ///
+        ///   IT MUST NEVER RETURN NULL. Push(null) is a silent no-op, so a null here is once again
+        ///   Escape appearing broken with nothing in the console.
         /// </summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void RegisterWithStack()
@@ -1000,6 +1049,53 @@ namespace DuckMow.UI
                 AddItem(QuitLabel, AskToQuit);
         }
 
+        // ------------------------------------------------------------------ the world behind
+
+        /// <summary>
+        /// What the game is turned down to while the board is up.
+        ///
+        /// DUCKED, not silenced, and the difference is the point. The popup stack does not touch
+        /// AudioListener.pause and should not — a game that goes completely silent has stopped, and
+        /// this one has not: the player is still in a round, the crowd is still there, and they are
+        /// coming back to it in a moment. A duck says the game is waiting; silence says it is over,
+        /// and the player who came here for a breath would be told they had quit.
+        ///
+        /// It also has to be done from HERE rather than left to the pause itself. Time.timeScale
+        /// hitting zero does not quieten a single AudioSource — pitch and volume are not on that
+        /// clock — so an engine drone whose pitch is driven by a road speed that has frozen simply
+        /// holds one flat tone under the menu for as long as the player leaves it up, which is the
+        /// most conspicuous possible way to sound broken.
+        /// </summary>
+        const float DuckedVolume = 0.30f;
+
+        /// <summary>Negative means "we never touched it", which is not the same as "it was zero".</summary>
+        float _volumeBefore = -1f;
+
+        protected override void OnComposed()
+        {
+            // Captured rather than assumed to be 1. Nothing else in the project writes
+            // AudioListener.volume today, but a popup that RESTORES a value it invented would be a
+            // popup that quietly undoes whatever starts writing it tomorrow. Capturing also makes
+            // this nest correctly if a second popup ever ducks as well.
+            _volumeBefore = AudioListener.volume;
+            AudioListener.volume = _volumeBefore * DuckedVolume;
+        }
+
+        /// <summary>
+        /// Put the sound back, in OnPop and only in OnPop.
+        ///
+        /// This is the reason the base calls OnClosed from there rather than anywhere more
+        /// convenient: OnPop is the single call the stack guarantees. A restore hung off a tick, or
+        /// off being uncovered, would leave a game running at a third of its volume with no board on
+        /// screen to explain it and nothing the player could do about it — the worst class of bug
+        /// this file can produce, because it survives the thing that caused it.
+        /// </summary>
+        protected override void OnClosed()
+        {
+            if (_volumeBefore >= 0f) AudioListener.volume = _volumeBefore;
+            _volumeBefore = -1f;
+        }
+
         // ------------------------------------------------------------------ what the choices do
 
         static bool HasChampionship => GameDirector.Instance != null;
@@ -1065,13 +1161,23 @@ namespace DuckMow.UI
         /// Out of the round and back to the gate.
         ///
         /// The director owns the whole move — curtain down, statics cleared, timescale restored,
-        /// scene load — and it is deliberately not duplicated here. What this DOES have to do is take
-        /// the popups off the screen: BackToMenu starts an asynchronous load, so this scene keeps
-        /// ticking for a while yet, and a pause board still up over a closing curtain would be the
-        /// last thing the player saw of the round.
+        /// scene load — and none of it is duplicated here.
         ///
-        /// PopAll rather than a close request, because everything on the stack is about a round that
-        /// is now over, not just this board.
+        /// THE ORDER OF THESE TWO LINES IS THE WHOLE FUNCTION, and getting it backwards produces a
+        /// bug that looks like anything but this. GameDirector.LeaveToMenu sets Time.timeScale back
+        /// to 1 on its way out, and it has to, because two different stages warp the clock and
+        /// arriving at the front page in slow motion has no recovery short of a restart. But the
+        /// popup stack re-applies its own pause gate in PostLateUpdate on every frame the stack is
+        /// not empty — so with the popups still up, the director's restore is stomped back to zero
+        /// later the same frame, and the entire leave-to-menu transition plays frozen until the
+        /// scene actually swaps. Curtain down, sign sliding in, all of it, at timeScale zero.
+        ///
+        /// So the boards come off FIRST. Then the director is asked to leave, into a game whose
+        /// clock nothing is holding.
+        ///
+        /// PopAll rather than a close request, for two reasons: a close request is only honoured
+        /// when Tick returns, which is after this runs and therefore too late, and everything on the
+        /// stack is about a round that is now over rather than just this one board.
         /// </summary>
         void BackToMenu()
         {
@@ -1086,8 +1192,8 @@ namespace DuckMow.UI
                 return;
             }
 
-            director.BackToMenu();
             PopupStack.PopAll();
+            director.BackToMenu();
         }
 
         /// <summary>
@@ -1112,30 +1218,30 @@ namespace DuckMow.UI
         /// building it. The front page is the closest true equivalent the browser has to "I am done
         /// with this run", so that is where a browser quit goes — and the LABEL says so, above, rather
         /// than the player finding out by pressing it.
+        ///
+        /// PopAll comes first on every branch. On the web that is mandatory and for the same reason
+        /// it is in BackToMenu — the stack holds Time.timeScale at zero for as long as it is not
+        /// empty, and the walk to the front page would run frozen. On the desktop branch it is
+        /// merely right: Application.Quit is not instant, and the last thing the player should be
+        /// looking at while the process winds down is the game, not a menu they have finished with.
         /// </summary>
         static void Quit()
         {
 #if UNITY_EDITOR
-            // The editor ignores Application.Quit as well, which is how a broken quit survives review.
-            UnityEditor.EditorApplication.isPlaying = false;
+            // The editor ignores Application.Quit as well, which is how a broken quit survives review
+            // all the way to a build.
             PopupStack.PopAll();
+            UnityEditor.EditorApplication.isPlaying = false;
 #elif UNITY_WEBGL
             var director = GameDirector.Instance;
-            if (director != null)
-            {
-                director.BackToMenu();
-                PopupStack.PopAll();
-                return;
-            }
+            PopupStack.PopAll();
+            if (director != null) { director.BackToMenu(); return; }
             // CanOfferQuit does not build the item in this case, so this is unreachable — and if it
             // ever becomes reachable, saying so in the console is better than a dead button.
             Debug.LogWarning("[Pause] nothing to quit to in a browser without a GameDirector.");
-            PopupStack.PopAll();
 #else
-            Application.Quit();
-            // Quit is not instant — the player is left looking at whatever is on screen while the
-            // process winds down, so the boards come off first.
             PopupStack.PopAll();
+            Application.Quit();
 #endif
         }
     }

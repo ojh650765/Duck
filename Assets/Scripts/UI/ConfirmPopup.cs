@@ -124,9 +124,13 @@ namespace DuckMow.UI
         /// to a question nobody has read yet must be the one that changes nothing. A player who
         /// mashes Enter through this board stays in their round.
         ///
-        /// Called from OnPushed rather than from Compose because the base deals the items their
-        /// positions after Compose returns — a selection set before the layout exists would be a
-        /// marker beside a row that has not been placed yet.
+        /// Set from OnComposed rather than from Compose because the base deals the items their
+        /// positions only after Compose returns — a selection set before the layout exists would put
+        /// the marker beside a row that has not been placed yet.
+        ///
+        /// Note that this popup deliberately does NOT duck the game's audio the way PausePopup does.
+        /// It is normally pushed on top of one that already has, and a second duck would take the
+        /// round down to a tenth of its volume and back up in two steps.
         /// </summary>
         protected override void OnComposed()
         {
