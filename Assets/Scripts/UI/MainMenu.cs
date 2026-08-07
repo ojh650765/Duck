@@ -789,8 +789,25 @@ namespace DuckMow
             // A fresh run. The escalation starts from quiet, whatever the last session ended on.
             MatchState.BeginSession();
 
-            yield return StageSeam.Begin(MatchState.Seam.MenuToRound, "THE CHAMPIONSHIP",
-                                         $"ROUND 1 OF {Mathf.Max(MatchState.RoundsTotal, 1)}");
+            // Wordless, deliberately.
+            //
+            // This board used to say THE CHAMPIONSHIP / ROUND 1 OF 3, and it was the single clearest
+            // example in the game of UI pasted over the world. The grass rising up the frame ALREADY
+            // says a tournament is starting — that is what the curtain styles are for, and they
+            // escalate across the evening precisely so the transitions carry the structure without
+            // narrating it. A headline on top of that is the game explaining its own effect.
+            //
+            // "THE CHAMPIONSHIP" also assumed the player knew what this game's championship was
+            // before they had played a second of it, which is the wrong order, and "ROUND 1 OF 3"
+            // put the format on screen at the one moment the player has nothing to attach it to.
+            // Both facts arrive in the next thirty seconds anyway — the briefing banner names the
+            // subject and what the round is worth, and every seam after this one carries the round
+            // count on its kicker, by which time it means something.
+            //
+            // Curtain handles an empty headline as a first-class case: _signWanted goes false, the
+            // sign group stays at zero alpha and the plate is never positioned or drawn. See
+            // Curtain.Close and Curtain.Apply.
+            yield return StageSeam.Begin(MatchState.Seam.MenuToRound);
 
             MatchState.CurtainPending = true;
             SceneManager.LoadSceneAsync(playScene);

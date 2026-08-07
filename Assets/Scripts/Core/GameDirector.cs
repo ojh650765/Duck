@@ -297,6 +297,40 @@ namespace DuckMow
         /// </summary>
         public bool SoloRound { get; private set; }
 
+        /// <summary>
+        /// True while the reveal has finished its three beats and is parked, waiting to be pressed
+        /// on from.
+        ///
+        /// Exists so the HUD can put the continue prompt on screen for exactly the window in which
+        /// the key does something, and not a moment of it earlier. The reveal is a sequence — the
+        /// picture, the ghost sweep, the analysis — and a prompt printed over the top of that
+        /// sequence tells the player the payoff is something to skip. Printed when the sequence
+        /// stops, it tells them the game is waiting for them, which it is.
+        ///
+        /// A property rather than the HUD timing the reveal itself, because there are four
+        /// serialized durations behind that hold and a second copy of the arithmetic in the UI
+        /// layer would be free to disagree with the one that actually gates the keypress.
+        /// </summary>
+        public bool RevealHolding { get; private set; }
+
+        /// <summary>
+        /// What pressing on from the reveal will actually do, in words a player can read.
+        ///
+        /// Deliberately answered by the same two gates <see cref="StageChainNext"/> uses, so the
+        /// prompt can never offer a stage this round is not going to play. A prompt that promises
+        /// the geese and then delivers the judges is worse than no prompt at all — it is the game
+        /// being wrong about itself, in the one place the player is looking for instructions.
+        /// </summary>
+        public string PressOnLabel
+        {
+            get
+            {
+                if (RallyWanted && !Played(GameState.Rally)) return "GOOSE RALLY";
+                if (BloomWanted && !Played(GameState.Bloom)) return "BLOOM RUSH";
+                return "THE JUDGES";
+            }
+        }
+
         void Start()
         {
             // WHAT KIND OF ROUND IS THIS. Before anything at all, because two of the decisions below
@@ -597,6 +631,17 @@ namespace DuckMow
         /// Asked by RallyStage and TurfStage as they close the curtain behind themselves. If another
         /// stage follows, that stage re-dresses the sign a frame later and this label is never seen —
         /// so the answer only has to be right for the case where the arena was the last one.
+        ///
+        /// ---- why the last line stopped saying THE PANEL ----
+        ///
+        /// A sign is on screen for about a second and it is the worst possible place to teach a
+        /// player a word. "THE PANEL" is the English village-fair term for a judging bench, and the
+        /// rest of this game's copy was written in that register — the green, the gate, the classes —
+        /// which is charming and completely opaque to somebody who has never been to a village fair.
+        /// It also named the wrong thing: what is on the other side of this particular curtain is
+        /// the LAWN, with the player's finished picture on it, and the judges are the beat AFTER
+        /// that. So the board now names the destination and the kicker names what is coming, which
+        /// is the job a sign has and the only job it can do in a second.
         /// </summary>
         public void NextSeamLabel(out string headline, out string kicker)
         {
@@ -606,8 +651,8 @@ namespace DuckMow
             { headline = "GOOSE RALLY"; kicker = StageSeam.RoundKicker(MatchState.Round); return; }
             if (BloomWanted && !Played(GameState.Bloom))
             { headline = "BLOOM RUSH"; kicker = StageSeam.RoundKicker(MatchState.Round); return; }
-            headline = "THE PANEL";
-            kicker = MatchState.FinalRound ? "FINAL JUDGING" : "TO THE JUDGES";
+            headline = "YOUR PICTURE";
+            kicker = MatchState.FinalRound ? "THE LAST JUDGING" : "THE JUDGES ARE NEXT";
         }
 
         /// <summary>Same picture, fresh lawn. The fast path the player will use most.</summary>
@@ -712,6 +757,12 @@ namespace DuckMow
             GameState from = State;
             State = s;
             _stateTime = 0f;
+
+            // The reveal's prompt belongs to the reveal and to nothing after it. Cleared here rather
+            // than trusted to UpdateReveal's own exit, because half the ways out of that beat do not
+            // go through it — a retry, Escape, DebugForceState — and a stale true would leave "press
+            // on" printed over the judging.
+            RevealHolding = false;
 
             // The klaxon's deceleration belongs to the klaxon and to nothing after it. Released here
             // rather than trusted to run out, because Time.timeScale is a GLOBAL that outlives this
@@ -1074,8 +1125,9 @@ namespace DuckMow
         /// a guard inside one popup covers that popup, and is a thing the next author has to know to
         /// copy.
         ///
-        /// Only the confirm edge is gated. RetryPressed and NextPressed are R and N, which dismiss
-        /// no popup in this game, and swallowing keys nothing is pressing would be superstition.
+        /// Only the confirm edge is gated. RetryPressed is R, which dismisses no popup in this game,
+        /// and swallowing a key nothing is pressing would be superstition. (N was the other one, and
+        /// this director no longer reads it at all — see the verdict case.)
         /// </summary>
         void UpdateConfirmGate(InputReader input)
         {
@@ -1342,10 +1394,21 @@ namespace DuckMow
                         if (_stateTime >= verdictHold || skip) SetState(GameState.VenueTour);
                         break;
                     }
+                    // No rivals, so no tour and no board — a degenerate venue, and the only one of
+                    // these three branches a shipping scene never takes.
+                    //
+                    // This used to offer R for the same picture and N for A NEW ONE, and N is the
+                    // key that has been removed. "New picture" was a third meaning for the end of a
+                    // round on top of "retry" and "carry on", it wiped the championship to do it,
+                    // and it was the loudest thing in the only prompt stage one ever printed. What
+                    // is left is the rule the whole game now follows: SPACE CONTINUES. With nothing
+                    // to continue TO, continuing means the front page — the same answer the solo
+                    // branch above gives, for the same reason, so a player who learns what the key
+                    // does in one kind of round has learned it for all of them.
                     if (input != null)
                     {
                         if (input.RetryPressed) RetrySameShape();
-                        else if (input.NextPressed || _confirm) NextShape();
+                        else if (_confirm && _stateTime > 1.2f) BackToMenu();
                     }
                     break;
                 }
@@ -1374,11 +1437,22 @@ namespace DuckMow
                         // opens its mouth. The extra hold is for the crowd — the ceremony stages the
                         // portrait and re-seats the bench on its first frame, and the curtain waits
                         // for that rather than revealing it happening.
+                        //
+                        // This board keeps its words where the two either side of it lost theirs,
+                        // and the rule is the same one that took them away: a sign earns its place
+                        // when it NAMES a thing the player could not otherwise work out. A wipe on
+                        // its own cannot say "the game is over and you are about to be given a
+                        // prize" — that is genuinely new information, arriving once a session, and
+                        // it is the whole reason the loudest curtain in the game is under it.
+                        //
+                        // Plainer than it was. THE CHAMPIONSHIP / THE SASH IS AWARDED asked the
+                        // player to already know both what this game's championship was and that a
+                        // sash is what an English village fair hands the winner.
                         if (settled)
                             EnterThrough(GameState.Ceremony, MatchState.Seam.IntoFinale,
-                                         "THE CHAMPIONSHIP",
+                                         "THE PRIZE GIVING",
                                          tournament.Championship.PlayerIsChampion
-                                             ? "THE SASH IS AWARDED" : "THE RESULT",
+                                             ? "COME AND COLLECT IT" : "THE FINAL RESULT",
                                          extraHold: 0.45f);
                         break;
                     }
@@ -1388,8 +1462,16 @@ namespace DuckMow
                         // R restarts the whole championship rather than re-mowing this round. The
                         // round's points are already banked by the time this board is on screen, so
                         // a same-picture retry would let one round be counted twice.
+                        // SPACE CONTINUES, and at the board what comes next is the next round of the
+                        // championship — a fresh subject on a fresh lawn, with the points so far
+                        // still standing. That is a different act from the NEW PICTURE that has been
+                        // removed at the verdict, which threw the points away; this one is simply
+                        // the evening carrying on, and it is the only thing this board can do.
+                        //
+                        // N used to be a second, unadvertised key for it. Dropped so that the whole
+                        // game has one continue key and the binding can be retired.
                         if (input.RetryPressed) RestartChampionship();
-                        else if (input.NextPressed || _confirm) NextShape();
+                        else if (_confirm) NextShape();
                     }
                     break;
                 }
@@ -1397,7 +1479,7 @@ namespace DuckMow
                 case GameState.Ceremony:
                     _ceremony?.Tick(dt);
                     if (input != null && _ceremony != null && _ceremony.PromptUp &&
-                        (input.RetryPressed || input.NextPressed || _confirm))
+                        (input.RetryPressed || _confirm))
                     {
                         // The ceremony hands the trophy over; the ending says what it MEANT. R still
                         // skips straight to a fresh championship for anyone who has seen it.
@@ -1419,8 +1501,7 @@ namespace DuckMow
                                              $"{_endingBudget:0.0}s; returning to the menu.");
                             _ending.Hide();
                         }
-                        if (input != null && (_confirm || input.NextPressed ||
-                                              input.RetryPressed || _ending == null))
+                        if (input != null && (_confirm || input.RetryPressed || _ending == null))
                             RestartChampionship();
                     }
                     break;
@@ -1665,7 +1746,19 @@ namespace DuckMow
             // survives into Menu.unity, and Menu raises it on its own first frame. That is the whole
             // trick that makes a full scene swap invisible — one object is alive on both sides of it
             // and is the only thing on screen while it happens.
-            yield return StageSeam.Begin(MatchState.Seam.RoundToMenu, "THE GREEN", "BACK TO THE GATE");
+            // No sign on this one, and that is the whole of the change.
+            //
+            // It used to read THE GREEN / BACK TO THE GATE, which is two pieces of English
+            // village-fair vocabulary in a board the player has under a second to read, describing
+            // the one journey in the game they cannot possibly be confused about: they just chose to
+            // leave. A sign earns its place when it NAMES something that could not otherwise be
+            // inferred — GOOSE RALLY does, BLOOM RUSH does. "You are going where you asked to go"
+            // does not, and printing it is a caption over the world rather than part of it.
+            //
+            // Curtain supports this properly rather than by accident: an empty headline sets
+            // _signWanted false, the sign group is held at zero alpha and the plate is never drawn.
+            // What is left is the wipe itself, which was always the part carrying the feeling.
+            yield return StageSeam.Begin(MatchState.Seam.RoundToMenu);
 
             // Deliberately NOT AbandonRally/AbandonBloom. Both call StopAllCoroutines, which would
             // kill this coroutine halfway through its own transition and leave the game covered by a
@@ -1877,24 +1970,47 @@ namespace DuckMow
             // capture run still completes.
             if (!stageChainOnConfirm) { SetState(GameState.Judging); return; }
 
+            // The finished picture is now a CARD waiting to be pressed on from, and the HUD has to
+            // be able to say so. It was silent through this entire hold — six seconds of a player
+            // looking at their own work with no indication that the game was waiting for them, and
+            // the only prompt in the whole round advertised a key that started a different picture.
+            // See HUD.UpdateOutro, which reads this and prints what the key actually does.
+            RevealHolding = true;
+
             // Through the gate, not off the reader — see UpdateConfirmGate. This beat is the one the
             // pause board bleeds into hardest: ENTER on RESUME would press on from the finished
             // picture the player had paused to look at, and take the reveal away with it. Only
             // called from Tick, so _confirm is this frame's answer.
-            var input = InputReader.Instance;
-            bool pressed = _confirm || (input != null && input.NextPressed);
-            if (!pressed && t < analysisEnd + revealStageHold) return;
+            if (!_confirm && t < analysisEnd + revealStageHold) return;
 
-            // The panel is a hard cut across ninety metres of lawn and always has been — see the
-            // Judging case. What it never had was anything covering the cut, so the player watched
-            // the camera arrive at the bench rather than watching the bench appear. Blossom comes
-            // down over it now, and on the last round it comes down loudly.
-            if (!StageChainNext(GameState.Judging))
-                EnterThrough(GameState.Judging,
-                             MatchState.FinalRound ? MatchState.Seam.IntoFinale
-                                                   : MatchState.Seam.IntoJudging,
-                             "THE PANEL",
-                             MatchState.FinalRound ? "FINAL JUDGING" : "TO THE JUDGES");
+            RevealHolding = false;
+
+            // ---- why there is no curtain over the way into the judging ----
+            //
+            // There used to be one, carrying a board that read THE PANEL, and it was wrong for a
+            // reason worth writing down because it will be tempting to put back.
+            //
+            // A curtain in this game means A JOURNEY. Every other seam covers a scene being loaded
+            // or unloaded, or the machine being teleported four hundred metres — StageSeam's own
+            // class note is explicit that the middle of a boundary is the part that must not be
+            // seen. This boundary loads NOTHING. It is a state change inside one scene, on one lawn,
+            // with the bench already standing where it has stood all round. Wiping the frame and
+            // sliding a sign across it told the player they were being taken somewhere, and then
+            // put them back down in the venue they never left. That is what read as odd.
+            //
+            // What the curtain was covering is a hard camera cut — ninety metres straight down to a
+            // ground-level bench shot, SetMode(Judges, 0f) plus SnapToCurrent; see the Judging case,
+            // which chose a cut over a blend deliberately and explains why a blend looks worse. A
+            // cut is a legitimate edit and needs no cover: television does exactly this. The proof
+            // that it is safe is one beat further on — Judging to Verdict is the SAME hard cut and
+            // it also PARKS THE MOWER on the portrait mark, and that transition has shipped
+            // uncovered since the beginning without anybody calling it a fault.
+            //
+            // Nothing else moves here. The chalk overlay is zeroed on the same frame as the cut, so
+            // it is not a flicker — it is a frame that changed completely, and one of the things
+            // that changed was the overlay. And BeginJudging only sets numbers and starts the lean-
+            // in from zero; the judges are already in the world and are not built on this frame.
+            if (!StageChainNext(GameState.Judging)) SetState(GameState.Judging);
         }
 
         // ------------------------------------------------------------------ the memory beat

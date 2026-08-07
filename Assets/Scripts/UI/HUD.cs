@@ -333,6 +333,15 @@ namespace DuckMow
                     // is sized for a two-word label.
                     ShowBanner("SCORING", "THE VERDICT AWAITS", 1.4f);
                     FillBreakdown(director.LastScore);
+                    // What the continue key will do, written now and shown later.
+                    //
+                    // Written HERE rather than per frame because the answer cannot change while the
+                    // reveal is on screen — the two stage gates behind PressOnLabel are settled the
+                    // moment the round reaches this beat — and because the arena chain re-enters
+                    // this state on its way back, which re-asks the question with the stage it just
+                    // played now marked as played. Shown later: see UpdateOutro, which holds it back
+                    // until the reveal has stopped moving.
+                    if (outroPrompt != null) outroPrompt.text = $"[SPACE]  {director.PressOnLabel}";
                     break;
 
                 case GameState.Judging:
@@ -364,13 +373,19 @@ namespace DuckMow
                         // Nothing to offer on the last board: the ceremony takes over by itself, and
                         // a prompt here would invite the player to skip their own prize-giving.
                         //
-                        // Worded as pictures rather than rounds. R does reset the running points —
-                        // it has to, because they are already banked by the time this board is up —
-                        // but saying so would put the structure back on screen, and "START OVER" is
-                        // true either way.
+                        // "NEXT ROUND" rather than the "NEXT PICTURE" this used to say. Both are
+                        // true — the next round is a new subject on a fresh lawn — but the game has
+                        // just removed a key called NEW PICTURE that meant something quite
+                        // different, and leaving a prompt one word away from the thing that was cut
+                        // is how a player learns the wrong lesson. Rounds are also the unit every
+                        // curtain in the run has already been counting at them.
+                        //
+                        // R does reset the running points — it has to, because they are already
+                        // banked by the time this board is up — but saying so would put the points
+                        // table back on screen, and "START OVER" is true either way.
                         outroPrompt.text = Champ != null && Champ.IsComplete
                             ? ""
-                            : "[SPACE]  NEXT PICTURE     [R]  START OVER     [ESC]  MENU";
+                            : "[SPACE]  NEXT ROUND     [R]  START OVER     [ESC]  PAUSE";
                     break;
 
                 case GameState.Ceremony:
@@ -384,14 +399,38 @@ namespace DuckMow
                     SetGroup(resultsGroup, 1f);
                     if (retryHint != null)
                     {
-                        // With neighbours to visit the round is not over, so the only thing on offer
-                        // is pressing on. Advertising a retry here used to be an invitation to throw
-                        // the round away before it had been added to the championship.
-                        bool tourAhead = director != null && director.tournament != null &&
+                        // Three endings, and the branch order has to be the DIRECTOR'S order or the
+                        // card lies. See the Verdict case in GameDirector.Tick: solo is tested
+                        // first, then whether there is a venue to tour, and only then the fallback.
+                        // Testing the tour first here — which is what this did — printed "see the
+                        // gardens" over a solo round that was about to walk out to the front page,
+                        // because the rivals array is authored on the component and is populated
+                        // whether or not the round is using it.
+                        //
+                        // One rule underneath all three, and it is the rule the whole game now
+                        // follows: SPACE CONTINUES. What it continues TO is the only thing that
+                        // changes, and each line says which.
+                        bool solo = director != null && director.SoloRound;
+                        bool tourAhead = !solo && director != null && director.tournament != null &&
                                          director.tournament.rivals.Length > 0;
-                        retryHint.text = tourAhead
-                            ? "[SPACE]  SEE THE VENUE     [ESC]  MENU"
-                            : "[R]  RETRY SAME PICTURE     [N]  NEW PICTURE     [ESC]  MENU";
+
+                        if (solo)
+                            // One picture, played on its own from the front page, and the front page
+                            // is where it goes back to. Named plainly: this is the one prompt in the
+                            // game whose destination is a menu rather than a place in the world.
+                            retryHint.text = "[SPACE]  MAIN MENU     [ESC]  PAUSE";
+                        else if (tourAhead)
+                            // With neighbours to visit the round is not over, so the only thing on
+                            // offer is pressing on. Advertising a retry here used to be an
+                            // invitation to throw the round away before it had been added to the
+                            // championship. "THE VENUE" told the player nothing about what they were
+                            // about to be shown, which is three rivals' finished lawns.
+                            retryHint.text = "[SPACE]  SEE THE OTHER GARDENS     [ESC]  PAUSE";
+                        else
+                            // A venue with no rivals in it. NEW PICTURE lived here and is gone; with
+                            // nothing to carry on to, carrying on means the front page.
+                            retryHint.text =
+                                "[R]  RETRY SAME PICTURE     [SPACE]  MAIN MENU     [ESC]  PAUSE";
                     }
                     break;
             }
@@ -552,6 +591,20 @@ namespace DuckMow
         ///
         /// It waits for the board to finish sorting. Putting "press R" on screen while the rankings
         /// are still moving steps on the one dramatic moment the round has been building toward.
+        ///
+        /// ---- it also carries the reveal's continue prompt, and that is not a hack ----
+        ///
+        /// The reveal used to be SILENT. The picture finished drawing itself and the round then sat
+        /// for six seconds waiting for a key that nothing on screen mentioned, while the only prompt
+        /// stage one ever printed — at the verdict, a full minute later — advertised NEW PICTURE, a
+        /// key that started a different round. A player who never guessed at Space experienced the
+        /// hold as the game having stopped.
+        ///
+        /// This card is the right home for that prompt rather than a second one being built: it is
+        /// already, by its own definition above, "the card that tells the player what to press", and
+        /// it is the only such card in the HUD. Its placing line is written only at the board and
+        /// blanked everywhere else, so at the reveal it shows exactly one line — the key and what
+        /// the key does — which is all this beat has to say.
         /// </summary>
         void UpdateOutro(float dt)
         {
@@ -559,6 +612,10 @@ namespace DuckMow
 
             bool atBoard = director.State == GameState.Scoreboard;
             bool settled = atBoard && (director.scoreboard == null || director.scoreboard.Finished);
+            // Held back until the reveal stops moving — the director owns that timing, because the
+            // same flag is what gates the keypress. A prompt printed over the ghost sweep would be
+            // telling the player to skip the payoff while the payoff is still playing.
+            bool pressOn = director.RevealHolding;
 
             if (settled && outroPlacing != null && string.IsNullOrEmpty(outroPlacing.text))
             {
@@ -582,7 +639,7 @@ namespace DuckMow
 
             if (!atBoard && outroPlacing != null) outroPlacing.text = "";
 
-            float want = settled ? 1f : 0f;
+            float want = (settled || pressOn) ? 1f : 0f;
             outroGroup.alpha = Mathf.MoveTowards(outroGroup.alpha, want, dt * 2.2f);
         }
 

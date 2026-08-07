@@ -191,6 +191,10 @@ namespace DuckMow
                     // Coming back out of an arena and onto the finished picture. Foliage, because
                     // what is on the other side is a lawn.
                     return FinalRound ? CurtainStyle.PetalCurtain : CurtainStyle.LeafSweep;
+                // Unused since the reveal stopped wiping into the judging — see UpdateReveal, which
+                // sets out at length why a curtain over a boundary that loads nothing read as the
+                // game leaving a place it never left. Kept, not deleted: this enum is append-only
+                // for the same reason GameState is, and the arm below costs nothing.
                 case Seam.IntoJudging:
                     return CurtainStyle.PetalCurtain;
                 case Seam.IntoFinale:
