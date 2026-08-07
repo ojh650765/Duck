@@ -968,15 +968,33 @@ namespace DuckMow
             UpdateTicks++;
             var input = InputReader.Instance;
 
-            // Escape leaves, from any state except the opening — during the intro there is nothing on
-            // screen the player would be trying to get out of, and the cutscene has its own skip.
-            // Checked before the state switch so it works even in states that accept no other input.
+            // Escape opens the pause menu, from any state except the opening — during the intro there
+            // is nothing on screen the player would be trying to get out of, and the cutscene has its
+            // own skip. Checked before the state switch so it works even in states that accept no
+            // other input.
             //
-            // Menu.unity has to be in the build settings or this silently does nothing;
-            // DuckMenuBuilder.RegisterBuildScenes is what guarantees that.
+            // It used to walk straight out to the front page from here, which meant one mistimed key
+            // threw away a round in progress with no confirmation and nothing to press to get it
+            // back. The exit still exists and is still BackToMenu — it is a button inside the pause
+            // popup now, so leaving costs a deliberate second choice instead of an accidental first
+            // one. Menu.unity still has to be in the build settings for that button to do anything;
+            // DuckMenuBuilder.RegisterBuildScenes is what guarantees it.
+            //
+            // Three guards, and each is load bearing:
+            //   * Consumed — the popup stack polls this same Escape latch one beat earlier in the
+            //     player loop. On the frame it closes the LAST popup the stack is empty again by the
+            //     time this runs, so without the flag that frame would reopen the menu the player
+            //     just shut and every close would be invisible.
+            //   * Any — while anything is open the stack owns Escape, including popups that refuse
+            //     to close on it. Stacking a second pause menu on top of a confirmation is not a
+            //     thing anybody wants.
+            //   * PauseFactory — the popup registers itself there on startup rather than being named
+            //     here, so this file and the popup do not have to know each other's types. Null means
+            //     nothing registered and Escape does nothing at all: a dead key, not a crash.
             if (input != null && input.MenuPressed && State != GameState.Intro)
             {
-                BackToMenu();
+                if (!UI.PopupStack.Consumed && !UI.PopupStack.Any && UI.PopupStack.PauseFactory != null)
+                    UI.PopupStack.Push(UI.PopupStack.PauseFactory());
                 return;
             }
 
