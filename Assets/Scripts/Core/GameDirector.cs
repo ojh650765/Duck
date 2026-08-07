@@ -286,8 +286,42 @@ namespace DuckMow
             if (_chalkInstance != null) Destroy(_chalkInstance);
         }
 
+        /// <summary>
+        /// True when this round was asked for by the STAGE SELECT rather than by PLAY: one round,
+        /// on its own, with no championship around it.
+        ///
+        /// Read-only, and taken once in <see cref="Start"/> — see the note there. Public because the
+        /// answer is a fact about the round that the HUD, the pause board and the diagnostics all
+        /// have a legitimate interest in, and because the alternative is each of them asking
+        /// StageLauncher a question whose flag has already been spent by the time they get to it.
+        /// </summary>
+        public bool SoloRound { get; private set; }
+
         void Start()
         {
+            // WHAT KIND OF ROUND IS THIS. Before anything at all, because two of the decisions below
+            // depend on the answer and one of them is the opening story.
+            //
+            // Two things can open this scene and they mean different things by it. PLAY on the front
+            // page means the CHAMPIONSHIP: the story page, three rounds, the goose rally spliced in
+            // at round two, Bloom Rush at round three, a ceremony and an ending. The stage select's
+            // first plate means STAGE ONE — one picture, mowed, judged, done — and has to mean that,
+            // because the two plates beside it are exactly that and a board whose three rows keep
+            // three different promises is not a stage select.
+            //
+            // The distinction cannot be worked out from this scene: Main.unity is identical on both
+            // routes, which is the whole problem. So it is TOLD, by the only thing that knows, and
+            // taken here exactly once — StageLauncher.TakeSoloRound clears the static as it hands it
+            // over, so a later PLAY cannot inherit a stage select's intent. The answer is latched
+            // into a field because the flag lasts one call and the behaviour has to last the round.
+            //
+            // Nothing below is allowed to read the flag directly. Every consequence hangs off this
+            // one field, so "what does solo change" is answerable by searching for one identifier.
+            SoloRound = DuckMow.Flow.StageLauncher.TakeSoloRound();
+            if (SoloRound)
+                Debug.Log("[Duck] stage select: playing Lawn Art as a single round — no opening " +
+                          "story, no rally, no Bloom Rush, and the front page after the verdict.");
+
             // The evening's own bookkeeping, before anything that reads it. The championship knows
             // how many rounds there are; MatchState mirrors it so a stage scene can ask how far in
             // the player is without having to find a Tournament that its own scene does not contain.
@@ -317,7 +351,24 @@ namespace DuckMow
             // and pressed R wants the start line, not the duck's childhood. Putting the check here
             // means "never replays on retry" is a property of the shape of the code rather than a
             // flag somebody has to remember to clear.
-            if (playIntro && intro != null)
+            //
+            // A solo round skips it, and the reason is the same one the retry path has: the story is
+            // the GAME's opening, not the STAGE's. It is where the duck comes from and what the pond
+            // is for — a frame around three rounds of championship — and a player who has clicked
+            // one plate on a stage select to play one picture has not asked for the frame. The two
+            // arenas have no equivalent in front of them and nobody has ever wanted one there.
+            //
+            // Note this is a SKIP and not a deletion. The sequence, its panels and its wiring are
+            // untouched; PLAY still opens on it exactly as it always has. That matters because the
+            // project's standing instruction is that the opening story is not to be BUILT yet, and
+            // stepping over one that already exists is a different act from authoring it.
+            //
+            // The stage's own opening — briefing, preview, count-in, and the controls card the popup
+            // stack now puts in front of all three — is deliberately kept. That sequence announces
+            // the SUBJECT and hands the player the picture they are about to be marked on; without
+            // it a solo stage would drop them onto a lawn with a shape they were never shown, which
+            // is not a shorter stage, it is an unplayable one.
+            if (playIntro && intro != null && !SoloRound)
             {
                 // Budgeted, not trusted. If the sequence stalls — a null in the panel table, an
                 // exception inside its own tick, art that never loaded — the round starts anyway.
@@ -961,12 +1012,92 @@ namespace DuckMow
 
         void OnDisable() => ReleaseHitStop();
 
+        /// <summary>The frame this director last saw anything in the popup stack. See <see cref="UpdateConfirmGate"/>.</summary>
+        int _popupFrame = -99;
+
+        /// <summary>
+        /// The confirm edge, with the one that dismissed a popup taken out of it.
+        ///
+        /// Everything in <see cref="Tick"/> and <see cref="UpdateReveal"/> reads THIS and nothing
+        /// reads <see cref="InputReader.AnyConfirmPressed"/> directly any more. A field rather than
+        /// a parameter because UpdateReveal is called from inside Tick and would otherwise need the
+        /// value threaded through it; recomputed at the top of every Tick, so it is never stale.
+        /// </summary>
+        bool _confirm;
+
+        /// <summary>
+        /// How many frames a confirm stays swallowed after the popup stack empties. See below —
+        /// the answer is exactly two, and it is arithmetic rather than taste.
+        /// </summary>
+        const int ConfirmBleedFrames = 2;
+
+        /// <summary>
+        /// Swallow the keypress that closed a popup, so it does not also press a button behind it.
+        ///
+        /// ---- the bug, frame by frame ----
+        ///
+        /// The controls card is dismissed with ENTER or SPACE. Dismissing it also skipped the
+        /// briefing — the player read the controls, pressed START, and the announcement of the
+        /// subject they are about to be marked on flashed past. One keypress, two actions, and the
+        /// second one invisible.
+        ///
+        /// Three separate pieces of timing conspire, and none of them is wrong on its own:
+        ///
+        ///   * PopupStack runs its beat from the START of the player loop's Update phase, ahead of
+        ///     every MonoBehaviour including this one, and the card reads the RAW device.
+        ///   * InputReader latches AnyConfirmPressed in its own Update at execution order 0.
+        ///   * This director runs at -10, so it always reads the PREVIOUS frame's latch. PopupStack
+        ///     says so itself, at length, in the note on <see cref="DuckMow.UI.PopupStack.Consumed"/>.
+        ///
+        /// So on frame N the stack pops the card and the stack is empty again before this director
+        /// has looked at anything; InputReader latches the edge later that same frame; and on frame
+        /// N+1 the Briefing case reads a live AnyConfirmPressed and does what it is supposed to do
+        /// with one. Every part behaves correctly and the round still loses a beat.
+        ///
+        /// PopupStack.Consumed does not cover it. That flag is about ESCAPE, is set only on frames
+        /// the stack actually answered Escape, and is cleared at the top of the very next beat — by
+        /// the time this stale confirm arrives it is long gone. The two mechanisms are solving the
+        /// same shape of problem for two different keys.
+        ///
+        /// ---- the fix, and why two ----
+        ///
+        /// The last frame this director can OBSERVE the stack occupied is N-1, because on frame N
+        /// the pop has already happened by the time it looks. The stale edge reaches it on N+1.
+        /// That is two frames later, so two frames is what gets swallowed — 33 ms at sixty, which no
+        /// player can press twice inside, and a genuine second press on N+2 is honoured normally.
+        ///
+        /// Fixed HERE rather than in ControlsPrimer deliberately. The card is only the loudest
+        /// instance: closing the PAUSE board by pressing ENTER on RESUME bleeds the identical edge,
+        /// and at the reveal that edge presses on to the judges — the player pauses, resumes, and
+        /// the picture they were looking at is gone. Any popup this project ever adds with a confirm
+        /// on it inherits the same fault. A guard on the RECEIVING side covers all of them at once;
+        /// a guard inside one popup covers that popup, and is a thing the next author has to know to
+        /// copy.
+        ///
+        /// Only the confirm edge is gated. RetryPressed and NextPressed are R and N, which dismiss
+        /// no popup in this game, and swallowing keys nothing is pressing would be superstition.
+        /// </summary>
+        void UpdateConfirmGate(InputReader input)
+        {
+            // Fully qualified for the reason the Escape block below gives: this file has
+            // `using UnityEngine;`, which puts UnityEngine.UI in scope under the same short name.
+            if (DuckMow.UI.PopupStack.Any) _popupFrame = Time.frameCount;
+
+            _confirm = input != null && input.AnyConfirmPressed &&
+                       Time.frameCount - _popupFrame > ConfirmBleedFrames;
+        }
+
         public void Tick(float dt)
         {
             _stateTime += dt;
 
             UpdateTicks++;
             var input = InputReader.Instance;
+
+            // Before every early return below, so the gate keeps watching the stack on the frames
+            // this method does nothing else with — a popup that is up for the whole of a covered
+            // seam would otherwise never be seen at all.
+            UpdateConfirmGate(input);
 
             // Escape opens the pause menu, from any state except the opening — during the intro there
             // is nothing on screen the player would be trying to get out of, and the cutscene has its
@@ -1027,8 +1158,11 @@ namespace DuckMow
                     break;
 
                 case GameState.Briefing:
-                    // Let an impatient player skip the announcement.
-                    if (_stateTime >= briefingDuration || (input != null && input.AnyConfirmPressed))
+                    // Let an impatient player skip the announcement — but only an impatient player.
+                    // Read through the gate, not off the reader: the controls card is dismissed with
+                    // the same key one frame earlier and used to skip this beat on its way out. See
+                    // UpdateConfirmGate.
+                    if (_stateTime >= briefingDuration || _confirm)
                         SetState(GameState.Preview);
                     break;
 
@@ -1165,17 +1299,53 @@ namespace DuckMow
                     // straight into a fresh picture from the verdict — and now that the championship
                     // banks a round at the board, that shortcut would have thrown away a round the
                     // player had just finished, marks and all, without it ever counting.
+                    // A SOLO STAGE ENDS HERE, and this is the one place in the file where that is a
+                    // decision rather than a consequence. Worth arguing properly.
+                    //
+                    // What comes next in a championship is the venue tour and the plaza board, and
+                    // neither of them is about the player's picture: the tour flies three RIVALS'
+                    // finished work, and the board is the standings of a three-round table with one
+                    // row filled in. Shown after a single stage they would be a tour of strangers
+                    // followed by a league nobody is playing in. The ceremony and the ending pages
+                    // are worse than irrelevant — they are the payoff for winning a CHAMPIONSHIP,
+                    // and firing them off one isolated round would be the game congratulating the
+                    // player for something they did not do. So none of it runs.
+                    //
+                    // But the round is played to its own end first, and that is the other half of
+                    // the decision. Everything up to this point — the klaxon, the reveal, the ghost
+                    // sweep, the panel, the marks, the verdict — belongs to the PICTURE, and it is
+                    // the whole reason to play stage one. A stage select that dropped the player at
+                    // the horn, or at the scoreboard with the judging cut off, would be showing them
+                    // most of a stage and calling it the stage. They mowed a heart; three animals
+                    // are entitled to have an opinion about it before anyone goes anywhere.
+                    //
+                    // And then the front page, because there is nowhere else honest to go. The stage
+                    // is over, the stage select is one scene away, and the two arenas end the same
+                    // way — StageLauncher.ReturnToMenu, and BackToMenu underneath it, which is the
+                    // exit that also drops the stage handles and puts the clock back.
+                    if (SoloRound)
+                    {
+                        // The same skip contract the tour branch offers below, so pressing on out of
+                        // a verdict means the same thing whichever kind of round produced it. The
+                        // 1.2 s floor is there for the same reason too: the verdict lands ON a
+                        // keypress often enough that accepting one immediately would make the
+                        // portrait a single frame.
+                        bool leave = _stateTime > 1.2f && _confirm;
+                        if (_stateTime >= SoloVerdictHold || leave) BackToMenu();
+                        break;
+                    }
+
                     bool tourAhead = tournament != null && tournament.rivals.Length > 0;
                     if (tourAhead)
                     {
-                        bool skip = _stateTime > 1.2f && input != null && input.AnyConfirmPressed;
+                        bool skip = _stateTime > 1.2f && _confirm;
                         if (_stateTime >= verdictHold || skip) SetState(GameState.VenueTour);
                         break;
                     }
                     if (input != null)
                     {
                         if (input.RetryPressed) RetrySameShape();
-                        else if (input.NextPressed || input.AnyConfirmPressed) NextShape();
+                        else if (input.NextPressed || _confirm) NextShape();
                     }
                     break;
                 }
@@ -1219,7 +1389,7 @@ namespace DuckMow
                         // round's points are already banked by the time this board is on screen, so
                         // a same-picture retry would let one round be counted twice.
                         if (input.RetryPressed) RestartChampionship();
-                        else if (input.NextPressed || input.AnyConfirmPressed) NextShape();
+                        else if (input.NextPressed || _confirm) NextShape();
                     }
                     break;
                 }
@@ -1227,7 +1397,7 @@ namespace DuckMow
                 case GameState.Ceremony:
                     _ceremony?.Tick(dt);
                     if (input != null && _ceremony != null && _ceremony.PromptUp &&
-                        (input.RetryPressed || input.NextPressed || input.AnyConfirmPressed))
+                        (input.RetryPressed || input.NextPressed || _confirm))
                     {
                         // The ceremony hands the trophy over; the ending says what it MEANT. R still
                         // skips straight to a fresh championship for anyone who has seen it.
@@ -1249,7 +1419,7 @@ namespace DuckMow
                                              $"{_endingBudget:0.0}s; returning to the menu.");
                             _ending.Hide();
                         }
-                        if (input != null && (input.AnyConfirmPressed || input.NextPressed ||
+                        if (input != null && (_confirm || input.NextPressed ||
                                               input.RetryPressed || _ending == null))
                             RestartChampionship();
                     }
@@ -1297,11 +1467,27 @@ namespace DuckMow
         /// mode does not own. Read off the CHAMPIONSHIP's round number rather than this director's,
         /// because <see cref="RoundNumber"/> counts retries — a player who restarted the first round
         /// four times would otherwise arrive at the arena in the middle of round one.
+        ///
+        /// A solo round never has it, and this property and <see cref="BloomWanted"/> are where that
+        /// is decided for the whole class. They are the ONLY two questions the round asks about the
+        /// later stages — the klaxon's mid-round splice, <see cref="StageChainNext"/> and
+        /// <see cref="NextSeamLabel"/> all read them and nothing reads the enable flags behind them,
+        /// which is exactly why that discipline was introduced (see StageChainNext's note about
+        /// three identical eight-minute rounds). So one answer here switches off every route into
+        /// the arenas AND stops the sign above the curtain naming a stage that is not coming, and
+        /// there is no fourth place a stage could sneak in from.
+        ///
+        /// Deliberately NOT done by writing <c>rallyEnabled = false</c> at startup. Those are
+        /// serialized fields on a component in Main.unity: setting them at runtime in the editor
+        /// leaves the inspector showing the stage as off, and one absent-minded Apply later the
+        /// championship has permanently lost round two in a scene file, with nothing in the diff to
+        /// explain it. What a solo round changes is what the round WANTS, not what the build HAS.
         /// </summary>
         bool RallyWanted
         {
             get
             {
+                if (SoloRound) return false;
                 if (!rallyEnabled) return false;
                 if (rallyOnRound <= 0) return true;
                 var champ = tournament != null ? tournament.Championship : null;
@@ -1348,11 +1534,15 @@ namespace DuckMow
         /// because <see cref="RoundNumber"/> counts retries — a player who restarted the first round
         /// four times would otherwise arrive at the arena in the middle of round one. Same rule the
         /// rally is under, for the same reason.
+        ///
+        /// And a solo round never has it, for the reason set out at length on <see cref="RallyWanted"/>
+        /// — these two properties are the whole of that decision.
         /// </summary>
         bool BloomWanted
         {
             get
             {
+                if (SoloRound) return false;
                 if (!bloomEnabled) return false;
                 if (bloomOnRound <= 0) return true;
                 var champ = tournament != null ? tournament.Championship : null;
@@ -1555,6 +1745,22 @@ namespace DuckMow
         [Header("Venue tour")]
         [Tooltip("Seconds the player's own verdict holds before the venue tour begins.")]
         public float verdictHold = 4.2f;
+
+        /// <summary>
+        /// Seconds a SOLO stage's verdict holds before the game returns to the front page.
+        ///
+        /// Longer than <see cref="verdictHold"/> because it is doing a different job. In a
+        /// championship the verdict is a PAUSE — the marks land and the venue opens up a moment
+        /// later, so four seconds is a breath between two things. In a solo stage it is the ENDING,
+        /// the last thing the player sees before the curtain, and an ending that leaves after four
+        /// seconds reads as the game having got bored of its own result.
+        ///
+        /// A const rather than a serialized field, and that is the point of it being here at all.
+        /// Adding a public field would put a new row in GameDirector's inspector, in a scene this
+        /// change is under instructions not to touch, to hold one number that no round played from
+        /// the front page will ever read. Pacing that belongs to one code path can live in the code.
+        /// </summary>
+        const float SoloVerdictHold = 7f;
         [Tooltip("Seconds each contestant's finished work is held on screen.")]
         public float tourHoldPerPlot = 3.0f;
 
@@ -1671,8 +1877,12 @@ namespace DuckMow
             // capture run still completes.
             if (!stageChainOnConfirm) { SetState(GameState.Judging); return; }
 
+            // Through the gate, not off the reader — see UpdateConfirmGate. This beat is the one the
+            // pause board bleeds into hardest: ENTER on RESUME would press on from the finished
+            // picture the player had paused to look at, and take the reveal away with it. Only
+            // called from Tick, so _confirm is this frame's answer.
             var input = InputReader.Instance;
-            bool pressed = input != null && (input.AnyConfirmPressed || input.NextPressed);
+            bool pressed = _confirm || (input != null && input.NextPressed);
             if (!pressed && t < analysisEnd + revealStageHold) return;
 
             // The panel is a hard cut across ninety metres of lawn and always has been — see the

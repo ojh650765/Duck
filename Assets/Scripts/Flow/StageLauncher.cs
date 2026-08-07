@@ -66,15 +66,26 @@ namespace DuckMow.Flow
     /// See <see cref="Run"/>. The short version: this class outlives the load, so it raises its own
     /// curtain rather than leaving one down for a scene that may have nobody in it to notice.
     ///
-    /// ---- NOTE: what StageId.LawnArt actually launches ----
+    /// ---- what StageId.LawnArt launches, and why it needed a flag ----
     ///
-    /// Main.unity, which is the championship, not a single stage. Its GameDirector runs its own
-    /// three-round running order and splices the two arenas in at <c>rallyOnRound</c> and
-    /// <c>bloomOnRound</c> exactly as it always has. "Stage 1" from a stage select is therefore the
-    /// whole game. That is a decision for whoever owns the menu, not for this file: nothing here
-    /// could change it without reaching into GameDirector and turning stages off, which would be
-    /// this class quietly reconfiguring the championship — and a launcher that edits the thing it
-    /// launches is worse than a menu row with a surprising name.
+    /// The other two stages are scenes. LawnArt is not: it is Main.unity, which is the whole
+    /// CHAMPIONSHIP — a GameDirector holding <c>playIntro</c>, a three-round running order, and
+    /// <c>rallyOnRound: 2</c> / <c>bloomOnRound: 3</c> splicing the other two stages into itself.
+    /// So for as long as this class only loaded a scene, picking stage one off a stage select gave
+    /// the player the opening story followed by all three stages, while picking stage two or three
+    /// gave them one match and a horn. Two rows behaved one way and the third behaved like the
+    /// entire game, and a board that offers three equal-looking plates and means something
+    /// different by one of them is lying to the person clicking it.
+    ///
+    /// The fix is <see cref="SoloRound"/>: an INTENT, set here and honoured by GameDirector, rather
+    /// than a reconfiguration performed here. That distinction is the whole of the design and it is
+    /// worth being explicit about, because the obvious alternative — reach into the live
+    /// GameDirector and set <c>rallyEnabled = false</c> — is genuinely worse in two ways. It is a
+    /// launcher editing the thing it launches, which is how a class ends up owning half of somebody
+    /// else's state machine. And those fields are SERIALIZED: writing them at runtime in the editor
+    /// is one accidental "Apply" away from a championship that no longer has a round two in it,
+    /// permanently, in a scene file, with nothing in the diff to say why. A bool the director reads
+    /// once and forgets cannot do that to anybody.
     /// </summary>
     public static class StageLauncher
     {
@@ -229,6 +240,58 @@ namespace DuckMow.Flow
         /// </summary>
         public static bool Busy => _busy;
 
+        // ------------------------------------------------------------------ the solo intent
+
+        static bool _soloRound;
+
+        /// <summary>
+        /// True when the Main.unity about to open was asked for by a STAGE SELECT, and should
+        /// therefore play one round on its own rather than a three-round championship.
+        ///
+        /// ---- why a static, and why here ----
+        ///
+        /// A static because it has to survive a scene load, which is the same reason
+        /// <see cref="MatchState.CurtainPending"/>, <see cref="RallyHandoff.Active"/> and every
+        /// other fact that crosses a boundary in this project is one. The alternative — a
+        /// DontDestroyOnLoad carrier — is a component that exists in two scenes at once, which is
+        /// how a retry ends up with two of them; RallyHandoff's note argues that at length and this
+        /// is not a new case.
+        ///
+        /// Here rather than in MatchState because this class is the only thing in the project that
+        /// ever sets it. MatchState holds the JOURNEY — how far through the evening the player is,
+        /// how loud the next seam should be — and is read by half a dozen files; a menu's private
+        /// intent parked in the middle of that is a field every one of them can see and none of them
+        /// has any business reading. The setter and the resets live together, in the file whose
+        /// behaviour they describe.
+        ///
+        /// ---- and why it is TAKEN rather than read ----
+        ///
+        /// This is the one part that has to be right, because the failure is silent. PLAY on the
+        /// front page does not come through this class at all — MainMenu.LeaveToGame calls
+        /// SceneManager.LoadSceneAsync(playScene) directly — so PLAY can never SET this flag. What
+        /// PLAY absolutely can do is INHERIT one: play stage one from the stage select, come back to
+        /// the front page, press PLAY, and a flag left true would hand the player a one-round
+        /// championship with no opening and no stages, with nothing on screen to explain why. So the
+        /// director takes it once and clears it — <see cref="TakeSoloRound"/>, exactly the contract
+        /// <see cref="MatchState.TakeCurtainPending"/> is under and for exactly the same reason — and
+        /// it is cleared again on every other route out of this class besides.
+        /// </summary>
+        public static bool SoloRoundPending => _soloRound;
+
+        /// <summary>
+        /// Take the solo intent once, so the round that opens is the only round that can act on it.
+        ///
+        /// Called by GameDirector.Start, which latches the answer into a field of its own for the
+        /// life of the round — the flag has to be spent immediately, but the BEHAVIOUR has to last
+        /// until the player leaves, and those are two different lifetimes.
+        /// </summary>
+        public static bool TakeSoloRound()
+        {
+            bool solo = _soloRound;
+            _soloRound = false;
+            return solo;
+        }
+
         // ------------------------------------------------------------------ the verbs
 
         /// <summary>
@@ -247,6 +310,19 @@ namespace DuckMow.Flow
 
             var host = Host();
             if (host == null) return;
+
+            // Assigned, not set — the else branch is load bearing.
+            //
+            // Writing `if (LawnArt) _soloRound = true;` would leave a stale true standing whenever
+            // the lawn was launched and, for whatever reason, nobody took it: a Main.unity whose
+            // GameDirector is disabled, a load that the browser never finished, a session stopped in
+            // the editor between the two. The next Goose Rally launch would carry it, and the PLAY
+            // after that would spend it. An unconditional assignment has no stale state to leave —
+            // every launch states what it is, including the two that are not the lawn.
+            //
+            // After the guards, so a launch this method is about to refuse cannot change what the
+            // NEXT one means.
+            _soloRound = stage == StageId.LawnArt;
 
             _busy = true;
             host.StartCoroutine(Run(scene, SeamFor(stage), TitleFor(stage), KickerFor(stage)));
@@ -291,6 +367,15 @@ namespace DuckMow.Flow
             // under this, but a net is what catches the fall rather than a reason not to step
             // carefully. Harmless if the caller already did it: PopAll on an empty stack is a no-op.
             DuckMow.UI.PopupStack.PopAll();
+
+            // The solo round is over the moment the player heads for the front page, whichever
+            // branch below takes them there. Belt and braces with the take in GameDirector.Start —
+            // by the time a solo round can be left, its director has already spent the flag — but
+            // the branch that matters is the OTHER one: a player who abandoned a stage-select launch
+            // of the lawn before Main.unity ever came up (a load the browser stalled on, a Bloom
+            // Rush launched from the pause board) is the one case where nobody took it, and this is
+            // the last chance to put it back before the front page offers PLAY again.
+            _soloRound = false;
 
             var director = GameDirector.Instance;
             if (director != null)
@@ -519,9 +604,17 @@ namespace DuckMow.Flow
         /// <see cref="MatchState"/> and PopupStack both give at their own resets: statics are not
         /// reset by entering play mode when domain reloading is off.
         ///
-        /// <see cref="_busy"/> is the whole of it, and it is enough to matter. A session stopped in
-        /// the editor mid-launch leaves it true, and the next session's front page would then be a
-        /// stage select where nothing happens when you click — silently, with no error, for ever.
+        /// <see cref="_busy"/> is the older of the two and the easier to describe. A session stopped
+        /// in the editor mid-launch leaves it true, and the next session's front page would then be
+        /// a stage select where nothing happens when you click — silently, with no error, for ever.
+        ///
+        /// <see cref="_soloRound"/> is the newer one and fails the other way round: a session
+        /// stopped in the editor between a stage-select launch of the lawn and GameDirector.Start
+        /// taking the flag leaves it TRUE, and the next session's PLAY would then open a
+        /// championship that quietly turns out to be one round with no opening story in front of it.
+        /// The player's first act in a new session is the one thing that must never inherit anything
+        /// from the last one.
+        ///
         /// There is deliberately nothing else to reset: the coroutine host is not cached here, it is
         /// asked of <see cref="Curtain.Ensure"/> at the moment it is needed, which is the same rule
         /// PopupStack.ApplyGates follows for InputReader and for the same reason — a reference kept
@@ -531,6 +624,7 @@ namespace DuckMow.Flow
         static void ResetForSession()
         {
             _busy = false;
+            _soloRound = false;
         }
     }
 }
