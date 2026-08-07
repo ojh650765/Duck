@@ -43,10 +43,36 @@ namespace DuckMow
         public float sweetSpotAhead = 1.25f;
 
         [Header("Confinement")]
-        [Tooltip("How hard the boundary pushes a machine back onto its ground over the last few " +
-                 "centimetres. A shove first, so leaning on the line is soft rather than a clang — " +
-                 "but only for those few centimetres. See Confine().")]
+        [Tooltip("Extra inward acceleration once the hull is past the line, on top of the return " +
+                 "velocity below. Belt to that braces: it is what gets a machine that was knocked " +
+                 "well outside moving again in the first place. See Confine().")]
         public float bandPush = 26f;
+        [Tooltip("Metres per second squared the boundary may take off the part of the velocity " +
+                 "heading OUT. Sets how far back from the line the machine starts being eased: a " +
+                 "machine leaving at v is braked over v*v/(2*this) metres, so at 60 a full-speed " +
+                 "run at the edge is smoothed over the last 0.8 m and arrives stopped rather than " +
+                 "stopping. Nothing across the line is touched at any point.")]
+        public float boundaryBrake = 60f;
+        [Tooltip("How much of what the boundary absorbs is handed back as speed ALONG it, 0..1. " +
+                 "0 is a wall that arrests you; 1 redirects everything it takes. Scaled by how " +
+                 "glancing the machine's NOSE is against the face, so a head-on run still stops " +
+                 "dead and a shallow scrape costs nothing.")]
+        [Range(0f, 1f)] public float slideCarry = 0.85f;
+        [Tooltip("Ceiling on that slide, m/s^2 — about twice the machine's own drive. Bounding it " +
+                 "as an acceleration rather than as a share of a velocity is what makes the " +
+                 "boundary feel the same at 30 fps as at 144.")]
+        public float slideAccel = 30f;
+        [Tooltip("Once the hull IS past the line, how fast per metre of overshoot the boundary " +
+                 "insists the machine is already travelling back in, 1/s. This is what actually " +
+                 "holds the line — see Confine() on why a boundary that merely forbids leaving can " +
+                 "still be walked through by an engine at full throttle.")]
+        public float bandReturn = 6f;
+        [Tooltip("Ceiling on that return, m/s. Stops a machine flung well outside from being " +
+                 "fired back across its own ground faster than it could drive.")]
+        public float bandReturnMax = 2.5f;
+        [Tooltip("Extra clearance past the chassis box, metres. Keeps the bodywork off the stones " +
+                 "that mark the line rather than resting exactly on them.")]
+        public float hullPadding = 0.05f;
 
         [Header("Feel")]
         [Tooltip("How hard a strike kicks the machine back through MowerController.Bonk, 0..1.")]
@@ -81,11 +107,27 @@ namespace DuckMow
 
         Rigidbody _rb;
 
+        /// <summary>
+        /// Half the chassis box, x across and y along the machine. Read off the collider the solver
+        /// actually uses rather than typed in, so a mower that is re-modelled cannot quietly leave
+        /// the confinement enforcing the old silhouette. The fallback is the current prefab's box.
+        /// </summary>
+        Vector2 _hullHalf = new Vector2(0.46f, 0.725f);
+
         void Awake()
         {
             if (mower == null) mower = GetComponentInChildren<MowerController>();
             if (mower != null) _rb = mower.GetComponent<Rigidbody>();
             if (brain != null && mower != null) mower.inputSource = brain;
+
+            // The chassis collider sits on the same GameObject as the body — that is the one the
+            // contact solver resolves against, so it is the one the boundary has to agree with.
+            if (_rb != null && _rb.TryGetComponent(out BoxCollider box))
+            {
+                Vector3 ls = _rb.transform.lossyScale;
+                _hullHalf = new Vector2(Mathf.Abs(box.size.x * ls.x) * 0.5f,
+                                        Mathf.Abs(box.size.z * ls.z) * 0.5f);
+            }
         }
 
         public void ResetForMatch()
@@ -171,46 +213,261 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Keep the machine on its own ground.
+        /// Keep the machine on its own ground — by DEFLECTING it, not by arresting it.
         ///
-        /// A shove for the first few centimetres and a wall after that, and the wall is the part
-        /// that was missing. A pure spring cannot hold a line: it is an acceleration, so a machine
-        /// arriving at speed keeps going while the shove spends its budget on the momentum, and how
-        /// far past it gets is a function of how fast it was travelling. That is why the boundary
-        /// could be driven through — not because the number was too small, but because "push back
-        /// proportionally" has no maximum overshoot at all, and the faster you go the further out
-        /// you end up. A marked area you can leave by going quickly is not a marked area.
+        /// The old version held the line and felt terrible, and the two facts were the same fact.
+        /// It clamped the machine's position to the nearest point inside the box, took the
+        /// direction back to that point as the wall normal, cancelled the velocity along it and,
+        /// past twelve centimetres, wrote <c>Rigidbody.position</c> directly. Every one of those
+        /// four steps is wrong in a way that costs the player their momentum:
         ///
-        /// So: the outward velocity is scrubbed first, the spring handles the shallow contact so
-        /// brushing the edge stays soft, and past <c>Give</c> the position is simply put back. The
-        /// hard part is never felt, because by the time it applies the machine has already been
-        /// stopped from travelling outward — it catches the frame where a big step would otherwise
-        /// jump the line, which is exactly the case the spring is worst at.
+        ///   • "Direction to the nearest inside point" is only the wall normal in the MIDDLE of a
+        ///     face. Approach a corner and both axes clamp at once, the direction swings diagonal,
+        ///     and the velocity cancelled along that diagonal takes the along-the-wall component
+        ///     with it. Corners are exactly where "I was turning and it stopped" was reported, and
+        ///     that is not a coincidence, it is the arithmetic.
+        ///
+        ///   • Cancelling the outward component is right, but doing it as a hard step function the
+        ///     instant the line is touched means the machine goes from full speed to nothing in one
+        ///     physics step. There is no wall in any driving game that does that. A wall lets you
+        ///     arrive.
+        ///
+        ///   • Even on a flat face, where the cancellation IS tangent-preserving, the tangent does
+        ///     not survive. MowerController.ApplyGrip removes the part of the velocity that is
+        ///     sideways relative to the NOSE, and a machine held against a wall it is pointing into
+        ///     has a velocity that is entirely sideways relative to its nose. So the boundary hands
+        ///     the mower a clean tangential slide and the mower's own grip model destroys it within
+        ///     about a tenth of a second. Step the loop out and a machine holding FULL THROTTLE at
+        ///     forty-five degrees into the line settles at two thirds of a metre per second, out of
+        ///     a top speed of ten — and a machine holding a full-lock turn, which the box is too
+        ///     small to fit, spends the match pinned at 0.4. That is the bug the player is
+        ///     describing, and no amount of tuning the old numbers reaches it, because the old code
+        ///     was not the thing spending the speed.
+        ///
+        ///   • Writing <c>Rigidbody.position</c> every physics step is a teleport. The mower runs
+        ///     with interpolation on, and a direct position write resets the interpolation history —
+        ///     MowerController.Place says so in its own comment and disables interpolation around
+        ///     the one legitimate case. Doing it fifty times a second along an edge does not read as
+        ///     a wall, it reads as the game dropping frames.
+        ///
+        /// So this is rebuilt as three things, in band coordinates so that each face can be
+        /// resolved against its OWN normal:
+        ///
+        ///   1. A brake curve instead of a cliff. The boundary caps the outward component of the
+        ///      velocity at sqrt(2 * boundaryBrake * distance-still-to-go), which is exactly the
+        ///      speed something can still be brought to rest in the room remaining. Far from the
+        ///      line the cap is above any speed the machine has and the boundary is not there at
+        ///      all; near it, the outward part is eased to nothing and reaches the line at zero.
+        ///      Nothing along the line is ever touched, so brushing the edge at a shallow angle
+        ///      costs nothing, which is the "grace" the mower already gives you around props.
+        ///
+        ///   2. A slide. Whatever the boundary absorbs is partly handed back as speed ALONG the
+        ///      face, scaled by how glancing the machine's NOSE is against it — a shallow scrape
+        ///      keeps everything, a head-on run keeps nothing and stops, as it should. This is what
+        ///      answers the grip model above: the mower bleeds tangential speed every step, so the
+        ///      boundary has to be topping it up or the machine grinds to a halt with the engine at
+        ///      full throttle. Simulating the whole step loop against MowerController's real drive,
+        ///      grip and steering numbers, the speed a machine settles at while HOLDING full
+        ///      throttle into the face goes:
+        ///
+        ///          nose into the face   20     25     30     40     45     55     60     90 deg
+        ///          before             4.38   2.55   1.68   0.87   0.66   0.39   0.31   0.00 m/s
+        ///          after              9.80   9.54   7.19   3.57   2.37   0.94   0.65   0.00 m/s
+        ///
+        ///      — out of a top speed of ten. The shape is the point, not the numbers: it is now
+        ///      monotone in the angle, so the boundary answers how badly you hit it instead of
+        ///      collapsing to a stop everywhere past about twenty degrees. Nothing exceeds what the
+        ///      throttle could be delivering at that instant, so the wall can redirect a machine
+        ///      and can never make one faster than driving.
+        ///
+        ///   3. A return, and the teleport demoted to a shunt-catcher. Past the line the permitted
+        ///      outward velocity goes negative rather than to zero, so the machine is required to
+        ///      already be coming back — see ResolveFace, which explains why merely forbidding
+        ///      departure is not enough to hold a line when the drive runs after this does. That
+        ///      settles a machine leaning on the edge between four and twenty-five centimetres past
+        ///      it depending on the angle, and holds it there indefinitely at any speed, with no
+        ///      position write at all. Twenty-five is more than the twelve the old code snapped to,
+        ///      and it is still well inside the stones that draw the line — a boundary that is a
+        ///      few centimetres soft and never stutters beats one that is exact fifty times a
+        ///      second. Anything found more than half a metre out did not drive there, it was hit
+        ///      there — a recoil, a collision with another competitor — and only that is snapped.
+        ///
+        /// The limits are inset by the machine's own hull, resolved onto each axis at its current
+        /// heading, so the marked line is where the BODYWORK stops rather than where the axle does.
+        /// See RallyArena.DriveLimits for why that matters here specifically.
         ///
         /// Applied to everyone including the player: a bot that can be shoved off its ground and a
-        /// player who cannot are two different games being played on the same pitch.
+        /// player who cannot are two different games being played on the same pitch. Note also that
+        /// this runs at execution order -5, ahead of MowerController — deliberately, because the
+        /// slide has to be in the velocity BEFORE the mower measures its own forward speed off it,
+        /// or the drive model spends the step fighting a correction it cannot see.
         /// </summary>
         void Confine(float dt)
         {
-            const float Give = 0.12f;      // how far past the line the machine may ever be seen
-
             var s = Slot;
             Vector3 p = _rb.position;
-            Vector3 limit = RallyArena.ClampToDrive(s, p);
-            Vector3 back = limit - p;
-            back.y = 0f;
-            float over = back.magnitude;
-            if (over < 1e-4f) return;
+            Vector3 v = _rb.linearVelocity;
 
-            Vector3 dir = back / over;
+            Vector2 pos = RallyArena.ToBand(s, p);
+            Vector2 vel = RallyArena.DirToBand(s, v);
 
-            // Cancel the part of the velocity still heading out first, or everything below is
-            // fighting momentum that is about to undo it.
-            float outward = Vector3.Dot(_rb.linearVelocity, -dir);
-            if (outward > 0f) _rb.linearVelocity += dir * outward;
+            // The machine's extent along each band axis at its CURRENT heading. A box meeting a
+            // wall square needs its half-depth; the same box at forty-five degrees needs most of
+            // its diagonal. Treating that as a constant would either let the bodywork through the
+            // marking when turned or hold it half a metre short of it when square.
+            Vector3 fwd = Heading; fwd.y = 0f;
+            if (fwd.sqrMagnitude < 1e-6f) fwd = s.inward;
+            fwd.Normalize();
+            Vector2 f = RallyArena.DirToBand(s, fwd);
+            Vector2 hull = new Vector2(
+                Mathf.Abs(f.y) * _hullHalf.x + Mathf.Abs(f.x) * _hullHalf.y + hullPadding,
+                Mathf.Abs(f.x) * _hullHalf.x + Mathf.Abs(f.y) * _hullHalf.y + hullPadding);
 
-            if (over > Give) _rb.position = p + dir * (over - Give);
-            else _rb.AddForce(dir * (bandPush * over), ForceMode.Acceleration);
+            Vector2 lim = RallyArena.DriveLimits(hull);
+
+            // What the throttle could be giving the machine at this instant. The ceiling on the
+            // slide, and the only thing standing between "a wall you can scrape along" and "a wall
+            // you can farm for speed you could never reach on open ground".
+            float ceiling = mower != null
+                ? mower.maxSpeed * (mower.IsBoosting ? mower.boostSpeedMultiplier : 1f)
+                : 10f;
+
+            // Each face's tangent is the other axis, so each is handed the other axis' everything —
+            // including the slice of the NOSE that lies along it, which is what decides whether
+            // contact here is a scrape or a crash.
+            var across = ResolveFace(pos.x, vel.x, lim.x, pos.y, vel.y, lim.y, f.y, ceiling, dt);
+            var along = ResolveFace(pos.y, vel.y, lim.y, pos.x, vel.x, lim.x, f.x, ceiling, dt);
+
+            // Each face's slide runs along the OTHER axis, which is why they are crossed here.
+            float newX = across.normalVel + along.slide;
+            float newY = along.normalVel + across.slide;
+
+            if (newX != vel.x || newY != vel.y)
+                _rb.linearVelocity = v + RallyArena.FromBand(s, new Vector2(newX - vel.x, newY - vel.y));
+
+            if (across.push != 0f || along.push != 0f)
+                _rb.AddForce(RallyArena.FromBand(s, new Vector2(across.push, along.push)),
+                             ForceMode.Acceleration);
+
+            if (across.snap != 0f || along.snap != 0f)
+                _rb.position = p + RallyArena.FromBand(s, new Vector2(across.snap, along.snap));
+        }
+
+        /// <summary>What one face of the boundary wants doing, in band coordinates.</summary>
+        struct Face
+        {
+            /// <summary>This axis' velocity after the face is finished with it.</summary>
+            public float normalVel;
+            /// <summary>Speed handed to the OTHER axis: the slide along this face.</summary>
+            public float slide;
+            /// <summary>Inward acceleration along this axis. Only ever non-zero past the line.</summary>
+            public float push;
+            /// <summary>Metres the position must be moved along this axis. The last resort.</summary>
+            public float snap;
+        }
+
+        /// <summary>
+        /// Resolve one face of the box, against its own axis-aligned normal.
+        ///
+        /// Everything here is signed by which side of the band centre the machine is on, so the
+        /// four faces are one piece of arithmetic rather than four cases. <paramref name="tanPos"/>
+        /// and <paramref name="tanLimit"/> are only read to answer the corner question.
+        /// </summary>
+        Face ResolveFace(float pos, float vel, float limit,
+                         float tanPos, float tanVel, float tanLimit,
+                         float noseTan, float ceiling, float dt)
+        {
+            const float Give = 0.10f;      // where a shunted machine is put back to, past the line
+            const float Shunt = 0.55f;     // past this, it did not drive here — something hit it
+
+            var face = new Face { normalVel = vel };
+
+            float side = pos >= 0f ? 1f : -1f;
+            float depth = side * pos - limit;   // > 0 once the hull is through the marking
+            float outward = side * vel;         // > 0 while still travelling out through this face
+
+            // The velocity the boundary will permit through this face, signed outward.
+            //
+            // Inside the line it is the brake curve: the room still left, converted into the
+            // fastest departure that can still be brought to rest inside it. Far from the edge that
+            // is above anything the machine can do and the boundary is not there at all.
+            //
+            // Past the line it goes NEGATIVE, and that sign is the whole difference between a
+            // boundary and a suggestion. Forbidding outward motion is not enough to hold a line,
+            // and the reason is the execution order this runs in: the confinement speaks at -5 and
+            // MowerController drives at 0, so every step the drive puts accelRate * dt back into
+            // the velocity AFTER the ceiling has been applied and the machine leaves at a fifth of
+            // a metre per second — twenty-eight centimetres of ground per second, for as long as
+            // the player leans on it. The old code met that with a per-frame position write, which
+            // is why it teleported. Requiring inward motion proportional to the overshoot meets it
+            // with arithmetic instead: the engine's fifth of a metre per second is answered at
+            // roughly five centimetres out and the machine simply sits there.
+            float allowed = depth <= 0f
+                ? Mathf.Sqrt(2f * boundaryBrake * -depth)
+                : -Mathf.Min(depth * bandReturn, bandReturnMax);
+
+            if (outward > allowed)
+            {
+                face.normalVel = side * allowed;
+
+                // Everything the boundary just took out of this axis, INCLUDING the escort back in.
+                //
+                // Counting only the part that was heading out sounds more principled and is in fact
+                // useless, and it took a simulation of the whole step loop to see why: a machine
+                // resting against the line is at equilibrium, so its outward velocity at this
+                // moment is zero by definition — the drive's push into the wall has already been
+                // absorbed by last step's return. Measure the slide off "how fast is it leaving"
+                // and the answer while leaning on a wall is always nothing, and the slide never
+                // fires at all when it is needed most. What the wall is actually absorbing is the
+                // whole correction, so that is what may be redirected.
+                float excess = outward - allowed;
+
+                // How glancing is it? Taken off the NOSE rather than off the velocity, and that is
+                // not a detail. At equilibrium the velocity is nearly all tangential whatever the
+                // machine is pointing at, so a velocity-derived angle says "glancing" even when the
+                // player is driving flat into the wall — the head-on case then creeps sideways at a
+                // fifth of a metre per second forever, which is a boundary moving the machine for
+                // them. The nose is what the player is holding and it is what decides whether this
+                // is a scrape or a crash: dead ahead into the face is exactly zero, and the wall
+                // stops you, as it should.
+                float glance = Mathf.Abs(noseTan);
+                float carry = excess * slideCarry * glance;
+
+                // A wall is not a rocket. Bounding the slide as an ACCELERATION rather than as a
+                // fraction of a velocity is what keeps it the same at any frame rate, and 30 m/s^2
+                // is about twice what the machine's own drive can do — enough to beat the grip
+                // model's appetite for a sideways velocity, not enough to feel like being thrown.
+                carry = Mathf.Min(carry, slideAccel * dt);
+
+                // Which way along the face. The machine's own travel decides it whenever there is
+                // any, so the slide only amplifies a direction it already has; below a crawl there
+                // is no travel to read and the nose decides instead, which is what lets a machine
+                // that has been stopped against the line get going again by turning rather than by
+                // reversing out.
+                float tanSide = Mathf.Abs(tanVel) > 0.15f
+                    ? (tanVel >= 0f ? 1f : -1f)
+                    : (noseTan >= 0f ? 1f : -1f);
+
+                // The corner, explicitly. If the face we would slide along is itself breached on
+                // the side we are heading, sliding is just burrowing further into the corner and
+                // the other face will spend the next step undoing it. So a corner does stop you —
+                // it is a corner — but a machine clipping one while running down a face is still
+                // free to keep running down that face, because only the outward half is suppressed.
+                if (tanSide * tanPos > tanLimit) carry = 0f;
+
+                // Never past what the machine could be doing on open ground under its own power.
+                carry = Mathf.Min(carry, Mathf.Max(ceiling - Mathf.Abs(tanVel), 0f));
+
+                face.slide = tanSide * carry;
+            }
+
+            if (depth > 0f)
+            {
+                face.push = -side * bandPush * Mathf.Min(depth, 1f);
+                if (depth > Shunt) face.snap = -side * (depth - Give);
+            }
+
+            return face;
         }
 
         // ------------------------------------------------------------------ striking

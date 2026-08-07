@@ -242,11 +242,66 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Clamp a point to the line a machine genuinely cannot pass — the one the boundary is
-        /// drawn on. Everything that enforces or draws the edge goes through here.
+        /// Clamp a POINT to the line a machine genuinely cannot pass — the one the boundary is
+        /// drawn on. The point form of the edge: use it for anything without a body, such as a
+        /// marker, an aim target or a gizmo.
+        ///
+        /// A machine is not a point and no longer goes through here; see
+        /// <see cref="DriveLimits"/> and RallyCompetitor.Confine.
         /// </summary>
         public static Vector3 ClampToDrive(in Slot s, Vector3 world)
             => ClampToBand(s, world, -BandSlack);
+
+        // -------------------------------------------------------------- band coordinates
+        //
+        // Every competitor's ground is an axis-aligned box in its OWN frame, and almost every
+        // question about it — am I past the edge, which edge, how fast am I leaving through it —
+        // is trivial in that frame and a mess in world space. The three helpers below are that
+        // change of basis and nothing else, so that the confinement can reason one face at a time
+        // instead of against the diagonal to the nearest inside point, which is not a wall normal
+        // anywhere except in the middle of a face.
+
+        /// <summary>
+        /// A world point in a competitor's band coordinates: x across the frontage (along
+        /// <see cref="Slot.right"/>), y along <see cref="Slot.outward"/>. Height is dropped.
+        /// </summary>
+        public static Vector2 ToBand(in Slot s, Vector3 world)
+        {
+            Vector3 d = world - s.bandCentre;
+            return new Vector2(Vector3.Dot(d, s.right), Vector3.Dot(d, s.outward));
+        }
+
+        /// <summary>The same projection for a DIRECTION — no origin, so velocities come here.</summary>
+        public static Vector2 DirToBand(in Slot s, Vector3 dir)
+            => new Vector2(Vector3.Dot(dir, s.right), Vector3.Dot(dir, s.outward));
+
+        /// <summary>Band coordinates back out to a world direction, on the flat.</summary>
+        public static Vector3 FromBand(in Slot s, Vector2 v) => s.right * v.x + s.outward * v.y;
+
+        /// <summary>
+        /// How far from the middle of the band a MACHINE of the given half-extents may put its
+        /// centre, per axis, in band coordinates.
+        ///
+        /// The distinction between this and <see cref="ClampToDrive"/> is the whole reason the
+        /// edge could be felt in the wrong place. The marking is a line of stones laid on
+        /// <see cref="DriveHalfWidth"/>; the confinement used to hold the machine's AXLE on that
+        /// same line, which means its bodywork was a metre through the stones long before the rule
+        /// ever spoke — and since the stones carry colliders, what actually stopped the player was
+        /// the solver catching a 0.92 m box on a row of static spheres. Two boundaries, half a
+        /// machine apart, and only one of them tuneable.
+        ///
+        /// Insetting by the hull makes the marked line mean what a player reading it assumes it
+        /// means: drive up until your side is against the stones. The rule and the paint agree
+        /// again, measured at the part of the machine that is actually against the paint.
+        ///
+        /// <paramref name="hullHalfExtents"/> is x across, y along, and is expected to already be
+        /// the machine's extent RESOLVED ONTO those axes at its current heading — a box needs more
+        /// room across a wall when it meets it at forty-five degrees, which is why this cannot be
+        /// a constant.
+        /// </summary>
+        public static Vector2 DriveLimits(Vector2 hullHalfExtents)
+            => new Vector2(Mathf.Max(DriveHalfWidth - hullHalfExtents.x, 1f),
+                           Mathf.Max(DriveHalfDepth - hullHalfExtents.y, 1f));
 
         public static bool InsideBand(in Slot s, Vector3 world, float margin = 0f)
         {
