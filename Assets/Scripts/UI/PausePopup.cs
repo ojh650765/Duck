@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DuckMow.Flow;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -793,8 +794,8 @@ namespace DuckMow.UI
         ///
         /// Done after every AddItem rather than during, because the column is centred on its own
         /// middle: an item's position depends on how many there turned out to be, and on this board
-        /// that number is decided at runtime — BACK TO MENU is not offered in a scene with no
-        /// championship in it.
+        /// that number is decided at runtime — QUIT is not offered in a browser that has nothing
+        /// to quit.
         /// </summary>
         void LayOutItems()
         {
@@ -906,8 +907,9 @@ namespace DuckMow.UI
     /// ---- what is on the board, and what is not ----
     ///
     ///   RESUME        closes this popup. Nothing else; the stack puts the clock back.
-    ///   BACK TO MENU  hands over to GameDirector, which runs the real transition. NOT OFFERED
-    ///                 where there is no championship to leave — see BuildItems.
+    ///   BACK TO MENU  hands over to StageLauncher, which runs the real transition. ALWAYS
+    ///                 OFFERED, in every scene, without exception — see BuildItems, which used to
+    ///                 leave it out and was wrong to.
     ///   QUIT          asks first, on a popup of its own, which is also the thing that proves the
     ///                 stack actually stacks.
     ///
@@ -936,8 +938,9 @@ namespace DuckMow.UI
         /// it is a static hook rather than a reference somebody drags in an inspector.
         ///
         /// The pause board has to exist in FIVE scenes — the round, the menu's own game scene, and
-        /// the standalone stage scenes that are opened and played on their own during development —
-        /// and it is built entirely in code, so there is no asset for anyone to drag anywhere. A
+        /// the standalone stage scenes, which are no longer only an editor's way in: the front
+        /// page's class list hands a player straight into one — and it is built entirely in code,
+        /// so there is no asset for anyone to drag anywhere. A
         /// serialized reference would mean wiring it into all five and remembering to on the sixth.
         /// GameDirector, which reads Escape, must not have to know this type exists; it asks the
         /// stack for "the pause popup" and the stack asks this factory.
@@ -1017,8 +1020,7 @@ namespace DuckMow.UI
         /// </summary>
         static int CountItems()
         {
-            int n = 1;                                  // RESUME, always
-            if (HasChampionship) n++;
+            int n = 2;                                  // RESUME and BACK TO MENU, always
             if (CanOfferQuit) n++;
             return n;
         }
@@ -1030,20 +1032,26 @@ namespace DuckMow.UI
             // BlocksDriving and has no business unwinding either of them by hand.
             AddItem("RESUME", RequestClose);
 
-            // BACK TO MENU is OMITTED, not greyed out, where there is no GameDirector.
+            // BACK TO MENU IS ALWAYS HERE. It used to be omitted where GameDirector.Instance was
+            // null, and that omission is worth recording because the reasoning behind it was sound
+            // and the conclusion was a trap.
             //
-            // The standalone stage scenes — BloomRush and the goose Arena — are opened and played
-            // directly during development and have no director in them at all, which means no
-            // BackToMenu, no curtain sequence, and nothing this item could honestly do. The three
-            // available answers were: throw (unacceptable), no-op (a button that does nothing is
-            // worse than no button, because the player concludes the game is broken rather than that
-            // the choice was unavailable), or disable it (a greyed row still invites a press and
-            // still has to explain itself).
+            // The argument was: the standalone stage scenes have no director, so there is no
+            // BackToMenu to call and nothing this item could honestly do — and a button that does
+            // nothing is worse than no button, because the player concludes the game is broken. All
+            // true. What it missed is the OTHER half of the board: in those same scenes RESUME is
+            // then the only choice, and on the web QUIT is not offered either, so Escape opens a
+            // menu whose every option is "carry on playing". The player is not merely denied a
+            // door, they are shut in. That was survivable while the only way into a standalone
+            // stage was an editor opening the scene by hand. The class list on the front page makes
+            // it a place a real player can be, and being shut in a room is worse than being shown a
+            // door that leads somewhere plainer than expected.
             //
-            // Omitting it is the only one that leaves the board readable. The player in those scenes
-            // never chose a menu to come back to; there is nothing to be denied.
-            if (HasChampionship)
-                AddItem("BACK TO MENU", BackToMenu);
+            // The fix is not a special case here — it is that leaving is no longer GameDirector's
+            // private business. StageLauncher.ReturnToMenu goes to the front page with a director
+            // or without one, so this item has something honest to do in every scene the game can
+            // reach, and this board no longer has to know which kind of scene it is standing in.
+            AddItem("BACK TO MENU", BackToMenu);
 
             if (CanOfferQuit)
                 AddItem(QuitLabel, AskToQuit);
@@ -1098,6 +1106,14 @@ namespace DuckMow.UI
 
         // ------------------------------------------------------------------ what the choices do
 
+        /// <summary>
+        /// Whether there is a championship in progress behind this board, as opposed to a single
+        /// class being played on its own from the front page's class list.
+        ///
+        /// It no longer decides whether the player can LEAVE — that question is closed, and the
+        /// answer is always yes. All it decides now is whether QUIT is a second, different thing to
+        /// offer on the web; see CanOfferQuit.
+        /// </summary>
         static bool HasChampionship => GameDirector.Instance != null;
 
         /// <summary>
@@ -1105,9 +1121,17 @@ namespace DuckMow.UI
         ///
         /// Application.Quit() DOES NOTHING in a WebGL player, and WebGL is this game's actual
         /// shipping target — so on the browser the item only exists if there is somewhere honest to
-        /// send the player instead, which is the front page. In a standalone stage scene opened in a
-        /// browser there is neither a way to close the tab nor a menu to return to, so the board
-        /// simply does not offer it. Everywhere else — editor, desktop player — quitting is real.
+        /// send the player instead, which is the front page. Everywhere else — editor, desktop
+        /// player — quitting is real and the item always appears.
+        ///
+        /// On the web it is gated on there being a championship, and the reason has changed. It is
+        /// no longer that a standalone stage has nowhere to go — it has, now that BACK TO MENU is
+        /// unconditional. It is that in a standalone stage QUIT would go to exactly the same place
+        /// as the row above it. Two plates on one board that do one thing, one of them behind a
+        /// confirmation, is a board that makes the player wonder which one they wanted. Where there
+        /// IS a championship the two are genuinely different acts — one leaves a class, the other
+        /// abandons a run in progress — and the question the confirmation asks is what tells them
+        /// apart.
         /// </summary>
         static bool CanOfferQuit
         {
@@ -1158,42 +1182,39 @@ namespace DuckMow.UI
         }
 
         /// <summary>
-        /// Out of the round and back to the gate.
+        /// Out of whatever this is and back to the gate.
         ///
-        /// The director owns the whole move — curtain down, statics cleared, timescale restored,
-        /// scene load — and none of it is duplicated here.
+        /// StageLauncher owns the whole move — curtain down, statics cleared, timescale restored,
+        /// scene load, and the choice between handing the job to GameDirector where there is one and
+        /// doing it plainly where there is not. None of that is duplicated here, and the director is
+        /// deliberately not named: this board is the same board in the championship and in a single
+        /// class opened from the front page, and the moment it starts asking which one it is
+        /// standing in, it grows two behaviours and one of them stops being tested.
         ///
         /// THE ORDER OF THESE TWO LINES IS THE WHOLE FUNCTION, and getting it backwards produces a
-        /// bug that looks like anything but this. GameDirector.LeaveToMenu sets Time.timeScale back
-        /// to 1 on its way out, and it has to, because two different stages warp the clock and
-        /// arriving at the front page in slow motion has no recovery short of a restart. But the
-        /// popup stack re-applies its own pause gate in PostLateUpdate on every frame the stack is
-        /// not empty — so with the popups still up, the director's restore is stomped back to zero
-        /// later the same frame, and the entire leave-to-menu transition plays frozen until the
-        /// scene actually swaps. Curtain down, sign sliding in, all of it, at timeScale zero.
+        /// bug that looks like anything but this. The leave sets Time.timeScale back to 1 on its way
+        /// out, and it has to, because two different stages warp the clock and arriving at the front
+        /// page in slow motion has no recovery short of a restart. But the popup stack re-applies
+        /// its own pause gate in PostLateUpdate on every frame the stack is not empty — so with the
+        /// popups still up, that restore is stomped back to zero later the same frame, and the
+        /// entire leave-to-menu transition plays frozen until the scene actually swaps. Curtain
+        /// down, sign sliding in, all of it, at timeScale zero.
         ///
-        /// So the boards come off FIRST. Then the director is asked to leave, into a game whose
+        /// So the boards come off FIRST. Then the launcher is asked to leave, into a game whose
         /// clock nothing is holding.
         ///
         /// PopAll rather than a close request, for two reasons: a close request is only honoured
         /// when Tick returns, which is after this runs and therefore too late, and everything on the
         /// stack is about a round that is now over rather than just this one board.
+        ///
+        /// Nothing may follow the hand-over. It can load a scene, and a scene load destroys the
+        /// canvas this popup is holding — see RunAction, which is watching the stack depth either
+        /// side of this call and will notice that PopAll took us off it.
         /// </summary>
         void BackToMenu()
         {
-            var director = GameDirector.Instance;
-            if (director == null)
-            {
-                // Not reachable: the item is not built without a director. Kept because "not
-                // reachable" is a statement about today's BuildItems, and the cost of being wrong
-                // about it is a null reference on a paused game with no way out.
-                Debug.LogWarning("[Pause] BACK TO MENU with no GameDirector — nothing to leave.");
-                RequestClose();
-                return;
-            }
-
             PopupStack.PopAll();
-            director.BackToMenu();
+            StageLauncher.ReturnToMenu();
         }
 
         /// <summary>
@@ -1224,6 +1245,13 @@ namespace DuckMow.UI
         /// empty, and the walk to the front page would run frozen. On the desktop branch it is
         /// merely right: Application.Quit is not instant, and the last thing the player should be
         /// looking at while the process winds down is the game, not a menu they have finished with.
+        ///
+        /// The web branch used to read the director itself and log a warning where there was none —
+        /// a dead button standing in for the case CanOfferQuit was supposed to have prevented. It
+        /// goes through StageLauncher now, which has an answer in every scene, so the branch has no
+        /// unreachable arm left to rot. CanOfferQuit still hides the item in a standalone class, but
+        /// it does so because the row would DUPLICATE the one above it rather than because this code
+        /// would have nowhere to go, and if that gate is ever loosened the button still works.
         /// </summary>
         static void Quit()
         {
@@ -1233,12 +1261,8 @@ namespace DuckMow.UI
             PopupStack.PopAll();
             UnityEditor.EditorApplication.isPlaying = false;
 #elif UNITY_WEBGL
-            var director = GameDirector.Instance;
             PopupStack.PopAll();
-            if (director != null) { director.BackToMenu(); return; }
-            // CanOfferQuit does not build the item in this case, so this is unreachable — and if it
-            // ever becomes reachable, saying so in the console is better than a dead button.
-            Debug.LogWarning("[Pause] nothing to quit to in a browser without a GameDirector.");
+            StageLauncher.ReturnToMenu();
 #else
             PopupStack.PopAll();
             Application.Quit();

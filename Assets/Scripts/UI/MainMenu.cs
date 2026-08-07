@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using DuckMow.Flow;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -9,8 +10,15 @@ using UnityEngine.UI;
 namespace DuckMow
 {
     /// <summary>
-    /// The front page: a slow move across the championship ground, three choices, and the hand-off
+    /// The front page: a slow move across the championship ground, four choices, and the hand-off
     /// into the game.
+    ///
+    /// TWO of those four start a game, and the split is the point. PLAY runs the championship —
+    /// rounds chained together, the stages arriving when the chain says they do. THE CLASSES opens
+    /// a board of the individual classes and hands one straight to <see cref="StageLauncher"/>,
+    /// with no chain, no round number and no verdict waiting at the end. The second door exists
+    /// because without it two thirds of this game can only be reached by playing through the third
+    /// that is not being asked for.
     ///
     /// The menu is a camera in the real set rather than a screen of text over a colour. Menu.unity
     /// builds the same lawn, lighting, post profile, mower and judges' bench the game does, so this
@@ -34,7 +42,17 @@ namespace DuckMow
     [DefaultExecutionOrder(-10)]
     public class MainMenu : MonoBehaviour
     {
-        public enum Choice { Play, Controls, Credits }
+        /// <summary>
+        /// What the four plates on the front page do.
+        ///
+        /// APPENDED rather than slotted in next to Play, even though THE CLASSES sits second on the
+        /// board. This enum is serialized into Menu.unity as an integer per plate, so inserting a
+        /// value in the middle silently renames every plate below it — the saved CONTROLS plate
+        /// would come back as Stages and the credits card would open the class list. The builder
+        /// rewrites the scene anyway, but a value that only survives if somebody remembers to
+        /// rebuild is a trap laid for whoever does not.
+        /// </summary>
+        public enum Choice { Play, Controls, Credits, Stages }
 
         [Serializable]
         public class Item
@@ -51,6 +69,37 @@ namespace DuckMow
             public float restShift;
             [Tooltip("The painted shadow under the plate. Offset grows as the plate is selected, so " +
                      "the selected plate reads as lifted off the board rather than merely bigger.")]
+            public RectTransform shadow;
+        }
+
+        /// <summary>
+        /// One line of the show schedule: a class the player can enter on its own.
+        ///
+        /// It carries a <see cref="StageId"/> and NOT a scene name, a title or a description. Those
+        /// three all belong to <see cref="StageLauncher"/>, which is the only thing in the project
+        /// that knows what a stage is called and which file it lives in; a copy of any of them here
+        /// would be a second answer free to disagree with the first, and the one that disagreed
+        /// would be the one on the front page.
+        ///
+        /// The text fields are therefore WRITTEN, not authored — see <see cref="LabelStages"/>. The
+        /// builder seeds them so the saved scene can be looked at in the editor, and the menu
+        /// overwrites them on load, which is the same arrangement the framing has for the same
+        /// reason.
+        /// </summary>
+        [Serializable]
+        public class StageChoice
+        {
+            public StageId stage;
+            public RectTransform rect;
+            public Image plate;
+            [Tooltip("Written from StageLauncher.TitleFor. Anything typed here is overwritten.")]
+            public TextMeshProUGUI title;
+            [Tooltip("Written from StageLauncher.KickerFor. Anything typed here is overwritten.")]
+            public TextMeshProUGUI kicker;
+            [Tooltip("Degrees this row sits off square at rest. Same rule as the front page's " +
+                     "plates: three rows on an exact vertical is a settings dialogue, and this " +
+                     "board is meant to read as a class list pinned up at a county show.")]
+            public float restTilt;
             public RectTransform shadow;
         }
 
@@ -207,6 +256,20 @@ namespace DuckMow
         public CanvasGroup creditsCard;
         public float cardFade = 0.16f;
 
+        [Header("The classes")]
+        [Tooltip("The class list. It is a CARD, on the same mechanism as CONTROLS and CREDITS, " +
+                 "rather than a screen of its own — see the Card enum.")]
+        public CanvasGroup stagesCard;
+        [Tooltip("One row per class, in the order they are pinned up. The order here is the " +
+                 "order the arrow keys walk; it does not have to match the enum.")]
+        public StageChoice[] stageChoices = Array.Empty<StageChoice>();
+        [Tooltip("The chevron that points at the class under the marker. The front page's pointer " +
+                 "stays where it is — this board has its own, because both can be on screen at " +
+                 "once while the card is fading in.")]
+        public RectTransform stagePointer;
+        [Tooltip("Pixels the class pointer sits to the left of the rows.")]
+        public float stagePointerGap = 22f;
+
         [Header("Transition")]
         public Image fade;
         [Tooltip("Seconds to come up from black when the menu loads.")]
@@ -246,7 +309,18 @@ namespace DuckMow
         const bool DebugTools = false;
 #endif
 
-        enum Card { None, Controls, Credits }
+        /// <summary>
+        /// The overlays this page can put over itself.
+        ///
+        /// STAGES IS ONE OF THESE ON PURPOSE, and it was the whole design decision behind the class
+        /// list. A stage picker is exactly what this mechanism already is — a plate is pressed, a
+        /// board fades up over the set, Escape takes it away again — and building it as a second
+        /// screen system would have meant a second fade, a second Escape path, a second thing to
+        /// remember to hide when the menu leaves, and two overlays free to be up at once. The only
+        /// thing it needs that CONTROLS and CREDITS do not is that it must not be dismissed by ANY
+        /// key, because it has choices on it; that is one branch in HandleInput, not a subsystem.
+        /// </summary>
+        enum Card { None, Controls, Credits, Stages }
 
         Camera _uiCamera;
         Camera _camera;
@@ -266,6 +340,14 @@ namespace DuckMow
         // Plate springs. One position and one velocity per item per channel; the selection channel
         // rides toward 0 or 1 and the press channel is kicked to 1 and left to fall back.
         float[] _sel, _selVel, _press, _pressVel;
+
+        // The same two channels again for the class list. Separate arrays rather than a shared set
+        // indexed past the end of the plates, because the two columns are selected independently:
+        // the front page keeps PLAY lit underneath while the card is up, and it has to, or closing
+        // the card would drop the player onto a page with nothing selected.
+        int _stageIndex;
+        int _stagePressed = -1;
+        float[] _stageSel, _stageSelVel, _stagePress, _stagePressVel;
 
         // Camera kick, in degrees and metres, and its velocities. Post-multiplied onto the vista
         // pose rather than folded into it, so the drift stays exactly what the framing says it is.
@@ -298,8 +380,13 @@ namespace DuckMow
             // without entering play mode; the fade-up only exists once something is running.
             _fadeAmount = 1f;
             ApplyFade();
+            // The class list is titled here rather than in Start, because the card can be opened on
+            // the very first frame a player is allowed to press anything and a board that spends
+            // that frame showing whatever the builder happened to bake is a board that flickers.
+            LabelStages();
             ApplyCard();
             ApplyHighlight();
+            ApplyStageHighlight();
         }
 
         void Start()
@@ -348,6 +435,12 @@ namespace DuckMow
             _cardAmount = Mathf.MoveTowards(_cardAmount, cardTarget, dt / Mathf.Max(cardFade, 0.01f));
             if (_cardAmount <= 0f) _shown = _card;
             ApplyCard();
+
+            // Only while the class list is on screen or on its way off it. The rows are three rects
+            // on a card that spends nearly all of the menu's life switched off, and springing them
+            // against a target they already sit on for the whole of a thirty-second camera cycle is
+            // work done for a board nobody is looking at.
+            if (_shown == Card.Stages || _card == Card.Stages) TickStagePlates(dt);
 
             if (_leaving)
             {
@@ -581,6 +674,14 @@ namespace DuckMow
 
             bool clicked = mouse != null && mouse.leftButton.wasPressedThisFrame;
 
+            if (_card == Card.Stages)
+            {
+                // The one card with choices on it, so the "anything closes it" rule below cannot
+                // apply — an arrow key here means "the next class", not "take this away".
+                HandleStages(move, confirm, back, clicked, mouse);
+                return;
+            }
+
             if (_card != Card.None)
             {
                 // Anything at all closes it. A card of key bindings is not a dialogue box and must
@@ -653,6 +754,27 @@ namespace DuckMow
                     _leaving = true;
                     break;
 
+                case Choice.Stages:
+                    Play(clickClip, 0.39f);
+                    KickCamera(-0.4f, 0.22f, 0.14f);
+                    // Re-titled on the way in as well as on load. StageLauncher owns those strings
+                    // and this is the only moment at which a change to them could reach the board
+                    // before the player reads it.
+                    LabelStages();
+                    // Snapped to whichever class was last looked at, rather than reset to the top.
+                    // A player who comes here twice in a session is nearly always coming back for
+                    // the same class, and a marker that slides down from the first row every time
+                    // reads as the board having forgotten.
+                    ApplyStageHighlight();
+                    // _pointerSeen is deliberately LEFT ALONE. Clearing it would make the card's
+                    // first frame count as a pointer move, and the mouse is at that instant resting
+                    // on the plate that opened the card — under the rows, if a future layout ever
+                    // puts the card over the column. The rule the rest of this page follows is that
+                    // the pointer has to actually move before it takes a highlight, and the card is
+                    // not a reason to suspend it.
+                    _card = Card.Stages;
+                    break;
+
                 case Choice.Controls:
                     Play(clickClip, 0.39f);
                     KickCamera(-0.4f, 0.22f, 0.14f);
@@ -683,6 +805,286 @@ namespace DuckMow
         {
             if (sfx == null || clip == null) return;
             sfx.PlayOneShot(clip, volume);
+        }
+
+        // ------------------------------------------------------------------ the classes
+        //
+        // THE CLASS LIST, and the one thing it is careful not to do.
+        //
+        // PLAY runs the championship: three rounds, chained, with the picture and the stages the
+        // chain decides on and a verdict at the end. That chain is the game, and it is also the
+        // reason two thirds of the game are hard to reach — the goose rally and the bloom rush only
+        // come up when the round the player is on says so, so somebody wanting to look at the rally
+        // has to play their way to it, every time, through a round they were not interested in.
+        //
+        // So this board is a SECOND, INDEPENDENT door. It knows three things: which classes exist,
+        // what they are called, and how to ask for one. It does not know which scene a class lives
+        // in, whether a championship is running, what round it is, or what happens when the class
+        // ends — every one of those belongs to StageLauncher, which is the whole point of there
+        // being a launcher rather than a second copy of the flow living on the front page. The
+        // rule this file holds itself to is that the last thing any of these methods does is hand
+        // over, and nothing here touches MatchState, StageSeam, the curtain, the scene manager or
+        // the director. If a class ever needs to be set up differently, that is a change to the
+        // launcher and this board never hears about it.
+
+        /// <summary>
+        /// Write the titles and the one-liners onto the rows, from the launcher.
+        ///
+        /// Public because the builder calls it: the saved scene is stored with the real class names
+        /// on it so the card can be looked at — and screenshotted — in the editor without entering
+        /// play mode. That is the same arrangement <see cref="ApplyFraming"/> has, and it has the
+        /// same caveat: the SAVED strings are a convenience and are never trusted at runtime. This
+        /// runs again in Awake and again as the card opens, so a rename in StageLauncher reaches the
+        /// front page without anybody having to remember to rebuild the menu scene.
+        /// </summary>
+        public void LabelStages()
+        {
+            if (stageChoices == null) return;
+            for (int i = 0; i < stageChoices.Length; i++)
+            {
+                var c = stageChoices[i];
+                if (c == null) continue;
+                if (c.title != null) c.title.text = StageLauncher.TitleFor(c.stage);
+                if (c.kicker != null) c.kicker.text = StageLauncher.KickerFor(c.stage);
+            }
+        }
+
+        /// <summary>
+        /// The class list's own input: the same keyboard, the same mouse and the same hit test as
+        /// the front page, because it is the same board and must feel like it.
+        ///
+        /// The one rule that is different is the way out. CONTROLS and CREDITS are dismissed by any
+        /// key at all, which is right for a card that only has reading on it and wrong here — up,
+        /// down and Enter all mean something now. So this card is left by Escape, by the pad's B
+        /// button, or by a click that lands anywhere other than a class.
+        ///
+        /// THAT LAST ONE IS NOT A FLOURISH. This game ships to a browser, where a player may never
+        /// touch the keyboard at all, and a card with three classes on it and no mouse-reachable way
+        /// back would trap them on it exactly as surely as a pause menu with no exit does. The
+        /// footer says so in words rather than leaving it to be discovered.
+        /// </summary>
+        void HandleStages(int move, bool confirm, bool back, bool clicked, Mouse mouse)
+        {
+            // The launcher has already been asked for a class and is running its transition. From
+            // here the board is a picture: the scene it belongs to is about to go, and a second
+            // press would either be a second launch or an Escape that closes the card out from
+            // under a curtain that is already coming down.
+            if (StageLauncher.Busy) return;
+
+            if (back) { CloseCard(); return; }
+
+            int n = stageChoices != null ? stageChoices.Length : 0;
+            if (n == 0)
+            {
+                // An empty board is nothing but a trap. It cannot happen with a scene the builder
+                // made, which is exactly why it is worth a line: it CAN happen to a scene somebody
+                // is halfway through hand-editing, and the failure should be a card that shuts
+                // rather than a page the player cannot leave.
+                if (confirm || clicked) CloseCard();
+                return;
+            }
+
+            if (move != 0)
+            {
+                SelectStage(((_stageIndex + move) % n + n) % n);
+                _pointerSeen = false;
+            }
+
+            int over = -1;
+            if (mouse != null)
+            {
+                Vector2 p = mouse.position.ReadValue();
+                // The pointer only takes the highlight while it is moving — MainMenu's own rule,
+                // and it matters more here than on the front page: the card opens under a mouse
+                // that has just clicked, and a resting cursor that re-selected every frame would
+                // pin the marker where the click happened to land.
+                bool moved = !_pointerSeen || (p - _lastPointer).sqrMagnitude > 4f;
+                _lastPointer = p;
+                _pointerSeen = true;
+
+                for (int i = 0; i < n; i++)
+                {
+                    if (stageChoices[i]?.rect == null || !PointerOver(stageChoices[i].rect, p)) continue;
+                    over = i;
+                    if (moved) SelectStage(i);
+                    break;
+                }
+            }
+
+            if (clicked)
+            {
+                if (over >= 0) { EnterStage(over); return; }
+                CloseCard();
+                return;
+            }
+            if (confirm) EnterStage(_stageIndex);
+        }
+
+        void SelectStage(int index)
+        {
+            if (index == _stageIndex) return;
+            _stageIndex = index;
+            Play(hoverClip, 0.19f);
+        }
+
+        /// <summary>
+        /// Ask the launcher for a class, and then do nothing else ever again.
+        ///
+        /// The order of the last two lines is the whole method. Everything before the hand-over is
+        /// this board's own business — the plate is kicked down, the horn note plays, the lens takes
+        /// the same shove PLAY gives it — and everything after it belongs to somebody else. Launch
+        /// may load a scene, and a scene load destroys this component; a line after it would be a
+        /// line running on a destroyed object on some frames and not others, which is the worst
+        /// possible kind of intermittent.
+        ///
+        /// <see cref="StageLauncher.Busy"/> is checked here as well as at the top of HandleStages,
+        /// because the two answer different questions. There it stops a board that is already
+        /// leaving from reading input at all; here it stops the one case that gets past it — a
+        /// mouse click and an Enter landing on the same frame, which would otherwise be two calls
+        /// to Launch and two scene loads racing each other.
+        /// </summary>
+        void EnterStage(int index)
+        {
+            if (StageLauncher.Busy) return;
+            if (stageChoices == null || index < 0 || index >= stageChoices.Length) return;
+            var choice = stageChoices[index];
+            if (choice == null) return;
+
+            _stageIndex = index;
+            _stagePressed = index;
+            EnsureStageSprings();
+            _stagePress[index] = 1f;
+            _stagePressVel[index] = 9f;
+
+            Play(confirmClip, 0.31f);
+            KickCamera(-0.9f, 0.55f, 0.35f);
+
+            StageLauncher.Launch(choice.stage);
+        }
+
+        void EnsureStageSprings()
+        {
+            int n = stageChoices != null ? stageChoices.Length : 0;
+            if (_stageSel != null && _stageSel.Length == n) return;
+            _stageSel = new float[n];
+            _stageSelVel = new float[n];
+            _stagePress = new float[n];
+            _stagePressVel = new float[n];
+        }
+
+        /// <summary>
+        /// Settle the class rows on the current selection without animating into it.
+        ///
+        /// Public for the same reason <see cref="ApplyHighlight"/> is — the builder calls it so the
+        /// saved card is the settled pose rather than a frame of an entrance — and called again
+        /// every time the card opens, because a board that fades up with its marker still sliding
+        /// from wherever it was left reads as two animations fighting.
+        /// </summary>
+        public void ApplyStageHighlight()
+        {
+            EnsureStageSprings();
+            if (_stageIndex >= _stageSel.Length) _stageIndex = 0;
+            for (int i = 0; i < _stageSel.Length; i++)
+            {
+                _stageSel[i] = i == _stageIndex ? 1f : 0f;
+                _stageSelVel[i] = 0f;
+                _stagePress[i] = 0f;
+                _stagePressVel[i] = 0f;
+            }
+            _stagePressed = -1;
+            ApplyStagePlates();
+        }
+
+        void TickStagePlates(float dt)
+        {
+            EnsureStageSprings();
+            for (int i = 0; i < _stageSel.Length; i++)
+            {
+                Spring(ref _stageSel[i], ref _stageSelVel[i], i == _stageIndex ? 1f : 0f, dt,
+                       springStiffness, springDamping);
+                Spring(ref _stagePress[i], ref _stagePressVel[i], 0f, dt, springStiffness * 1.6f, 0.62f);
+                if (_stagePress[i] < -0.35f) { _stagePress[i] = -0.35f; _stagePressVel[i] = 0f; }
+            }
+            if (_stagePressed >= 0 && _stagePressed < _stagePress.Length &&
+                _stagePress[_stagePressed] < 0.25f) _stagePressed = -1;
+            ApplyStagePlates();
+        }
+
+        /// <summary>
+        /// The rows, driven off the springs.
+        ///
+        /// Deliberately gentler than the front page's plates, and the numbers say why. A class row
+        /// is the better part of a thousand pixels wide against a plate's four hundred, so
+        /// <see cref="selectedScale"/>'s seven percent would throw its ends sixty-odd pixels out
+        /// past the edge of the card it is sitting on. The lift has to read as the same gesture at
+        /// half the amount, which is what the shadow is doing most of the work for.
+        /// </summary>
+        void ApplyStagePlates()
+        {
+            const float rowScale = 1.028f;     // ~26 px of growth on a 950 px row
+            const float rowShift = 11f;
+            const float rowStraighten = 0.75f;
+            const float rowPressDepth = 5f;
+
+            if (stageChoices == null) return;
+
+            for (int i = 0; i < stageChoices.Length; i++)
+            {
+                var c = stageChoices[i];
+                if (c == null || c.rect == null) continue;
+
+                float sel = _stageSel != null && i < _stageSel.Length ? _stageSel[i] : 0f;
+                float press = _stagePress != null && i < _stagePress.Length ? _stagePress[i] : 0f;
+
+                c.rect.localScale = Vector3.one * (1f + (rowScale - 1f) * sel - 0.03f * press);
+                c.rect.localRotation = Quaternion.Euler(0f, 0f, c.restTilt * (1f - rowStraighten * sel));
+
+                // Fractional anchors, so the nudge goes on the offsets — the same reason the front
+                // page's plates do it this way.
+                float x = rowShift * sel;
+                float y = -rowPressDepth * press;
+                c.rect.offsetMin = new Vector2(x, y);
+                c.rect.offsetMax = new Vector2(x, y);
+
+                if (c.title != null) c.title.color = Color.Lerp(labelIdle, labelSelected, sel);
+                if (c.kicker != null)
+                {
+                    // The one-liner stays quieter than the title at every point in the transition,
+                    // because it is a description and the title is the choice. Faded rather than
+                    // greyed: a second ink on a cream plate is a second material, and the board
+                    // already has two.
+                    var idle = labelIdle; idle.a = 0.62f;
+                    var hot = labelSelected; hot.a = 0.85f;
+                    c.kicker.color = Color.Lerp(idle, hot, sel);
+                }
+                if (c.plate != null)
+                {
+                    var sprite = (i == _stagePressed && platePressed != null) ? platePressed : plateIdle;
+                    if (sprite != null) c.plate.sprite = sprite;
+                }
+                if (c.shadow != null)
+                {
+                    float drop = shadowOffset + selectedLift * sel - (shadowOffset + selectedLift) * press;
+                    c.shadow.offsetMin = new Vector2(drop, -drop);
+                    c.shadow.offsetMax = new Vector2(drop, -drop);
+                }
+            }
+
+            if (stagePointer != null && stageChoices.Length > 0)
+            {
+                float y = 0f, w = 0f;
+                for (int i = 0; i < stageChoices.Length; i++)
+                {
+                    if (stageChoices[i]?.rect == null) continue;
+                    float weight = Mathf.Max(_stageSel != null && i < _stageSel.Length ? _stageSel[i] : 0f, 0f);
+                    y += stageChoices[i].rect.localPosition.y * weight;
+                    w += weight;
+                }
+                if (w > 1e-3f) y /= w;
+                stagePointer.anchoredPosition = new Vector2(-stagePointerGap, y);
+                float pulse = 1f + Mathf.Sin(_clock * 4.4f) * 0.06f;
+                stagePointer.localScale = new Vector3(pulse, pulse, 1f);
+            }
         }
 
         // ------------------------------------------------------------------ plates
@@ -812,6 +1214,7 @@ namespace DuckMow
         {
             SetCard(controlsCard, _shown == Card.Controls ? _cardAmount : 0f);
             SetCard(creditsCard, _shown == Card.Credits ? _cardAmount : 0f);
+            SetCard(stagesCard, _shown == Card.Stages ? _cardAmount : 0f);
         }
 
         static void SetCard(CanvasGroup group, float amount)

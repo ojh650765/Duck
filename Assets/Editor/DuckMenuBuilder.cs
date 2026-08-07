@@ -8,6 +8,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 using DuckMow;
+using DuckMow.Flow;
 
 namespace DuckMow.EditorTools
 {
@@ -217,6 +218,12 @@ namespace DuckMow.EditorTools
             // saved scene's lawn is bare.
             menu.ApplyFraming(0);
             menu.ApplyHighlight();
+            // And the class list, settled on its first row with the launcher's own titles on it, so
+            // the saved card is a card rather than three plates stacked at the origin with whatever
+            // the last edit left on them. It is never TRUSTED — MainMenu writes both again on load —
+            // but a card that cannot be looked at in the editor is a card nobody reviews.
+            menu.LabelStages();
+            menu.ApplyStageHighlight();
 
             EnsureFolder("Assets/Scenes");
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -538,6 +545,7 @@ namespace DuckMow.EditorTools
             menu.labelIdle = Ink;
             menu.labelSelected = Brick;
 
+            menu.stagesCard = BuildStagesCard(root, menu);
             menu.controlsCard = BuildControlsCard(root);
             menu.creditsCard = BuildCreditsCard(root);
             menu.framingLabel = BuildFramingLabel(root);
@@ -700,31 +708,68 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
-        /// Three plates down the left, clear of both the mower on the right and the picture behind
+        /// Four plates down the left, clear of both the mower on the right and the picture behind
         /// them, with a chevron pointing at whichever is selected and the hint under them.
         ///
         /// Left rather than centred because the middle of this frame is the mown picture, and that is
         /// the one thing the menu exists to show. The column stops at 30.5% across and the picture
         /// starts at 33%, which is the constraint that fixes its width.
+        ///
+        /// ---- what the fourth plate cost ----
+        ///
+        /// THE CLASSES went in second, under PLAY, because the two plates that start a game belong
+        /// together and the two that only have reading on them belong underneath. That left three
+        /// plates' worth of column holding four, and there were only two ways out of it.
+        ///
+        /// The column used to run from 11.5% to 50% of frame height with plates 116 px tall. Simply
+        /// keeping that band and dividing it four ways drops every plate to 81 px, which is a ten
+        /// percent cut to the front page's largest piece of type in order to add its smallest
+        /// choice — the wrong trade, and it happens to PLAY as much as to CREDITS.
+        ///
+        /// So the band grew UPWARD instead, to 58.5%, and the plates only came down to 104 px. Up
+        /// rather than down because the room is there and the room below is not: the hint sits at
+        /// 5.5–10.5% and the frame ends just under it, whereas above the column there is nothing but
+        /// lawn until the judges' bench, which starts at 65% of frame height at 27% across. The top
+        /// of the column now clears the bench by six and a half percent of the frame — about 70
+        /// pixels — and the bench is the one group in the shot that actually animates, so covering
+        /// any part of it would have been the real cost of the fourth choice.
         /// </summary>
         static MainMenu.Item[] BuildChoices(RectTransform root, out RectTransform pointer)
         {
-            var column = DuckUIBuilder.Frac("Choices", root, 0.075f, 0.115f, 0.305f, 0.50f);
+            var column = DuckUIBuilder.Frac("Choices", root, 0.075f, 0.115f, 0.305f, 0.585f);
 
-            var labels = new[] { "PLAY", "CONTROLS", "CREDITS" };
-            var choices = new[] { MainMenu.Choice.Play, MainMenu.Choice.Controls, MainMenu.Choice.Credits };
-            // Nothing is on a perfect grid except the mowing stripes. Three plates on an exact
+            var labels = new[] { "PLAY", "THE CLASSES", "CONTROLS", "CREDITS" };
+            // The hierarchy names are kept apart from the painted labels, because the second choice
+            // is two words and "THE CLASSESShadow" is a name somebody has to read at three in the
+            // morning while working out which rect is on top of which.
+            var names = new[] { "Play", "Stages", "Controls", "Credits" };
+            var choices = new[]
+            {
+                MainMenu.Choice.Play, MainMenu.Choice.Stages,
+                MainMenu.Choice.Controls, MainMenu.Choice.Credits
+            };
+            // Nothing is on a perfect grid except the mowing stripes. Four plates on an exact
             // vertical at an exact tilt is the one arrangement that reads as a web form, so each one
             // sits at its own angle and its own inset — small numbers, all under a degree and a half.
-            var tilts = new[] { -1.1f, 0.8f, -0.5f };
-            var insets = new[] { 0f, 9f, 3f };
+            //
+            // The new plate's tilt is NEGATIVE, which breaks the run. The three that were here
+            // alternated their signs, and adding a fourth in sequence would have made the column a
+            // regular zigzag — which is a pattern, and a pattern is exactly the thing these numbers
+            // exist to avoid. Two leaning the same way and then two that do not is what a row of
+            // plates actually nailed up by hand looks like.
+            var tilts = new[] { -1.1f, -0.35f, 0.8f, -0.5f };
+            var insets = new[] { 0f, 6f, 9f, 3f };
             var items = new MainMenu.Item[labels.Length];
 
-            const float rowHeight = 0.28f, rowStep = 0.34f;
+            // 104 px plates with 26 px between them and 14 px left under the last one, measured
+            // against a column that is now 507 px tall. The step is the height plus the gap, and
+            // the two are kept in that proportion so the column reads as evenly spaced rather than
+            // as four plates that happen to end near the bottom.
+            const float rowHeight = 0.205f, rowStep = 0.256f;
             for (int i = 0; i < labels.Length; i++)
             {
                 float y1 = 1f - i * rowStep;
-                var rt = DuckUIBuilder.Frac(labels[i], column, 0f, y1 - rowHeight, 1f, y1);
+                var rt = DuckUIBuilder.Frac(names[i], column, 0f, y1 - rowHeight, 1f, y1);
 
                 // The shadow is a sibling under the plate rather than a child of it, so scaling the
                 // plate on selection does not scale its own shadow with it — which would cancel
@@ -732,7 +777,7 @@ namespace DuckMow.EditorTools
                 // Offsets are left at zero: MainMenu.ApplyPlates owns them, and its resting value is
                 // MainMenu.shadowOffset. Two places writing the same rect is how a shadow ends up
                 // hidden exactly behind its plate.
-                var shadow = DuckUIBuilder.Frac($"{labels[i]}Shadow", column, 0f, y1 - rowHeight, 1f, y1);
+                var shadow = DuckUIBuilder.Frac($"{names[i]}Shadow", column, 0f, y1 - rowHeight, 1f, y1);
                 DuckUIBuilder.AddImage(shadow, DuckUIBuilder.Spr("button_256"),
                                        new Color(0.10f, 0.08f, 0.06f, 0.38f), Image.Type.Sliced);
                 shadow.SetAsFirstSibling();
@@ -796,6 +841,119 @@ namespace DuckMow.EditorTools
             return t;
         }
 
+        /// <summary>
+        /// THE CLASS LIST: the show's schedule, pinned up, with one plate per class.
+        ///
+        /// ---- why it is plates and not rows ----
+        ///
+        /// The other two cards are lines of type: a table of key bindings and a paragraph. Neither
+        /// can be pressed, so neither needs to look pressable. This one is three CHOICES, and the
+        /// game has already taught the player exactly what a choice looks like — a cream plate with
+        /// dark type on it, lifting off a shadow, leaning half a degree off square. The same
+        /// sprite, the same shadow rule and the same chevron are used here as on the front page,
+        /// because a stage picker that invented its own idea of a button would be the first screen
+        /// in the game that was not made by the same signwriter.
+        ///
+        /// ---- what is written on them ----
+        ///
+        /// Nothing here decides what a class is CALLED. The titles and the one-line descriptions
+        /// are seeded from StageLauncher so the saved scene can be screenshotted in the editor, and
+        /// MainMenu.LabelStages writes them again on load — so this build is a convenience and never
+        /// an authority. The one thing this file does author is the ORDER, and with it the class
+        /// numbers down the left: they are the show's running order, which is a fact about the
+        /// schedule rather than about any one class, so it belongs to the board.
+        /// </summary>
+        static CanvasGroup BuildStagesCard(RectTransform root, MainMenu menu)
+        {
+            // Taller and a shade wider than the reading cards. Three 112-pixel plates and their
+            // gaps do not fit in a board sized for seven lines of 24-point type, and shrinking them
+            // to make them fit would have produced exactly the row of thin bars this card exists
+            // not to be. The top stops at 68% of frame height, which is clear of the title board at
+            // 74.5% — the class list must never cover the name of the show it belongs to.
+            var content = BuildCard(root, "StagesCard", "THE CLASSES", out CanvasGroup group,
+                                    "ARROWS  ·  ENTER TO GO  ·  ESC OR A CLICK OFF THE BOARD GOES BACK",
+                                    "ONE CLASS, ENTERED ON ITS OWN",
+                                    0.36f, 0.115f, 0.93f, 0.68f);
+
+            var stages = new[] { StageId.LawnArt, StageId.GooseRally, StageId.BloomRush };
+            // Same rule as the front page's column, and the same reason: three rows at one angle is
+            // a form. Two leaning the same way and one against them is a schedule somebody pinned up.
+            var tilts = new[] { -0.7f, -0.4f, 0.6f };
+            var rows = new MainMenu.StageChoice[stages.Length];
+
+            const float rowHeight = 0.30f, rowStep = 0.345f;
+            for (int i = 0; i < stages.Length; i++)
+            {
+                float y1 = 1f - i * rowStep;
+                string name = stages[i].ToString();
+
+                // The shadow is a SIBLING under the plate rather than a child of it, so the plate
+                // growing on selection does not grow its own shadow with it and cancel exactly the
+                // gap the lift is meant to open. Offsets stay at zero here: MainMenu.ApplyStagePlates
+                // owns them, and two places writing one rect is how a shadow ends up hidden behind
+                // its plate.
+                var shadow = DuckUIBuilder.Frac($"{name}Shadow", content, 0f, y1 - rowHeight, 1f, y1);
+                DuckUIBuilder.AddImage(shadow, DuckUIBuilder.Spr("button_256"),
+                                       new Color(0.05f, 0.04f, 0.03f, 0.45f), Image.Type.Sliced);
+                shadow.SetAsFirstSibling();
+
+                var rt = DuckUIBuilder.Frac(name, content, 0f, y1 - rowHeight, 1f, y1);
+                rt.SetAsLastSibling();
+                var plate = DuckUIBuilder.AddImage(rt, DuckUIBuilder.Spr("button_256"), Color.white,
+                                                   Image.Type.Sliced);
+
+                // The class number, painted on the left of the plate the way a schedule numbers its
+                // classes. It does not respond to selection: it is not part of the choice, it is
+                // the position of the choice in the running order, and a number that lit up would
+                // read as a second thing to press.
+                var ordRt = DuckUIBuilder.Frac("Number", rt, 0.028f, 0.14f, 0.115f, 0.86f);
+                var ord = DuckUIBuilder.AddText(ordRt, (i + 1).ToString(), 50f,
+                                                TextAlignmentOptions.Center, Brick, 0.10f, false);
+                ord.fontStyle = FontStyles.Bold;
+
+                // Seeded from the launcher so the saved card is legible in the editor. Overwritten
+                // on load — see the class comment.
+                var titleRt = DuckUIBuilder.Frac("Title", rt, 0.135f, 0.44f, 0.97f, 0.93f);
+                var title = DuckUIBuilder.AddText(titleRt, StageLauncher.TitleFor(stages[i]), 40f,
+                                                  TextAlignmentOptions.Left, Ink, 0.10f, false);
+                title.fontStyle = FontStyles.Bold;
+                title.characterSpacing = 5f;
+
+                var kickRt = DuckUIBuilder.Frac("Kicker", rt, 0.14f, 0.075f, 0.97f, 0.44f);
+                var kicker = DuckUIBuilder.AddText(kickRt, StageLauncher.KickerFor(stages[i]), 21f,
+                                                   TextAlignmentOptions.Left, Ink, 0.08f, false);
+                kicker.fontStyle = FontStyles.Bold;
+
+                rows[i] = new MainMenu.StageChoice
+                {
+                    stage = stages[i],
+                    rect = rt,
+                    plate = plate,
+                    title = title,
+                    kicker = kicker,
+                    restTilt = tilts[i],
+                    shadow = shadow
+                };
+            }
+
+            // The chevron, off the left edge of the rows, on the dark board. Same sprite and same
+            // driving as the front page's, so the marker the player learned on the column is the
+            // marker they meet here.
+            var go = new GameObject("Pointer", typeof(RectTransform));
+            var pointer = (RectTransform)go.transform;
+            pointer.SetParent(content, false);
+            pointer.anchorMin = new Vector2(0f, 0.5f);
+            pointer.anchorMax = new Vector2(0f, 0.5f);
+            pointer.pivot = new Vector2(1f, 0.5f);
+            pointer.sizeDelta = new Vector2(44f, 44f);
+            var chevron = DuckUIBuilder.AddImage(pointer, DuckUIBuilder.Spr("icon_speed_128"), Gold);
+            chevron.preserveAspect = true;
+
+            menu.stageChoices = rows;
+            menu.stagePointer = pointer;
+            return group;
+        }
+
         static CanvasGroup BuildControlsCard(RectTransform root)
         {
             var content = BuildCard(root, "ControlsCard", "CONTROLS", out CanvasGroup group);
@@ -857,13 +1015,26 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
-        /// A dark plate with a heading, a body area and a way out. Both cards are the same object
-        /// with different rows in them, so they cannot drift apart.
+        /// A dark plate with a heading, a body area and a way out. All three cards are the same
+        /// object with different rows in them, so they cannot drift apart.
+        ///
+        /// The footer is a PARAMETER rather than a constant, and that is not tidiness — it is the
+        /// only honest way to have three cards on one mechanism. CONTROLS and CREDITS really are
+        /// dismissed by pressing anything, and the class list really is not, because up, down and
+        /// Enter mean something on it. A shared footer would have to be wrong on one card or the
+        /// other, and the card it was wrong on is the card with a way out the player has to find.
+        ///
+        /// The rect is a parameter for a duller reason: the class list carries three plates rather
+        /// than seven lines of type and needs a taller board to do it without shrinking them.
         /// </summary>
         static RectTransform BuildCard(RectTransform root, string name, string heading,
-                                       out CanvasGroup group)
+                                       out CanvasGroup group,
+                                       string footerText = "PRESS ANYTHING TO GO BACK",
+                                       string subheading = null,
+                                       float x0 = 0.36f, float y0 = 0.14f,
+                                       float x1 = 0.92f, float y1 = 0.66f)
         {
-            var card = DuckUIBuilder.Frac(name, root, 0.36f, 0.14f, 0.92f, 0.66f);
+            var card = DuckUIBuilder.Frac(name, root, x0, y0, x1, y1);
             group = card.gameObject.AddComponent<CanvasGroup>();
             group.alpha = 0f;
             DuckUIBuilder.AddImage(card, DuckUIBuilder.Spr("panel_card_dark_256"), Color.white,
@@ -874,12 +1045,26 @@ namespace DuckMow.EditorTools
             t.fontStyle = FontStyles.Bold;
             t.characterSpacing = 8f;
 
+            // A subheading, where there is one, is a line UNDER the gold — quieter, and in the
+            // body's cream rather than the heading's gold, so it reads as the sentence that
+            // explains the heading instead of as a second heading.
+            if (!string.IsNullOrEmpty(subheading))
+            {
+                var subRt = DuckUIBuilder.Frac("Subheading", card, 0.06f, 0.792f, 0.94f, 0.836f);
+                DuckUIBuilder.AddText(subRt, subheading, 21f, TextAlignmentOptions.Center,
+                                      new Color(0.86f, 0.82f, 0.72f), 0.16f, false)
+                    .fontStyle = FontStyles.Bold;
+            }
+
             var footer = DuckUIBuilder.Frac("Footer", card, 0.06f, 0.045f, 0.94f, 0.135f);
-            DuckUIBuilder.AddText(footer, "PRESS ANYTHING TO GO BACK", 18f, TextAlignmentOptions.Center,
+            DuckUIBuilder.AddText(footer, footerText, 18f, TextAlignmentOptions.Center,
                                   new Color(0.80f, 0.76f, 0.66f), 0.18f, false).fontStyle = FontStyles.Bold;
 
             card.gameObject.SetActive(false);   // MainMenu switches it on when it is asked for
-            return DuckUIBuilder.Frac("Content", card, 0.07f, 0.16f, 0.93f, 0.80f);
+            // The body stops short of the subheading where there is one, so the two cannot sit on
+            // top of each other. Every card without one keeps the height it always had.
+            float top = string.IsNullOrEmpty(subheading) ? 0.80f : 0.775f;
+            return DuckUIBuilder.Frac("Content", card, 0.07f, 0.16f, 0.93f, top);
         }
 
         // ------------------------------------------------------------------ audio
