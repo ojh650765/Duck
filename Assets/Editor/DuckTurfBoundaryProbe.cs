@@ -98,6 +98,26 @@ namespace DuckMow.EditorTools
         const float LampRingInner = 28.2f;
         const float LampRingOuter = 34.8f;
 
+        /// <summary>
+        /// How far out the mower's CENTRE can actually get, which is not the touchline.
+        ///
+        /// The touchline used to sit at 42 m with three and a half metres of run-off behind it, so
+        /// "did the centre reach the touchline" was a fair question. It is not any more: ArenaRadius
+        /// is now BarrierRadius, the paintable disc runs into the wall, and a mower is a box 1.45 m
+        /// long. Drive it straight at the barrier and its nose stops on the wall's inner face with
+        /// its centre still three quarters of a metre short — for ever, on every bearing, in a
+        /// perfectly healthy arena. Asking for the touchline would fail all 36 bearings and call a
+        /// working game broken, which is the one thing a regression check must never do.
+        ///
+        /// So the target is whichever comes first: the touchline, or as close to the wall as a body
+        /// with length can physically put its middle. When the touchline is inboard of the wall the
+        /// first term wins and this reads exactly as it did before.
+        /// </summary>
+        const float WallFace = WallRadius - 0.3f;          // half the barrier's 0.6 m thickness
+        const float ChassisHalfLength = 0.725f;            // Mower.prefab BoxCollider m_Size.z 1.45
+        static float ReachTarget =>
+            Mathf.Min(TurfArena.ArenaRadius, WallFace - ChassisHalfLength);
+
         /// <summary>Beyond the hedge ring and its gate pillars: the first radius where a blocker is news.</summary>
         const float OuterFrom = TurfArena.HedgeOuter + 1.5f;
         /// <summary>A first blocker in the outfield closer in than this is the fault being hunted.</summary>
@@ -715,7 +735,7 @@ namespace DuckMow.EditorTools
             sb.AppendLine($"  the player's mower, full throttle outward from {ReachStart:0.0} m, " +
                           $"{samples.Count} bearings, at most {ReachMaxSteps} fixed steps each " +
                           $"({ReachMaxSteps * Time.fixedDeltaTime:0.0} s).");
-            sb.AppendLine($"  touchline {TurfArena.ArenaRadius:0.#} m — anything short of it is a FAILURE. " +
+            sb.AppendLine($"  reach target {ReachTarget:0.00} m — anything short of it is a FAILURE. " +
                           $"wall {WallRadius:0.0} m — anything past it is also a FAILURE.");
             sb.AppendLine();
             sb.AppendLine("   deg |    max |    end | steps | outcome");
@@ -727,7 +747,7 @@ namespace DuckMow.EditorTools
                 min = Mathf.Min(min, s.maxRadius);
                 max = Mathf.Max(max, s.maxRadius);
                 sum += s.maxRadius;
-                string flag = s.maxRadius < TurfArena.ArenaRadius ? "  << SHORT" :
+                string flag = s.maxRadius < ReachTarget ? "  << SHORT" :
                               s.maxRadius > WallRadius ? "  << ESCAPED" : "";
                 sb.AppendLine($"  {s.azimuth,4:0} | {s.maxRadius,6:0.00} | {s.endRadius,6:0.00} | " +
                               $"{s.steps,5} | {s.note}{flag}");
@@ -747,18 +767,18 @@ namespace DuckMow.EditorTools
             var over = new List<ReachSample>();
             foreach (var s in samples)
             {
-                if (s.maxRadius < TurfArena.ArenaRadius) stoppedShort.Add(s);
+                if (s.maxRadius < ReachTarget) stoppedShort.Add(s);
                 if (s.maxRadius > WallRadius) over.Add(s);
             }
 
             if (stoppedShort.Count == 0)
-                sb.AppendLine($"    every bearing reached the {TurfArena.ArenaRadius:0.#} m touchline.");
+                sb.AppendLine($"    every bearing reached {ReachTarget:0.00} m — the wall, or the touchline if it is nearer.");
             else
             {
                 sb.AppendLine($"    {stoppedShort.Count} BEARING(S) NEVER REACHED THE TOUCHLINE:");
                 foreach (var s in stoppedShort)
                     sb.AppendLine($"      {s.azimuth,4:0} deg  stopped at {s.maxRadius:0.00} m  " +
-                                  $"({TurfArena.ArenaRadius - s.maxRadius:0.00} m short)  [{s.note}]");
+                                  $"({ReachTarget - s.maxRadius:0.00} m short)  [{s.note}]");
             }
 
             if (over.Count == 0)
@@ -800,7 +820,7 @@ namespace DuckMow.EditorTools
             if (haveReach)
                 foreach (var s in samples)
                 {
-                    if (s.maxRadius < TurfArena.ArenaRadius) shortCount++;
+                    if (s.maxRadius < ReachTarget) shortCount++;
                     if (s.maxRadius > WallRadius) escapeCount++;
                 }
 
@@ -814,7 +834,7 @@ namespace DuckMow.EditorTools
 
             var verdict = new StringBuilder();
             verdict.AppendLine("VERDICT");
-            verdict.AppendLine($"  [{v1}] every bearing reaches the {TurfArena.ArenaRadius:0.#} m touchline" +
+            verdict.AppendLine($"  [{v1}] every bearing reaches the {ReachTarget:0.00} m reach target" +
                                (haveReach ? $"  ({samples.Count - shortCount}/{samples.Count})"
                                           : "  (needs play mode)"));
             verdict.AppendLine($"  [{v2}] no bearing gets past the {WallRadius:0.0} m wall" +
