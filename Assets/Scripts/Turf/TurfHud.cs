@@ -34,6 +34,9 @@ namespace DuckMow
         public TurfDirector director;
         [Tooltip("Camera the map's mower pips are placed against. The main one if left empty.")]
         public Camera view;
+        [Tooltip("The thing that knows whether a round is waiting on this stage, and therefore what " +
+                 "the way out says. Found in the scene if left empty.")]
+        public TurfBootstrap stage;
 
         [Header("Layout")]
         [Tooltip("Diameter of the corner map, in reference pixels.")]
@@ -70,6 +73,8 @@ namespace DuckMow
         readonly RectTransform[] _row = new RectTransform[TurfArena.Count];
         TextMeshProUGUI _resultsRank, _resultsTotal;
         Image _boostFill;
+        CanvasGroup _exitGroup;
+        TextMeshProUGUI _exitPrompt;
 
         float _calloutTimer = 99f;
         string _shownCallout = "";
@@ -90,6 +95,7 @@ namespace DuckMow
         {
             if (director == null) director = FindFirstObjectByType<TurfDirector>();
             if (view == null) view = Camera.main;
+            if (stage == null) stage = FindFirstObjectByType<TurfBootstrap>();
             Build();
         }
 
@@ -142,6 +148,48 @@ namespace DuckMow
             BuildMap();
             BuildBoost();
             BuildStandings();
+            BuildExitPrompt();
+        }
+
+        /// <summary>
+        /// The way out, in the round's own dark plate at the foot of the frame.
+        ///
+        /// OUTSIDE the results group, and that is the one thing about this that had to be got
+        /// right. The card belongs to one beat of the ending — it fades up on the player's machine
+        /// and back down again the moment the camera leaves for the board — whereas the prompt
+        /// belongs to the END of the ending, which is a beat LATER than the card's and is spent
+        /// looking at the scoreboard. Parented to the card it would be invisible at exactly the
+        /// moment it exists to be read. Outside the live group too, for the mirror-image reason:
+        /// that whole group stands down as the reveal takes the screen.
+        ///
+        /// Bottom centre, where the share bar was. That is not a coincidence worth avoiding — the
+        /// bar has faded by then, the strip is empty, and it is the one place in this frame the
+        /// player's eye has already been returning to all match.
+        ///
+        /// Same plate, same cream, same bold twenty-point capitals as the round's own hint line
+        /// under its result card (DuckUIBuilder's RetryPlate). This stage borrows the round's kit
+        /// everywhere else on this screen; a prompt in a different dress would be the one element
+        /// that gave away that two people built it.
+        /// </summary>
+        void BuildExitPrompt()
+        {
+            var root = new GameObject("Exit prompt", typeof(RectTransform), typeof(CanvasGroup));
+            root.transform.SetParent(_canvas.transform, false);
+            var rt = (RectTransform)root.transform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.anchoredPosition = new Vector2(0f, 46f);
+            rt.sizeDelta = new Vector2(620f, 72f);
+
+            _exitGroup = root.GetComponent<CanvasGroup>();
+            _exitGroup.alpha = 0f;
+            _exitGroup.interactable = _exitGroup.blocksRaycasts = false;
+
+            Plate(rt, cardPanelDark, Color.white);
+
+            var inner = Frac("Text", rt, 0.05f, 0.16f, 0.95f, 0.84f);
+            _exitPrompt = CardText(inner, "", 24f, TextAlignmentOptions.Center, Cream, 0.24f, false);
+            _exitPrompt.fontStyle = FontStyles.Bold;
         }
 
         void BuildBar()
@@ -342,6 +390,40 @@ namespace DuckMow
             TickCallout();
             TickBoost();
             TickReveal(mask);
+            TickExitPrompt();
+        }
+
+        /// <summary>
+        /// The way out, once there is one.
+        ///
+        /// Every decision about WHEN belongs to <see cref="TurfBootstrap"/> and none of it is
+        /// second-guessed here — this reads one bool and draws it. That is worth saying out loud
+        /// because the tempting version is to test the director's phase from the HUD, which would
+        /// put the rule "the prompt is up once the presentation has finished" in two files that are
+        /// free to disagree, and the disagreement would be a prompt offering a key that does
+        /// nothing.
+        ///
+        /// The TEXT is re-read every frame rather than set once, for a duller reason: this HUD is
+        /// built in Awake and the bootstrap does not know whether a round is waiting until its own
+        /// Start, so anything latched at construction would be latched from the wrong answer.
+        ///
+        /// It breathes. A prompt at rest on a still frame — and this is the stillest frame in the
+        /// stage, a finished board with nothing moving on it — is furniture; one that swells on a
+        /// slow beat is something asking to be pressed. Unscaled, so it keeps breathing through a
+        /// hit stop, and gentle enough at four percent that it is noticed rather than watched.
+        /// </summary>
+        void TickExitPrompt()
+        {
+            if (_exitGroup == null || _exitPrompt == null) return;
+
+            bool up = stage != null && stage.ExitPromptUp;
+            _exitGroup.alpha = Mathf.MoveTowards(_exitGroup.alpha, up ? 1f : 0f,
+                                                 Time.unscaledDeltaTime * 3f);
+            if (_exitGroup.alpha <= 0.001f) return;
+
+            if (up) _exitPrompt.text = stage.ExitPrompt;
+            float beat = 1f + Mathf.Sin(Time.unscaledTime * 2.6f) * 0.04f;
+            _exitGroup.transform.localScale = Vector3.one * beat;
         }
 
         void TickClock()

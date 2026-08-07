@@ -40,6 +40,9 @@ namespace DuckMow
         public RallyDirector director;
         [Tooltip("Camera the off-screen arrows are computed against. The main one if left empty.")]
         public Camera view;
+        [Tooltip("The thing that knows whether a round is waiting on this stage, and therefore what " +
+                 "the way out says. Found in the scene if left empty.")]
+        public RallyBootstrap stage;
 
         [Header("Clock")]
         public TextMeshProUGUI timerText;
@@ -79,6 +82,13 @@ namespace DuckMow
         public Image resultRosette;
         public Sprite[] rosetteByPlace = new Sprite[0];    // 1st..4th
 
+        [Header("The way out")]
+        [Tooltip("The line offering SPACE once the bench has finished. Left empty it is built at " +
+                 "runtime just above the result card — see EnsureExitPrompt, which explains why " +
+                 "the one piece of this HUD that is not baked is not baked.")]
+        public CanvasGroup exitGroup;
+        public TextMeshProUGUI exitPrompt;
+
         [Header("Threat arrows")]
         [Tooltip("Graphic rather than Image so a chevron can be a glyph — the UI kit has cards, " +
                  "ribbons, rings and rosettes but no arrow, and TextMeshPro already has one.")]
@@ -100,8 +110,117 @@ namespace DuckMow
         void Awake()
         {
             if (director == null) director = FindFirstObjectByType<RallyDirector>();
+            if (stage == null) stage = FindFirstObjectByType<RallyBootstrap>();
             if (resultGroup != null) resultGroup.alpha = 0f;
             if (tickerGroup != null) tickerGroup.alpha = 0f;
+            EnsureExitPrompt();
+            if (exitGroup != null) exitGroup.alpha = 0f;
+        }
+
+        /// <summary>
+        /// Build the way-out line if the scene has not got one, just above the result card.
+        ///
+        /// ---- why this one thing is built at runtime in a HUD that is otherwise baked ----
+        ///
+        /// It should be baked, and the fields above are here so that it can be: point them at a
+        /// rect in DuckRallyBuilder.BuildResult and this method does nothing. The class note at the
+        /// top of this file is right and is not being argued with — a canvas that assembles bare
+        /// rectangles at runtime cannot match one made of painted cards, and the kit IS the design.
+        ///
+        /// But a baked canvas only reaches the player after somebody re-runs the builder and saves
+        /// the scene, and this is a line of TEXT on a plate that already exists two centimetres
+        /// below it. Shipping it as a builder change alone would mean a GooseRally.unity in which
+        /// the standalone player is still stranded at the results with no way off — the exact fault
+        /// this is fixing — until an unrelated menu item happens to be clicked. So it stands itself
+        /// up, once, and steps aside the moment the scene provides a better one.
+        ///
+        /// It is deliberately the plainest thing it could be: no plate, no sprite, no attempt at a
+        /// card. A bare untextured box next to the painted result panel is precisely the mismatch
+        /// this HUD was rebuilt to stop, whereas type on its own — set in the same cream, the same
+        /// bold capitals, the same outline and drop shadow every other glyph in the arena carries —
+        /// belongs to the same game as the panel beneath it.
+        /// </summary>
+        void EnsureExitPrompt()
+        {
+            if (exitPrompt != null)
+            {
+                // Spelt out rather than written with ??, which does not go through Unity's
+                // overloaded null operator and would happily hand back a destroyed component.
+                if (exitGroup == null) exitGroup = exitPrompt.GetComponent<CanvasGroup>();
+                if (exitGroup == null) exitGroup = exitPrompt.gameObject.AddComponent<CanvasGroup>();
+                return;
+            }
+
+            // The canvas is reached through a BAKED widget rather than through this component's own
+            // transform, and that is load bearing. DuckRallyBuilder puts the RallyHud on the
+            // "~ Systems" object and creates "~ Rally HUD" as a separate scene root, so a walk up
+            // from here finds no canvas at all. The result panel is on the one we want, by
+            // construction — it is the thing this prompt sits above.
+            var anchorTo = resultGroup != null ? (RectTransform)resultGroup.transform : null;
+            var canvas = anchorTo != null ? anchorTo.GetComponentInParent<Canvas>() : null;
+            if (canvas == null)
+            {
+                Debug.LogWarning("[Rally] the HUD has no result panel to hang the way-out prompt " +
+                                 "off, so the arena will end without one. Rebuild the scene with " +
+                                 "'Duck/3 · Build goose rally scene'.");
+                return;
+            }
+
+            var go = new GameObject("Exit prompt", typeof(RectTransform), typeof(CanvasGroup));
+            var rt = (RectTransform)go.transform;
+            rt.SetParent(canvas.transform, false);
+            // Directly over the result card, which occupies 0.045 -> 0.235 of the frame. Centred on
+            // the same column so the two read as one block rather than as two notices.
+            rt.anchorMin = new Vector2(0.18f, 0.245f);
+            rt.anchorMax = new Vector2(0.82f, 0.315f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
+
+            exitGroup = go.GetComponent<CanvasGroup>();
+            exitGroup.interactable = exitGroup.blocksRaycasts = false;
+            exitPrompt = PromptText(rt);
+        }
+
+        /// <summary>
+        /// Type set the way DuckUIBuilder.AddText sets it — wrap decided before auto-sizing is asked
+        /// for a size, then a dark outline and a drop shadow, because every glyph in this game is
+        /// read over bright grass or a lit arena floor.
+        ///
+        /// Written out here rather than called, because that helper lives in an editor assembly and
+        /// this runs when the scene starts. The ordering inside it is load bearing and is copied
+        /// rather than approximated; see the note on AddText for what goes wrong when it is not.
+        /// </summary>
+        static TextMeshProUGUI PromptText(RectTransform rt)
+        {
+            var t = rt.gameObject.AddComponent<TextMeshProUGUI>();
+            t.text = "";
+            t.alignment = TextAlignmentOptions.Center;
+            t.color = new Color(1f, 0.97f, 0.88f);
+            t.raycastTarget = false;
+            t.fontStyle = FontStyles.Bold;
+
+            t.textWrappingMode = TextWrappingModes.NoWrap;
+            t.overflowMode = TextOverflowModes.Truncate;
+            t.fontSize = 26f;
+            t.enableAutoSizing = true;
+            t.fontSizeMax = 26f;
+            t.fontSizeMin = 11f;
+            t.margin = new Vector4(10f, 4f, 10f, 4f);
+
+            if (t.font == null) t.font = TMP_Settings.defaultFontAsset;
+            if (t.fontSharedMaterial == null) { t.characterSpacing = 4f; return t; }
+
+            t.fontMaterial = new Material(t.fontSharedMaterial);
+            t.fontMaterial.EnableKeyword("OUTLINE_ON");
+            t.fontMaterial.SetFloat(ShaderUtilities.ID_OutlineWidth, 0.26f);
+            t.fontMaterial.SetColor(ShaderUtilities.ID_OutlineColor, new Color(0.09f, 0.16f, 0.10f, 1f));
+            t.fontMaterial.EnableKeyword("UNDERLAY_ON");
+            t.fontMaterial.SetColor(ShaderUtilities.ID_UnderlayColor, new Color(0f, 0f, 0f, 0.55f));
+            t.fontMaterial.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, 0.4f);
+            t.fontMaterial.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, -0.5f);
+            t.fontMaterial.SetFloat(ShaderUtilities.ID_UnderlaySoftness, 0.24f);
+            t.characterSpacing = 4f;
+            return t;
         }
 
         void LateUpdate()
@@ -116,7 +235,40 @@ namespace DuckMow
             UpdateCards(dt);
             UpdateTicker(dt);
             UpdateResult(dt);
+            UpdateExitPrompt(dt);
             UpdateArrows();
+        }
+
+        /// <summary>
+        /// The way out, once there is one.
+        ///
+        /// Every decision about WHEN belongs to <see cref="RallyBootstrap"/> and none of it is
+        /// second-guessed here — this reads one bool and draws it. That is worth saying out loud
+        /// because the tempting version is to test the director's phase from the HUD, which would
+        /// put the rule "the prompt is up once the bench has finished" in two files free to
+        /// disagree, and the disagreement would be a prompt offering a key that does nothing. The
+        /// bootstrap is also the only one of the two that can see the verdict at all.
+        ///
+        /// The TEXT is re-read every frame rather than set once, for a duller reason: this
+        /// component wakes before the bootstrap has asked <see cref="RallyHandoff.Active"/> whether
+        /// a round is waiting, so anything latched at construction would be latched from the wrong
+        /// answer.
+        ///
+        /// It breathes. A prompt at rest on the stillest frame in the stage — a finished bench with
+        /// nothing moving on it — is furniture; one that swells on a slow beat is something asking
+        /// to be pressed. Four percent, on the unscaled clock, so it keeps breathing through a hit
+        /// stop and is noticed rather than watched.
+        /// </summary>
+        void UpdateExitPrompt(float dt)
+        {
+            if (exitGroup == null || exitPrompt == null) return;
+
+            bool up = stage != null && stage.ExitPromptUp;
+            exitGroup.alpha = Mathf.MoveTowards(exitGroup.alpha, up ? 1f : 0f, dt * 3f);
+            if (exitGroup.alpha <= 0.001f) return;
+
+            if (up) exitPrompt.text = stage.ExitPrompt;
+            exitGroup.transform.localScale = Vector3.one * (1f + Mathf.Sin(_clock * 2.6f) * 0.04f);
         }
 
         void UpdateClock()
