@@ -807,8 +807,14 @@ namespace DuckMow
                     //
                     // A cut hides it completely and is the right edit anyway: television does not
                     // dissolve from a portrait to a wide.
+                    // Ending belongs on this list and was missing from it: RestartChampionship is
+                    // reached from the ending page on every completed run, and a 0.9 s blend out of
+                    // whatever shot the page was covering is the same lurch the rest of this list
+                    // exists to prevent. It matters more now that the page is entered directly from
+                    // the board rather than by way of the ceremony.
                     bool fromRoundEnd = from == GameState.Verdict || from == GameState.VenueTour ||
-                                        from == GameState.Scoreboard || from == GameState.Ceremony;
+                                        from == GameState.Scoreboard || from == GameState.Ceremony ||
+                                        from == GameState.Ending;
                     cameraDirector?.SetMode(CameraMode.Briefing, fromRoundEnd ? 0f : 0.9f);
                     if (fromRoundEnd) cameraDirector?.SnapToCurrent();
                     break;
@@ -989,6 +995,13 @@ namespace DuckMow
                     break;
 
                 case GameState.Ceremony:
+                    // OFF THE LIVE ROUTE. Nothing in a played round enters this state any more —
+                    // the scoreboard goes straight to the ending page; see the Scoreboard case in
+                    // Tick for the argument. Kept working rather than gutted, because
+                    // DebugJumpToCeremony and the review harness still ask for it by name, and a
+                    // state that is reachable by a tool but half-dismantled is a trap for whoever
+                    // next runs a capture over it.
+                    //
                     // Put the machine back on the portrait mark before the sequence needs it. The
                     // verdict already parked it there and nothing since has moved it, but the
                     // ceremony's last beat is that portrait and it must not depend on which route
@@ -1431,28 +1444,45 @@ namespace DuckMow
                     // sit behind a keypress the player has no reason to expect is waiting for them.
                     if (tournament != null && tournament.Championship.IsComplete)
                     {
-                        // The loudest seam in the game, and the only one that gets the full
-                        // treatment: confetti, brass, the lights up. Everything before it has been
-                        // building to this and the transition should say so before the ceremony
-                        // opens its mouth. The extra hold is for the crowd — the ceremony stages the
-                        // portrait and re-seats the bench on its first frame, and the curtain waits
-                        // for that rather than revealing it happening.
+                        // ---- straight to the ending page; the pageant in between is gone ----
                         //
-                        // This board keeps its words where the two either side of it lost theirs,
-                        // and the rule is the same one that took them away: a sign earns its place
-                        // when it NAMES a thing the player could not otherwise work out. A wipe on
-                        // its own cannot say "the game is over and you are about to be given a
-                        // prize" — that is genuinely new information, arriving once a session, and
-                        // it is the whole reason the loudest curtain in the game is under it.
+                        // This used to enter GameState.Ceremony: a four-beat prize-giving — the
+                        // bench applauding, a push-in on the trophy, the board counting up, the
+                        // duck under a title card, the venue taken to night with fireworks — and
+                        // only then the ending. It has been cut on the player's own reading of it,
+                        // and the reading holds up: the pageant is a SECOND ending, playing before
+                        // the real one, made of beats the player has already been shown. The bench
+                        // has just marked them, the board behind the curtain is the board they were
+                        // looking at a second ago, and the portrait is the same portrait the verdict
+                        // ends on every single round. Fifteen seconds of ceremony for information
+                        // the scoreboard already delivered, standing between the player and the two
+                        // authored comic pages that are the actual payoff.
                         //
-                        // Plainer than it was. THE CHAMPIONSHIP / THE SASH IS AWARDED asked the
-                        // player to already know both what this game's championship was and that a
-                        // sash is what an English village fair hands the winner.
+                        // What survives is what the ceremony was borrowing anyway: the loudest
+                        // curtain in the game — confetti, brass, the lights up — because THIS is the
+                        // moment the evening ends, and the board deserves to be got off with a bang
+                        // whatever comes next. The extra hold stays too: the ending page builds its
+                        // first panel on its first frame, and the curtain should not lift on that
+                        // happening.
+                        //
+                        // The sign earns its place by the same rule that stripped the words off the
+                        // two menu boards: it NAMES something a wipe cannot say on its own, and it
+                        // is genuinely new — the game is over, and here is how it turned out. It is
+                        // also the one sign in the game that arrives exactly once a session.
+                        //
+                        // VictoryCeremony and CeremonyNight are deliberately left in the project and
+                        // GameState.Ceremony is deliberately still a working state. The enum is
+                        // append-only (GameState's own note explains that reordering silently
+                        // repoints serialized references and every capture ordinal), the state is
+                        // still reachable through DebugJumpToCeremony, and the review tooling still
+                        // asks for it by name — DuckSimulator and DuckCurtainShots both wait on it.
+                        // Deleting the class would break the harness to remove code that costs
+                        // nothing to leave sitting in an unreachable case.
                         if (settled)
-                            EnterThrough(GameState.Ceremony, MatchState.Seam.IntoFinale,
-                                         "THE PRIZE GIVING",
+                            EnterThrough(GameState.Ending, MatchState.Seam.IntoFinale,
+                                         "HOW IT ENDED",
                                          tournament.Championship.PlayerIsChampion
-                                             ? "COME AND COLLECT IT" : "THE FINAL RESULT",
+                                             ? "YOU WON THE DAY" : "THE FINAL RESULT",
                                          extraHold: 0.45f);
                         break;
                     }
@@ -1476,6 +1506,8 @@ namespace DuckMow
                     break;
                 }
 
+                // Only ever entered by DebugJumpToCeremony and the review harness now — see the
+                // SetState case. Left intact so both of those still work.
                 case GameState.Ceremony:
                     _ceremony?.Tick(dt);
                     if (input != null && _ceremony != null && _ceremony.PromptUp &&

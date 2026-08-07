@@ -609,11 +609,19 @@ namespace DuckMow
                     SwapMusic(musicJudgingBed, masterMusic * 0.8f);
                     break;
 
+                // Both endings of the evening, and they need the identical thing done.
+                //
+                // Ending was added here when the prize-giving stopped being on the live route — the
+                // scoreboard now goes straight to the comic page, so if only Ceremony cleared the
+                // bed then the closing pages of the game would play over the loop that accompanies
+                // a scorecard being filled in. Ceremony keeps its arm because the state is still
+                // reachable from the review tooling and must still sound right when it is.
                 case GameState.Ceremony:
+                case GameState.Ending:
                     // Drop the judging bed. It is still looping at this point — nothing has cleared
                     // it since the panel deliberated — and a title announced over the music that
                     // accompanies a scorecard being filled in sounds like a formality rather than a
-                    // result. The crowd and the ceremony's own fanfare are the sound of this beat.
+                    // result. The crowd and the page's own audio are the sound of this beat.
                     SwapMusic(null, 0f);
                     _ambCrowd.volume = masterAmbience * crowdMurmur * 1.8f;
                     break;
