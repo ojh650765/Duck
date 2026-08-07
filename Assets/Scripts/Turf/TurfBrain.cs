@@ -211,13 +211,32 @@ namespace DuckMow
         const float TurnSeconds = 2.4f;
 
         /// <summary>
-        /// Neutral share below which the board counts as "used up" and the match becomes a steal war.
+        /// The band of neutral share over which the match turns from a land grab into a steal war.
         ///
         /// Not a clock. The board filling is something the player can SEE, and it is the honest
-        /// trigger: while there is loose grass, taking it is cheap; once there is none, the only way
+        /// trigger: while there is loose grass, taking it is cheap; once it is scarce, the only way
         /// to gain a metre is to take it off somebody, and it is worth double because they lose it.
+        ///
+        /// THESE TWO NUMBERS WERE MEASURED, and the first attempt at them was dead code. It asked
+        /// for neutral to fall below 0.34 before anything changed, on the arithmetic that four
+        /// mowers lay ~13,000 m2 of roller over a hundred seconds onto a 5900 m2 board and must
+        /// therefore fill it twice over. The board does not do that, for two reasons the arithmetic
+        /// did not know: a match is seventy-five seconds and not a hundred (matchSeconds is 75 in
+        /// BloomRush.unity), and the roller spends a great deal of its time on ground somebody
+        /// already owns. A full run traced at four second intervals goes
+        ///
+        ///     t75 100%   t63 90%   t51 81%   t39 77%   t23 71%   t03 56.5%
+        ///
+        /// and stops there. Neutral NEVER APPROACHED 0.34, so the ramp never left zero, enemy ground
+        /// stayed at its opening weight for the whole match, and the one thing this class was given
+        /// to make a gardener play the ending differently from the opening did nothing at all.
+        ///
+        /// Pitched across the second half of the real curve instead: still a land grab while the
+        /// grass is loose, fully a steal war by the closing seconds. A ratio against a single
+        /// threshold cannot express that — it needs both ends, or the transition lands outside the
+        /// range the board actually visits.
         /// </summary>
-        const float RipeAt = 0.34f;
+        const float RipeFrom = 0.88f, RipeTo = 0.50f;
 
         /// <summary>Share behind the leader that counts as fully behind. Ten points is a lot on this board.</summary>
         const float DeficitSpan = 0.10f;
@@ -259,6 +278,20 @@ namespace DuckMow
 
         /// <summary>The band of the outer loop a gardener will run a lane in.</summary>
         const float LaneInner = 35.2f, LaneOuter = 43.0f;
+
+        /// <summary>
+        /// Radius an objective is pulled in to, so no gardener ever drives AT the touchline.
+        ///
+        /// Sector centres go out to 45.2 m and the barrier is at 45.5, so a rim sector's centre is a
+        /// point three tenths of a metre short of a wall. A machine sent to one arrives nose-first
+        /// into the fence and grinds along it: the trace has HORACE at r 45 doing 0.1 m/s on full
+        /// lock with his objective three metres away, which is a gardener spending seconds achieving
+        /// nothing at the one place on the board where the recovery push and the barrier collider are
+        /// both arguing with him. The ground out there is still worth painting — the roller is 3.3 m
+        /// wide, so a pass at 43.1 covers to within a whisker of the line — it just is not worth
+        /// AIMING at. Same reasoning as the lane's outer limit, and deliberately the same radius.
+        /// </summary>
+        const float FenceStandoff = TurfArena.ArenaRadius - 2.4f;
         /// <summary>Metres of lane drift per metre driven out on the loop.</summary>
         const float LaneDrift = 0.022f;
 
@@ -484,12 +517,12 @@ namespace DuckMow
             int slot = competitor.slot;
             _leader = mask.Leader;
 
-            // HOW FULL IS THE BOARD. Four mowers lay down about thirteen thousand square metres of
-            // roller over a hundred seconds onto a board of five thousand nine hundred, so loose
-            // grass is a resource that RUNS OUT around the middle of the match. Before it does,
-            // taking empty ground is the cheapest metre available; after, the only metre on offer is
-            // one somebody else is standing on — and it is worth double, because they lose it.
-            _ripe = 1f - Mathf.Clamp01(mask.NeutralShare / RipeAt);
+            // HOW FULL IS THE BOARD. Loose grass gets scarcer all match, and the cheapest metre
+            // available changes with it: empty ground while there is plenty, and once there is not,
+            // ground somebody else is standing on — which is worth double, because they lose it.
+            // Ramped across the share the board really visits rather than one it never reaches; see
+            // the traced curve beside RipeFrom.
+            _ripe = Mathf.Clamp01((RipeFrom - mask.NeutralShare) / (RipeFrom - RipeTo));
 
             // AM I LOSING. A gardener behind the leader should not play the same match as one ahead
             // of them, and until now they did.
@@ -689,7 +722,7 @@ namespace DuckMow
             _objPrizeCells = bestPrizeCells;
             _reviewTimer = ReviewEvery;
 
-            Objective = TurfArena.NearestPlayable(best + _aimJitter);
+            Objective = TurfArena.NearestPlayable(HoldOffTheFence(best + _aimJitter));
             Repath();
         }
 
@@ -713,6 +746,17 @@ namespace DuckMow
             int takeable = mask.SectorPlayable(_objSx, _objSz)
                          - mask.SectorOwned(_objSx, _objSz, competitor.slot);
             return takeable < _objPrizeCells * PrizeCollapse;
+        }
+
+        /// <summary>Slide an objective radially in to <see cref="FenceStandoff"/> if it is outside it.</summary>
+        static Vector3 HoldOffTheFence(Vector3 p)
+        {
+            float r = Mathf.Sqrt(p.x * p.x + p.z * p.z);
+            if (r <= FenceStandoff || r < 1e-3f) return p;
+            float k = FenceStandoff / r;
+            p.x *= k;
+            p.z *= k;
+            return p;
         }
 
         /// <summary>Who is wearing the crown, or -1. Read off the competitors the director set it on.</summary>
