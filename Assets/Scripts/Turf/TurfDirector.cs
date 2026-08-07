@@ -179,6 +179,13 @@ namespace DuckMow
 
         public void Begin()
         {
+            // Start the trace's clock full, so a run does not open with a sample taken on the frame
+            // Live begins. That sample is degenerate by construction — nobody has moved, the mask is
+            // still wholly neutral, every machine is still on its spawn mark — and read out of
+            // context it is indistinguishable from the match having been wiped mid-play. It cost me
+            // a wrong bug report to somebody who had to go and disprove it.
+            _traceTimer = traceInterval;
+
             if (competitors == null || competitors.Length == 0)
                 competitors = FindObjectsByType<TurfCompetitor>(FindObjectsSortMode.None);
 
@@ -878,7 +885,14 @@ namespace DuckMow
                 string plan = c.brain != null
                     ? $"{c.brain.plan,-8} obj {Vector3.Distance(c.Position, c.brain.Objective),4:0} m" +
                       (c.brain.RoutingVia >= 0 ? $" gap{c.brain.RoutingVia}" : " open") +
-                      $" thr{c.brain.Throttle,5:0.00} str{c.brain.Steer,5:0.00}"
+                      $" thr{c.brain.Throttle,5:0.00} str{c.brain.Steer,5:0.00}" +
+                      // Printed rather than inferred, and that is the whole point. Boost was read
+                      // off speed for two rounds of fixes — anything over the mower's 10 m/s had to
+                      // be a burst — and a gate that was structurally shut survived both times,
+                      // because "no samples above 10" and "never armed" look identical from outside.
+                      // StraightRun is the number the gate actually tests, so a boost that never
+                      // fires can now be told apart from a boost that fires and does nothing.
+                      $" run{c.brain.StraightRun,4:0}m {(c.brain.Boost ? "BOOST" : "     ")}"
                     : "player";
                 Debug.Log($"[Bloom] t{TimeRemaining:0}s {c.Name,-8} {mask.Share(c.slot) * 100f,5:0.0}%" +
                           $"  r{r,4:0}m  {c.Speed,4:0.0} m/s  stole {c.MetresStolen,5:0}" +
