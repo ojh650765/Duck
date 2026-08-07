@@ -30,7 +30,7 @@ Shader "Duck/TurfStamp"
 
         HLSLINCLUDE
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-        // For TurfPlayable. The stamp has to obey the SAME definition of what is playable as the
+        // For TurfPlayableHard. The stamp has to obey the SAME definition of what is playable as the
         // scoring grid, and the only way to guarantee that is to call the same function.
         #include "TurfCommon.hlsl"
 
@@ -90,10 +90,29 @@ Shader "Duck/TurfStamp"
         //
         // It matters most on the strip between the touchline and the barrier: a mower can drive
         // there, so it was painting a coloured ring around an arena that ends further in.
+        //
+        // THE TEST IS TurfPlayableHard AND NOT THE TurfPlayable THE GROUND SHADER USES, and the two
+        // shaders asking the same question through two different functions is the design and not a
+        // leftover. TurfPlayable is feathered on purpose — the arena's colour and its glow ought to
+        // die away over the last metre instead of stopping on a stencil line, and that softness is
+        // the ground layer's to keep. But a feather is a picture, and this is a RULE: the stamp is
+        // the only thing writing the render texture the picture is read from, and what it refuses to
+        // write has to be the exact set TurfArena.IsPlayable refuses, to the metre.
+        //
+        // Clipping the feathered ramp at half strength was NOT that set. The ramps are 1.2 m wide,
+        // so half strength lands 0.6 m inside the touchline and 0.6 m outside the core wall, while
+        // the CPU grid counts and claims all the way to both. Two rings — about 157 m2 at the rim,
+        // 31 m2 around the core — changed hands, paid out, and never got painted. Reading a score
+        // for ground that is still visibly neutral is the worst lie a territory mode can tell, and
+        // it is worse than the ring this function was written to stop, because that one at least
+        // erred towards showing the player LESS than they were given.
+        //
+        // Not fixed by lowering the 0.5, which is the tempting one-liner: at the hedge the ramp is
+        // exactly 0.5 where the clearance is exactly zero, so the old threshold was already right
+        // there, and anything lower walks the paint into the hedges instead. See TurfPlayableHard.
         void ClipToArena(float2 worldXZ)
         {
-            float hedgeDepth;
-            clip(TurfPlayable(worldXZ, hedgeDepth) - 0.5);
+            clip(TurfPlayableHard(worldXZ) ? 1.0 : -1.0);
         }
         ENDHLSL
 

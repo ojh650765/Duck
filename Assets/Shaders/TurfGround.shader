@@ -304,7 +304,8 @@ Shader "Duck/TurfGround"
                     // Brightest on the newest ground and settling to a low ember, so a mower leaves
                     // a bright wake that cools behind it rather than the whole territory glowing
                     // flat.
-                    // The trail lights up BEHIND the machine, not underneath it.
+                    // The trail lights up BEHIND the machine — brighter behind it than under it, but
+                    // never dark under it. Both halves of that were learned the hard way.
                     //
                     // The obvious form is wave squared, brightest the instant ground changes hands
                     // — and the ground that has just changed hands is the ground directly under the
@@ -312,11 +313,27 @@ Shader "Duck/TurfGround"
                     // player's own mower was standing, tracking it perfectly, and from a chase
                     // camera that is not a trail at all: it is a spotlight bolted to the character.
                     //
-                    // wave * (1 - wave) is zero at the moment of the claim, peaks a beat later, and
-                    // fades. The ground under the machine stays dark, the planting behind it comes
-                    // up, and the arena reads as something taking hold in the wake rather than as a
-                    // lamp being carried around. Scaled by four so the peak still reaches one.
-                    float bloomIn = wave * (1.0 - wave) * 4.0;
+                    // The answer to that was wave * (1 - wave): zero at the moment of the claim,
+                    // peaking a beat later, fading after. It fixed the spotlight and bought a second
+                    // problem with the same coin, because ZERO is not a neutral value here. Emissive
+                    // is added after lighting and is not shadow attenuated, so the wake behind the
+                    // machine is genuinely brighter than anything the moon is doing, and the one
+                    // patch excluded from it was the patch the mower is standing on — which is also
+                    // the patch the mower is casting a real shadow onto. A hole in the trail, the
+                    // exact size and shape of the machine, following it around the arena. The intent
+                    // was right and it still read as a rendering fault.
+                    //
+                    // So the curve no longer collapses to nothing at the claim: it starts at half
+                    // strength under the roller, climbs to full a beat behind it, and cools from
+                    // there. Same wavefront, same "planting comes up in the wake" reading, and the
+                    // freshest ground is now the second brightest thing in the arena instead of the
+                    // darkest. crest is the old shape, scaled so the sum still peaks at one so
+                    // _PathGlow keeps meaning what it meant; fresh is a cube, which is the cheapest
+                    // curve that holds up the newest ground and is gone by the time the wave is half
+                    // faded, so it lifts the floor without dragging the peak back under the machine.
+                    float crest = wave * (1.0 - wave) * 4.0;
+                    float fresh = wave * wave * wave;
+                    float bloomIn = crest * 0.93 + fresh * 0.5;
                     emissive += accent * (bloomIn * _PathGlow + _ClaimEmber);
 
                     // 4 · the steal: turned earth in the seam, not a flash. Taking ground off

@@ -146,6 +146,10 @@ float TurfGapOpening(float2 wxz, float r)
 
 // 1 where ground can be painted, 0 under a hedge, with a metre of softness so the transition is a
 // planted edge rather than a stencil.
+//
+// This is the LOOK. Every ramp in it is there to make an edge die away over a metre instead of
+// ending on a stencil line, which is exactly what the ground layer, the blades and the map want and
+// exactly what the STAMP must not have — see TurfPlayableHard below for the rule.
 float TurfPlayable(float2 wxz, out float hedgeDepth)
 {
     float r = length(wxz);
@@ -161,6 +165,40 @@ float TurfPlayable(float2 wxz, out float hedgeDepth)
     float open = TurfGapOpening(wxz, r);
     hedgeDepth = saturate(-open / 3.0);
     return outer * saturate(open / 1.1 + 0.5);
+}
+
+// The same question, answered HARD. No feather anywhere in it, and that is the entire point.
+//
+// A soft edge is the right answer to "how should the arena stop looking like arena" and the wrong
+// answer to "where is the arena", and TurfStamp was asking the second question with the first
+// function. Clipping the feathered ramp at half strength is quietly a DIFFERENT ARENA to the one
+// TurfArena.IsPlayable describes: saturate((ArenaRadius - r) / 1.2) does not reach 0.5 until 0.6 m
+// inside the touchline, and the core ramp not until 0.6 m outside the wall. TurfMask.BuildGrid
+// marks both of those rings playable, TurfMask.Claim changes their owner and pays the player for
+// them, and the stamp then discarded every fragment in them — so they counted toward the score and
+// rendered as untouched neutral turf forever. Roughly 157 m2 around the rim and 31 m2 around the
+// core: ground a player drove, was scored for, and watched stay grey.
+//
+// It cannot be fixed by lowering the clip threshold, which is the tempting one-character version.
+// Inside the hedge band the ramp returns saturate(open / 1.1 + 0.5), which is exactly 0.5 when the
+// clearance is zero — half strength is ALREADY sitting on the hedge face and is already correct
+// there. Any threshold below it buys back the missing rim by letting paint run 1.1 * (0.5 - t)
+// metres INTO the hedges — the same disagreement with the same score, pointing the other way, and
+// against the one edge in this arena the player can see with their own eyes. The hedge face has to
+// stay exactly at "clearance greater than zero", so the rim has to be fixed somewhere else. Here.
+//
+// Structured to read against IsPlayable line for line, squared radii and all, because the day those
+// two stop matching is the day the picture stops matching the percentages. Every radius comes from
+// the uniforms TurfPalette pushes out of the TurfArena constants, so moving the touchline moves
+// this with it and no shader is edited.
+bool TurfPlayableHard(float2 wxz)
+{
+    float rSq = dot(wxz, wxz);
+    if (rSq > _TurfGeometry.x * _TurfGeometry.x) return false;   // past the touchline
+    if (rSq < _TurfGaps.w * _TurfGaps.w) return false;           // inside the sealed core
+    float r = sqrt(rSq);
+    if (r < _TurfGeometry.z || r > _TurfGeometry.w) return true; // hub and court, or the outer loop
+    return TurfGapOpening(wxz, r) > 0.0;                         // in the wall: only through a gap
 }
 
 #endif
