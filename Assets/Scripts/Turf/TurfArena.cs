@@ -12,7 +12,9 @@ namespace DuckMow
     ///
     /// Four rings of ground, worth more the further in you go, separated by one thin hedge wall:
     ///
-    ///   * the LOOP (33 m to 42 m) — nine metres wide, open, fast, and where everyone starts.
+    ///   * the LOOP (33 m to 45.5 m) — twelve and a half metres wide, open, fast, and where
+    ///     everyone starts. It runs all the way out to the barrier, because there is no sense in a
+    ///     strip of visibly good lawn between the last scoring metre and the wall that stops you.
     ///     Safe ground: you can hold full throttle and paint it all day. It is also the furthest
     ///     possible place from anybody else's territory, so a match spent here is a match spent
     ///     taking the cheapest ground on the board.
@@ -31,9 +33,20 @@ namespace DuckMow
     /// 531. SEVENTY PER CENT of everything paintable was the outer ring: the safest, fastest,
     /// widest, least contested ground on the board was also, by a factor of three, the most of it.
     /// A player who never went in was not being timid, they were farming correctly, and the mode
-    /// spent seventy-five seconds proving it. The rings now run 2121 / 1693 / 1134 — the loop is a
-    /// LANE rather than a field, and the two inner rings together are 57% of the score. Going in is
-    /// now where the ground is, which is the only argument a territory mode can actually make.
+    /// spent seventy-five seconds proving it. Moving the hedge ring out to 30/33 fixed that: the
+    /// loop became a LANE rather than a field, and the ground inside the wall went from 30% of the
+    /// score to 57%. Going in is where the ground is, which is the only argument a territory mode
+    /// can actually make.
+    ///
+    /// It is a narrower argument today than that paragraph makes it sound, and the honest figures
+    /// belong next to it. The rings measure 3083 loop / 1693 court / 933 hub, plus 206 m2 of open
+    /// ground inside the eight gateways, against a total of 5915. Two things moved: the core took
+    /// eight metres out of the middle of the hub, so the 1134 quoted above is now 933; and the
+    /// touchline went out to the barrier at 45.5, which handed the loop another 962 m2. Inside the
+    /// wall is 44% of the board rather than 57%. See <see cref="ArenaRadius"/> for why that trade
+    /// was made and what to do about it if the mode starts reading as a rim-farm again — the short
+    /// version is that the crown, not the acreage, is what has to make the middle worth entering,
+    /// and if it cannot then the hedge ring moves outward rather than the touchline moving in.
     ///
     /// So the question the arena asks, continuously, is: how far in dare you go? Every metre inward
     /// is worth more and is harder to hold, and the only ways in are eight places everybody knows
@@ -65,16 +78,56 @@ namespace DuckMow
         // ------------------------------------------------------------------ radii
 
         /// <summary>
-        /// Outer edge of paintable ground. The barrier stands a little beyond this.
-        ///
-        /// Forty-two, down from forty-six. A lap of the old loop was 239 m, which at the mower's
-        /// 10 m/s top speed is TWENTY-FOUR SECONDS — a third of a seventy-five second match to go
-        /// round once. An arena whose cheapest ring takes a third of the clock to circle is an
-        /// arena that has already decided what everybody is going to do with the clock.
+        /// Where the spectator barrier ring sits, and the only thing in the mode that physically
+        /// stops a mower. <c>DuckTurfBuilder</c> stands the wall's box colliders at
+        /// BarrierRadius + 0.4 with 0.6 m of thickness, so the face a machine actually meets is
+        /// 45.6 — a tenth of a metre of overrun past the touchline and then a wall.
         /// </summary>
-        public const float ArenaRadius = 42f;
-        /// <summary>Where the spectator barrier ring sits. Three and a half metres of run-off.</summary>
         public const float BarrierRadius = 45.5f;
+
+        /// <summary>
+        /// Outer edge of paintable ground. The barrier, and nothing short of it.
+        ///
+        /// This was 42 for a long time, on an argument that was right about the wrong number. It
+        /// ran: a lap of the old loop was 239 m, which at the mower's 10 m/s top speed is
+        /// TWENTY-FOUR SECONDS — a third of a seventy-five second match to go round once, and an
+        /// arena whose cheapest ring takes a third of the clock to circle has already decided what
+        /// everybody is going to do with the clock. That reasoning is correct and it is still load
+        /// bearing. It is simply an argument about LAP TIME, and lap time is set by
+        /// <see cref="LoopMid"/> — the line a mower running the rim actually follows — which is
+        /// 37.5 and is not changing here.
+        ///
+        /// The tell is in the arithmetic. A lap at LoopMid is 2*pi*37.5 = 236 m, or 23.6 seconds:
+        /// three tenths of a second off the 239 m the paragraph above was complaining about.
+        /// Pulling the touchline in from 46 to 42 never shortened the lap at all, because the
+        /// touchline is not what anybody drives. What it actually bought was three and a half
+        /// metres of ground the player could see, drive on, and not paint.
+        ///
+        /// And it IS visibly grass. TurfGround.shader:383 says so in as many words — beyond the
+        /// touchline the ground is still lawn, only slightly cooler so the painted line itself
+        /// reads — and it says so deliberately, because the version that rendered the run-off as
+        /// soil put a black moat between the arena and its own barrier which from a chase camera
+        /// read as the level running out. So the shipped arrangement was: a strip of obviously good
+        /// turf, a machine that drives onto it happily, a wall three and a half metres further out
+        /// that is the thing which really stops you, and a scoring rule that refused to count any of
+        /// it. Somebody who can see lawn and can drive on it will try to paint it, and being unable
+        /// to does not read as a boundary. It reads as a bug, and it was reported as one.
+        ///
+        /// So the touchline goes where the wall is. Written as <see cref="BarrierRadius"/> rather
+        /// than retyping 45.5, because the whole point is that these two cannot be allowed to drift
+        /// apart again: the painted ring, the score's outer bound, the shader's cutout and
+        /// <c>TurfCompetitor.Recover</c>'s soft edge are now all the same number as the fence, and
+        /// the fence is what stops you.
+        ///
+        /// The price is paid in the denominator, and it is not small. Score is counted per square
+        /// metre with no weighting by ring, so widening the loop from nine metres to twelve and a
+        /// half adds 962 m2 to a board that was 4953: every share is divided by 19% more ground,
+        /// and the loop goes from 43% of the arena to 52%. That is a genuine pull back toward the
+        /// outside and it is the one thing here worth watching. If the mode starts reading as a
+        /// rim-farm again, the fix is to move <see cref="LoopMid"/> and the hedge ring outward so
+        /// the loop is a lane again — not to fence the player off from grass they can see.
+        /// </summary>
+        public const float ArenaRadius = BarrierRadius;
 
         /// <summary>The hub: the plaza in the middle, bounded by a stone kerb.</summary>
         public const float PlazaRadius = 19f;
@@ -120,7 +173,16 @@ namespace DuckMow
         public const float HedgeOuter = 33f;
         public static float HedgeMid => (HedgeInner + HedgeOuter) * 0.5f;
 
-        /// <summary>Middle of the outer loop, where a mower running the rim naturally sits.</summary>
+        /// <summary>
+        /// The racing line round the outer loop: where the spawns stand, where <c>TurfNavGraph</c>
+        /// lays its outer ring, and the radius every lap-time argument in this file is really about.
+        ///
+        /// It is no longer the geometric middle of the loop — with the touchline out at the barrier
+        /// the band is 33 to 45.5 and its centre is 39.25. Deliberately left at 37.5: this is the
+        /// line a driver holds, and holding it a metre and three quarters inboard of centre leaves
+        /// the run-off on the outside of the corner where a mower that overcooks one wants it,
+        /// rather than putting the fence a metre closer than the driver expects.
+        /// </summary>
         public const float LoopMid = 37.5f;
 
         // ------------------------------------------------------------------ gaps

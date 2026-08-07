@@ -978,10 +978,22 @@ namespace DuckMow.EditorTools
         /// straight from the klaxon to the reveal with a warning nobody is looking at the console
         /// for. This list is the one place that decides what ships; if a scene can be reached at
         /// runtime it belongs here whether or not the game can open on it.
+        ///
+        /// Bloom Rush is here for exactly that rule, and it was missing. TurfStage.Run loads
+        /// BloomRush.unity additively on round three and has a guard for the load coming back null
+        /// that logs "is it in the build settings?" and lets the round carry on without the stage —
+        /// which is the right thing to do to a shipped player and the worst possible thing for
+        /// noticing, because the only symptom is a championship that quietly has two stages in it
+        /// instead of three. The stage was reachable at runtime and absent from the build, so it
+        /// never once ran in a browser.
+        ///
+        /// Arena.unity is still deliberately NOT here. It is a standalone review scene opened by
+        /// hand from the Duck menu, nothing in the game loads it, and a scene with no runtime path
+        /// to it is weight in the download rather than a stage somebody might reach.
         /// </summary>
         public static string[] PlayerScenes()
         {
-            var list = new List<string>(3);
+            var list = new List<string>(4);
             if (File.Exists(ScenePath)) list.Add(ScenePath);
             else Debug.LogWarning("[Duck] Menu.unity has not been built, so this player will open " +
                                   "straight into a round. Run Duck/4 · Build Menu Scene.");
@@ -989,6 +1001,10 @@ namespace DuckMow.EditorTools
             if (File.Exists(DuckRallyBuilder.ScenePath)) list.Add(DuckRallyBuilder.ScenePath);
             else Debug.LogWarning("[Duck] GooseRally.unity has not been built, so the final round " +
                                   "will go straight to the reveal. Run Duck/3 · Build goose rally scene.");
+            if (File.Exists(DuckTurfBuilder.ScenePath)) list.Add(DuckTurfBuilder.ScenePath);
+            else Debug.LogWarning("[Duck] BloomRush.unity has not been built, so round three will " +
+                                  "skip the stage and go on to the reveal. Run Duck/4 · Build bloom " +
+                                  "rush scene.");
             return list.ToArray();
         }
 
