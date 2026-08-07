@@ -9,6 +9,14 @@
 // Cutting does not scale a blade down. It crushes it: the stub loses height, splays wider,
 // and lies over in the direction the mower was actually travelling. That is the difference
 // between "grass was cut here" and "a texture was erased here".
+//
+// COLOUR IS NOT FLAT. That took a report from the goose arena to fix and it is worth stating up
+// front, because the obvious way to write this shader is the wrong one. A blade layer built from
+// two colours and a per-blade random multiply has exactly one spatial frequency in it — the blade,
+// about ten centimetres — and ten centimetres is below the size the eye will accept as a shape. A
+// field of it does not read as a lawn, it reads as static laid over a flat green plane. The cure is
+// LOW frequency: broad soft patches sized in tens of metres, so there is something large to see
+// before there is anything small to see. Details in the colour block near the bottom of Vert.
 Shader "Duck/GrassBlades"
 {
     Properties
@@ -18,6 +26,18 @@ Shader "Duck/GrassBlades"
         _CutBase   ("Cut base",   Color) = (0.1559, 0.3419, 0.0382, 1)
         _CutTip    ("Cut tip",    Color) = (0.4600, 0.6600, 0.1100, 1)
         _Translucency ("Translucency", Color) = (0.55, 0.85, 0.22, 1)
+
+        [Header(Patch variation   the field is not one colour)]
+        // Deliberately the same NAME and the same DEFAULT as GrassGround's dominant mottle octave,
+        // and it should stay that way: a reader comparing M_GrassBlades against M_GrassGround in the
+        // inspector is entitled to assume that two properties spelled the same are the same patches.
+        _MottleScale  ("Mottle scale (cells per metre)", Float) = 0.075
+        _MottleAmount ("Mottle amount", Range(0, 0.6)) = 0.38
+        _BroadAmount  ("Broad wash amount", Range(0, 0.4)) = 0.10
+        _OldMow       ("Old mowing bands (uncut only)", Range(0, 0.2)) = 0.055
+        // The old value of this was 0.28 and it was the entire visual budget of the lawn spent at a
+        // frequency too high to read. Halved, on purpose. See the colour block.
+        _BladeJitter  ("Per blade value jitter", Range(0, 0.4)) = 0.14
 
         _CutHeight   ("Cut height fraction", Range(0.02, 0.6)) = 0.16
         _TrackHeight ("Track height fraction", Range(0.02, 1)) = 0.55
@@ -68,6 +88,7 @@ Shader "Duck/GrassBlades"
                 float _CutHeight, _TrackHeight, _CutLayover, _RootJitter, _HeightVar;
                 float _AO, _NormalBias, _Wrap, _FadeStart, _FadeEnd, _ThinStart, _ThinEnd;
                 float _AmbientGain, _AmbientFloor;
+                float _MottleScale, _MottleAmount, _BroadAmount, _OldMow, _BladeJitter;
             CBUFFER_END
 
             struct Attributes
@@ -168,11 +189,97 @@ Shader "Duck/GrassBlades"
                 OUT.normalWS = normalize(lerp(nWS, float3(0, 1, 0), _NormalBias));
 
                 // ---- colour, resolved per vertex: blades are small, this is plenty ----
-                half3 uncut = lerp(_UncutBase.rgb, _UncutTip.rgb, heightFrac);
-                half3 cutC  = lerp(_CutBase.rgb,   _CutTip.rgb,   heightFrac);
+                //
+                // WHY THERE IS A NOISE CALL IN THE VERTEX SHADER THAT DRAWS A MILLION BLADES.
+                //
+                // The report from the goose arena was "the grass colour is uniform, so it looks like
+                // noise", and those two halves are one fault, not two. Every blade in the field was
+                // drawn from the same two colours — base at the root, tip at the top — with nothing
+                // on top of it but a per-blade random multiply. A per-blade random varies at ten
+                // centimetres. Ten centimetres is below the size the eye is willing to resolve into
+                // a shape at chase-camera range, so it does not read as "blades differ from one
+                // another": with no larger structure behind it to belong to, it reads as speckle
+                // over a flat plane. The lawn had no low frequency left in it at all, and
+                // high-frequency detail with nothing underneath it is the definition of static.
+                //
+                // The GROUND layer has had the cure since the day it was written — three octaves of
+                // mottling at roughly forty-eight, thirteen and three metres. The blades then stood
+                // on top of it and hid it, which is why the fault was worst exactly where the grass
+                // was thickest. So this is not an invented look: it is the blade layer carrying the
+                // SAME patches as the ground it is standing in.
+                //
+                //     ValueNoise2D(wxz * _MottleScale)        <- GrassGround.shader, octave m1
+                //     ValueNoise2D(rootWS.xz * _MottleScale)  <- here
+                //
+                // Same function, same argument, same default scale, biased in the same direction, so
+                // a patch of poorer ground now has poorer blades growing out of it instead of the two
+                // layers each drawing their own unrelated lawn.
+                //
+                // Sampled at the blade ROOT, not at the vertex, so all five vertices of a blade get
+                // one patch value and a blade is a single flat sample of the field. A gradient
+                // running up an individual blade would be a second kind of centimetre-scale detail,
+                // which is the thing being removed.
+                float patch = ValueNoise2D(rootWS.xz * _MottleScale);
+                // Contrast-stretched, and this is not cosmetic. Hermite-interpolated value noise
+                // spends most of its life near 0.5 — the interior of every cell is an average of its
+                // four corners, so the raw signal has a standard deviation of about 0.2 and a patch
+                // built straight off it is a wobble, not a patch. Pushed through a smoothstep it
+                // actually reaches its ends and the lawn gets areas rather than a gradient. The
+                // window is wider than GrassPlain's 0.38..0.72 on purpose: that one is drawing a
+                // field boundary and wants a visible edge, this one is drawing where the grass grew
+                // better, which has no edge at all.
+                patch = smoothstep(0.30, 0.70, patch);
+
+                // One frequency higher up, bought with two sines instead of a second noise octave.
+                //
+                // Value noise is about seventy operations a call and this shader already spends five
+                // hashes per vertex, so a second octave is not free at this density. It does not need
+                // to be noise: at forty-odd metres a plane wave is a soft wash across most of what
+                // the camera can see and there is no possibility of reading it as plaid. Two of them,
+                // forty-five and fifty-three metres long, crossing at roughly a right angle and at a
+                // ratio that is not a neat fraction, so they never line up twice in the same place.
+                // This is the term that stops a sixty-four metre lawn being one average colour with
+                // clumping laid over it.
+                float broad = sin(rootWS.x *  0.110 + rootWS.z * 0.085)
+                            + sin(rootWS.x * -0.062 + rootWS.z * 0.101);
+
+                // Both applied as a BIAS ON THE HEIGHT GRADIENT rather than as a tint, and that is
+                // the whole reason this cannot escape the palette. The result is a clamped position
+                // on the straight line between the two authored greens, so the darkest a patch can
+                // possibly go is exactly _UncutBase and the lightest is exactly _UncutTip. No hue
+                // exists between them that was not already being drawn on every blade; all that
+                // changes is WHERE on that line a given square metre of lawn sits. Whatever the
+                // scene builder authors those two colours as, the variation follows it.
+                float shade = (patch - 0.5) * _MottleAmount + broad * 0.5 * _BroadAmount;
+                float h = saturate(heightFrac + shade);
+
+                half3 uncut = lerp(_UncutBase.rgb, _UncutTip.rgb, h);
+                half3 cutC  = lerp(_CutBase.rgb,   _CutTip.rgb,   h);
+
+                // A memory of last week's mowing. Deliberately the SAME expression, the same phase
+                // and the same default amplitude as GrassGround.shader's `oldStripe`, because the
+                // ground has been drawing these fifteen-metre bands all along and the blades have
+                // been standing in front of them. Matching means the two layers band together
+                // instead of the upper one washing the lower one out. Uncut only, exactly as on the
+                // ground: cut grass gets its banding from the mow direction stored in the mask,
+                // which is a real record of where the mower went and must not be competed with.
+                float oldMow = sin(rootWS.x * 0.42) * 0.5;
+                uncut *= 1.0 + oldMow * _OldMow;
+
                 half3 col = lerp(uncut, cutC, smoothstep(0.18, 0.65, cut));
+                // Root darkening reads the TRUE height fraction, not the biased one. This is contact
+                // occlusion between blades — it is geometry, and geometry does not care which patch
+                // of the lawn it is standing in.
                 col *= lerp(1.0 - _AO, 1.0, heightFrac);
-                col *= 0.86 + 0.28 * hRand;
+
+                // Per-blade value jitter, halved from the plus-or-minus fourteen percent it used to
+                // be. This is the term that was reading as static, and it is reduced rather than
+                // deleted: blades genuinely do differ, and this is still what stops a stand of grass
+                // looking extruded from one profile. It simply no longer has to carry the entire
+                // variation of the surface on its own, so it can go back to being a texture rather
+                // than the subject. Note hRand also drives the blade's height, so the taller blades
+                // stay the brighter ones, which is how light really falls on a stand of grass.
+                col *= 1.0 + (hRand - 0.5) * _BladeJitter;
 
                 OUT.color = col;
                 OUT.heightFrac = heightFrac;

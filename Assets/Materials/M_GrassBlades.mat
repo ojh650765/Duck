@@ -28,12 +28,17 @@ Material:
     - _AO: 0.34
     - _AmbientFloor: 0.1
     - _AmbientGain: 1.35
+    - _BladeJitter: 0.14
+    - _BroadAmount: 0.1
     - _CutHeight: 0.16
     - _CutLayover: 0.55
     - _FadeEnd: 41
     - _FadeStart: 30
     - _HeightVar: 0.45
+    - _MottleAmount: 0.38
+    - _MottleScale: 0.075
     - _NormalBias: 0.55
+    - _OldMow: 0.055
     - _RootJitter: 0.16
     - _ThinEnd: 42
     - _ThinStart: 15
