@@ -203,9 +203,22 @@ Shader "Duck/Prop"
                 half3 ambient = SampleSH(N) * _AmbientGain
                                 + lerp(_ShadowTint.rgb, half3(1, 1, 1), 0.45) * _AmbientFloor;
 
+                // Tight, normalised, fresnel-weighted, and gated by the key light.
+                //
+                // The old highlight was a wide blob: exponent 27 at the default smoothness, applied
+                // at full strength wherever N.H was positive, which is most of the object. That is a
+                // uniform sheen rather than a highlight — it flattens form instead of describing it,
+                // and it is exactly the plastic look. Three corrections: an exponential gloss range
+                // so the lobe is small, a (gloss+8)/8 normalisation so shrinking it does not just
+                // make everything dimmer, and the ndotl gate so the unlit side of a prop can no
+                // longer carry a specular the sun could not have put there.
                 half3 H = normalize(mainLight.direction + V);
-                half spec = pow(saturate(dot(N, H)), lerp(8.0, 96.0, _Smoothness))
-                            * _Smoothness * lerp(0.25, 1.6, _Metallic) * shadow;
+                half gloss = exp2(lerp(4.5, 12.0, _Smoothness));
+                half fres = pow(1.0 - saturate(dot(V, H)), 5.0);
+                half spec = pow(saturate(dot(N, H)), gloss)
+                            * ((gloss + 8.0) * 0.0125)
+                            * lerp(lerp(0.30, 1.0, _Metallic), 1.0, fres)
+                            * _Smoothness * saturate(ndotl * 4.0) * shadow;
 
                 half rim = pow(1.0 - saturate(dot(N, V)), _RimPower) * _RimStrength;
 

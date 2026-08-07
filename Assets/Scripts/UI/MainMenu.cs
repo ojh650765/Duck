@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -310,6 +311,19 @@ namespace DuckMow
             ApplyVista(0f);
             CacheTitlePieces();
             if (music != null && music.clip != null && !music.isPlaying) music.Play();
+
+            // Arriving back from a round, the curtain that covered the load is still down over this
+            // scene and raising it is now this scene's job — whatever closed it was destroyed by the
+            // load. It is raised INSTEAD of the black fade-up rather than as well as it: two things
+            // clearing the frame at once is how a transition ends up with a grey step in the middle
+            // of it. A cold start has no curtain and keeps the fade, which is the app opening rather
+            // than a stage boundary and is allowed to look like one.
+            if (MatchState.TakeCurtainPending())
+            {
+                _fadeAmount = 0f;
+                ApplyFade();
+                StartCoroutine(StageSeam.End(0.1f));
+            }
         }
 
         void Update()
@@ -337,18 +351,21 @@ namespace DuckMow
 
             if (_leaving)
             {
-                _fadeAmount = Mathf.MoveTowards(_fadeAmount, 1f, dt / Mathf.Max(fadeOut, 0.01f));
+                // The camera keeps pushing in and the tune keeps ebbing — that is the OUTRO, and it
+                // runs underneath the curtain closing rather than instead of it.
+                //
+                // What used to be here as well was a fade to black, and it was the single worst
+                // moment in the game: the front page went dark, stayed dark for as long as the
+                // browser needed, and then a lawn appeared. The load is now hidden behind grass
+                // growing up over the frame instead — see LeaveToGame — so the player never sees the
+                // game stop. The fade image is left alone, at zero, for the cold start to use.
                 _leaveAmount = Mathf.MoveTowards(_leaveAmount, 1f, dt / Mathf.Max(fadeOut, 0.01f));
-                ApplyFade();
                 if (music != null) music.volume = Mathf.MoveTowards(music.volume, 0f, dt / Mathf.Max(fadeOut, 0.01f));
 
-                // Asked for only once, and only after the screen is actually black: a synchronous
-                // load of a scene this size locks the browser tab for long enough that the player
-                // decides the click did not register and clicks again.
-                if (_fadeAmount >= 1f && !_loadStarted)
+                if (!_loadStarted)
                 {
                     _loadStarted = true;
-                    SceneManager.LoadSceneAsync(playScene);
+                    StartCoroutine(LeaveToGame());
                 }
                 return;
             }
@@ -492,6 +509,45 @@ namespace DuckMow
                 if (Cam != null && vistas != null && vista < vistas.Length && vistas[vista] != null)
                     Cam.fieldOfView = vistas[vista].fov - leaveZoom * ease;
             }
+        }
+
+        /// <summary>
+        /// Out of the front page and into the championship, with the load underneath the grass.
+        ///
+        /// The load is asked for only once the frame is genuinely opaque, which is the same rule the
+        /// old fade-to-black followed and for the same reason: a scene this size locks a browser tab
+        /// hard enough that a player who can still see the menu decides their click did not register
+        /// and clicks again. The difference is what they are looking at while it happens.
+        ///
+        /// The curtain is left DOWN across the load. It is DontDestroyOnLoad, so it is alive on both
+        /// sides of the swap, and GameDirector.Start raises it onto the venue — which is the whole
+        /// mechanism by which a full scene change has no visible seam at all.
+        /// </summary>
+        /// <summary>
+        /// Editor capture hook: take the Play choice without a keypress.
+        ///
+        /// The front page reads the keyboard directly rather than through InputReader — it is a
+        /// different scene with no round in it — so an unattended review run has no way to get past
+        /// it, and the boundary out of the menu is the one the player meets FIRST and the one most
+        /// likely to be slow. A journey sheet that has to start at the second scene is not a journey
+        /// sheet. Idempotent, so a driver polling it every frame cannot queue two loads.
+        /// </summary>
+        public void DebugPlayNow()
+        {
+            if (_leaving) return;
+            _leaving = true;
+        }
+
+        IEnumerator LeaveToGame()
+        {
+            // A fresh run. The escalation starts from quiet, whatever the last session ended on.
+            MatchState.BeginSession();
+
+            yield return StageSeam.Begin(MatchState.Seam.MenuToRound, "THE CHAMPIONSHIP",
+                                         $"ROUND 1 OF {Mathf.Max(MatchState.RoundsTotal, 1)}");
+
+            MatchState.CurtainPending = true;
+            SceneManager.LoadSceneAsync(playScene);
         }
 
         // ------------------------------------------------------------------ input

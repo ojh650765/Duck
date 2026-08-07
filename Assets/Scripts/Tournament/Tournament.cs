@@ -20,11 +20,23 @@ namespace DuckMow
         /// </summary>
         public float total;
         /// <summary>
-        /// The bench's verdict on the goose defence, roughly -3..+8. Zero for every rival — they never
-        /// face the geese, so the defence is the player's own opportunity and their own risk. Counted by
-        /// the championship and by the round's placing; see <see cref="RoundScore"/>.
+        /// The bench's verdict on the goose rally, roughly -6..+10.
+        ///
+        /// No longer the player's alone. Every contestant defends a garden in the rally, so every
+        /// contestant carries a mark out of it — which is what makes redirecting a goose at HORACE an
+        /// act with a consequence rather than a way of tidying your own lawn. Counted by the
+        /// championship and by the round's placing; see <see cref="RoundScore"/>.
         /// </summary>
         public int defenceAward;
+        /// <summary>
+        /// Whether this contestant has actually been marked on a rally.
+        ///
+        /// Carried rather than inferred, because <see cref="defenceAward"/> being zero is a real
+        /// result — fourth place is worth exactly zero — and the scoreboard was reading "0" as
+        /// "no rally happened" and printing the picture alone. The contestant who came last was
+        /// the one contestant whose line did not show the sum, which is precisely backwards.
+        /// </summary>
+        public bool rallyMarked;
         /// <summary>The round score that actually decides anything: the picture plus the defence.</summary>
         public float RoundScore => total + defenceAward;
         public string rank;        // S..D, on the picture alone
@@ -267,6 +279,95 @@ namespace DuckMow
             PlayerPlace = 1;
             for (int i = 0; i < _standings.Count; i++)
                 if (_standings[i].isPlayer) { PlayerPlace = places[i]; break; }
+        }
+
+        /// <summary>
+        /// Fold the rally's four gardens into the round that has just closed.
+        ///
+        /// Called after <see cref="CloseRound"/> rather than inside it, because the picture and the
+        /// rally are marked by different things and the order is load-bearing: the pictures are what
+        /// they are the moment the klaxon sounds, and the gardens are not settled until the horn at
+        /// the far end of the arena. Closing the round on the artwork and then applying the gardens
+        /// keeps each number answerable to the beat that produced it.
+        ///
+        /// Everybody is marked, not just the player — see <see cref="Standing.defenceAward"/>.
+        /// </summary>
+        public void ApplyRallyResults()
+        {
+            if (!RallyHandoff.ResultsReady || _standings.Count == 0) return;
+
+            // Placed first, then marked. The bench's pick has to be the best-paid result — see
+            // RallyAwardForPlace.
+            var ranked = RallyHandoff.Ranked();
+            for (int i = 0; i < _standings.Count; i++)
+            {
+                var s = _standings[i];
+                var r = RallyHandoff.Of(s.name);
+                int place = 1;
+                for (int p = 0; p < ranked.Length; p++)
+                    if (ranked[p].contestant == s.name) { place = p + 1; break; }
+                s.defenceAward = RallyAwardForPlace(r, place, Mathf.Max(ranked.Length, 1));
+                s.rallyMarked = true;
+                _standings[i] = s;
+            }
+
+            _standings.Sort((a, b) =>
+            {
+                int byTotal = b.RoundScore.CompareTo(a.RoundScore);
+                if (byTotal != 0) return byTotal;
+                return string.CompareOrdinal(a.name, b.name);
+            });
+
+            var places = Scoring.CompetitionPlaces(_standings);
+            PlayerPlace = 1;
+            for (int i = 0; i < _standings.Count; i++)
+                if (_standings[i].isPlayer) { PlayerPlace = places[i]; break; }
+        }
+
+        /// <summary>
+        /// What a garden is worth.
+        ///
+        /// Built around a break-even at 60 percent intact, so an average rally is worth about
+        /// nothing and the mark is genuinely earned in both directions. The offensive half is
+        /// deliberately the smaller one: knockouts and geese landed in somebody else's flowers are a
+        /// bonus on top of defending, not a way to win the round while your own beds are flattened.
+        ///
+        /// Bounded well inside the picture's thirty marks. The rally is a third of a round, and a
+        /// third of a round must not be able to overturn one that was mown properly.
+        /// </summary>
+        public static int RallyAward(RallyHandoff.Result r)
+        {
+            float defence = (r.integrity - 0.6f) * 14f;
+            float offence = r.knockouts * 1.2f + r.landed * 0.45f + r.perfects * 0.25f;
+            return Mathf.Clamp(Mathf.RoundToInt(defence + offence), -6, 10);
+        }
+
+        /// <summary>
+        /// The rally's marks, graded by placing rather than computed independently.
+        ///
+        /// The bench PICKS a winner at the end of the rally, and a picked winner has to be worth the
+        /// most — otherwise the ceremony announces one contestant and the points table rewards
+        /// another, which is the sort of contradiction that makes a scoring system feel arbitrary.
+        /// So first place takes the top mark and the rest are stepped down behind it.
+        ///
+        /// Stepped rather than flat, because four contestants who all defended well should not be
+        /// separated by nothing — and the step is small enough that a good rally in fourth still
+        /// beats a bad rally in first, which keeps the mode about defending rather than about
+        /// placing.
+        /// </summary>
+        public static int RallyAwardForPlace(RallyHandoff.Result r, int place, int of)
+        {
+            int earned = RallyAward(r);
+            if (of <= 1) return earned;
+
+            // The winner is floored at a real reward, and everyone else is stepped down from it.
+            int[] byPlace = { 10, 6, 3, 0 };
+            int placed = byPlace[Mathf.Clamp(place - 1, 0, byPlace.Length - 1)];
+
+            // The better of "what you earned" and "what your placing is worth", so a contestant who
+            // was never attacked cannot out-score one who defended a siege — and a winner is never
+            // punished for the flock having been quiet.
+            return Mathf.Clamp(Mathf.Max(earned, placed), -6, 10);
         }
 
         /// <summary>Find the rival working a given plot, for the tour.</summary>

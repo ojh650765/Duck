@@ -127,7 +127,13 @@ namespace DuckMow
 
             var rb = mower.GetComponent<Rigidbody>();
             float yawRate = rb != null ? rb.angularVelocity.y : 0f;
-            float steerInput = InputReader.Instance != null ? InputReader.Instance.Steer : 0f;
+            // This machine's own controls, not the keyboard's.
+            //
+            // It read InputReader directly, which is right for the one mower the player is sitting
+            // on and wrong the moment there are four on a pitch: three opponents' wheels, steering
+            // columns and drivers all leaned whichever way the PLAYER was steering, in perfect
+            // unison, while the machines underneath them drove somewhere else entirely.
+            float steerInput = mower != null ? mower.VisualSteer : 0f;
 
             UpdateWheels(speed, steerInput, dt);
             UpdateChassis(yawRate, accel, dt);
@@ -149,12 +155,23 @@ namespace DuckMow
 
             if (steeringColumn != null)
             {
-                // The column is raked back, so the wheel spins about its own shaft rather than a
-                // world axis; resolve that shaft from the rest pose instead of guessing an index.
-                Vector3 shaft = steeringColumn.parent != null
-                    ? steeringColumn.parent.InverseTransformDirection(steeringColumn.up)
-                    : Vector3.up;
-                steeringColumn.localRotation = Quaternion.AngleAxis(-steerInput * 105f, shaft) * _steerBase;
+                // The column is raked back, so the wheel turns about its OWN shaft rather than a
+                // world axis. The shaft comes from the REST pose, and it has to — this used to read
+                // `steeringColumn.up`, which is the axis of the pose written on the previous frame.
+                //
+                // That is a feedback loop. Turn the wheel about its shaft, the shaft moves; next
+                // frame the new shaft is resolved from the already-rotated pose and the rotation
+                // compounds on top of itself. Hold any steering input and the wheel accelerates into
+                // a full 360 and keeps going — the "propeller". Deriving the axis from _steerBase
+                // makes it a fixed property of how the column is mounted, which is what it is.
+                //
+                // Positive steer turns the wheel to the RIGHT. It was negated, which had been
+                // invisible for as long as the column was spinning — you cannot tell which way a
+                // propeller is wrong. With the rotation stable the reversal is the first thing you
+                // see, and a steering wheel that turns away from the direction the machine goes is
+                // worse than one that does not move at all.
+                Vector3 shaft = _steerBase * Vector3.up;
+                steeringColumn.localRotation = Quaternion.AngleAxis(steerInput * 105f, shaft) * _steerBase;
             }
         }
 

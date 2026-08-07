@@ -156,6 +156,20 @@ namespace DuckMow
                     break;
             }
 
+            // What the duck did AFTER the picture: the rally's gardens, Bloom Rush's share of the
+            // arena. Folded in here so the later stages are marked by the same three chairs, on the
+            // same curve, as the mowing — which is the difference between a stage that was judged
+            // and a stage that announced its own result.
+            //
+            // Blended rather than added, so a round that plays every stage still tops out at ten
+            // and cannot outscore the scale. Weighted a little under a third: enough that throwing
+            // the arena away is visible on the card, not so much that the picture stops mattering.
+            //
+            // Zero when no stage was played, and lerp by zero is the identity — which is why every
+            // round that is only a picture scores exactly as it did before this existed.
+            const float stageWeight = 0.3f;
+            if (s.stages > 0f) raw = Mathf.Lerp(raw, s.stages, stageWeight);
+
             raw = Mathf.Clamp01(raw);
             float curved = Mathf.Pow(raw, Mathf.Max(severity, 0.05f));
             return Mathf.Clamp(Mathf.Round(Mathf.Lerp(floor, ceiling, curved)), 0f, 10f);
@@ -184,7 +198,13 @@ namespace DuckMow
             var places = new int[sorted.Count];
             for (int i = 0; i < sorted.Count; i++)
             {
-                places[i] = (i > 0 && Mathf.Abs(sorted[i].total - sorted[i - 1].total) < 0.001f)
+                // RoundScore, not total. The list arrives sorted by RoundScore — picture plus the
+                // rally's marks — while this compared the PICTURE alone, so the order and the place
+                // labels were reading different numbers. Four contestants who mowed equally well
+                // and defended completely differently all came out "1st" on a board that had
+                // already put them in the right order underneath. Sort key and tie key have to be
+                // the same key or the board contradicts itself.
+                places[i] = (i > 0 && Mathf.Abs(sorted[i].RoundScore - sorted[i - 1].RoundScore) < 0.001f)
                     ? places[i - 1]
                     : i + 1;
             }

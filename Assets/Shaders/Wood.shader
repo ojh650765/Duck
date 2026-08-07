@@ -397,8 +397,12 @@ Shader "Duck/Wood"
                                 + lerp(_ShadowTint.rgb, half3(1, 1, 1), 0.45) * _AmbientFloor;
 
                 half3 H = normalize(mainLight.direction + V);
-                half spec = pow(saturate(dot(N, H)), lerp(8.0, 96.0, _Smoothness))
-                            * _Smoothness * lerp(0.25, 1.6, _Metallic) * shadow;
+                half gloss = exp2(lerp(4.5, 12.0, _Smoothness));
+                half fres = pow(1.0 - saturate(dot(V, H)), 5.0);
+                half spec = pow(saturate(dot(N, H)), gloss)
+                            * ((gloss + 8.0) * 0.0125)
+                            * lerp(lerp(0.30, 1.0, _Metallic), 1.0, fres)
+                            * _Smoothness * saturate(ndotl * 4.0) * shadow;
 
                 half rim = pow(1.0 - saturate(dot(N, V)), _RimPower) * _RimStrength;
 

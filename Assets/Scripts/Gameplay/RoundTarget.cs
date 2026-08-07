@@ -30,6 +30,21 @@ namespace DuckMow
 
         /// <summary>How little of the mowing landed outside the picture. Simply 1 - spill.</summary>
         public float neatness;
+
+        /// <summary>
+        /// How the duck did in the round's LATER STAGES, 0..1, or 0 when there were none.
+        ///
+        /// The goose rally's gardens and Bloom Rush's share of the arena arrive here, normalised so
+        /// that holding your own is a half and running away with it is a one. Zero by default, and
+        /// that default is what keeps every round that plays only the picture scoring exactly as it
+        /// did before this field existed.
+        ///
+        /// It lives on the ROUND's score rather than being announced by the stage that produced it,
+        /// and that is the whole point of it. A stage that prints its own winner has decided the
+        /// competition by itself; a stage that hands a number to the panel has been JUDGED, along
+        /// with everything else the duck did that round, by the three animals whose job that is.
+        /// </summary>
+        public float stages;
     }
 
     /// <summary>

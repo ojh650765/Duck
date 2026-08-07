@@ -65,6 +65,8 @@ namespace DuckMow
         public TextMeshProUGUI countdownText;
 
         [Header("Results")]
+        /// <summary>Set by VictoryCeremony to keep the round card up through the champion beat.</summary>
+        [System.NonSerialized] public bool ceremonyResultsHold;
         public CanvasGroup resultsGroup;
         public TextMeshProUGUI resultsRank;
         public TextMeshProUGUI resultsTotal;
@@ -372,7 +374,9 @@ namespace DuckMow
                     break;
 
                 case GameState.Ceremony:
-                    SetGroup(resultsGroup, 0f);
+                    // The ceremony's champion beat re-uses the round card on the left of frame, which
+                    // is the only reason this is not simply 0.
+                    SetGroup(resultsGroup, ceremonyResultsHold ? 1f : 0f);
                     FillCeremonyCard();
                     break;
 
@@ -617,6 +621,27 @@ namespace DuckMow
 
             _shownTotal += score;
             if (resultsTotal != null) resultsTotal.text = $"{Mathf.RoundToInt(_shownTotal)} / 30";
+        }
+
+        /// <summary>
+        /// Put the FINAL ROUND on the round card: where the player placed in it, and what it paid.
+        ///
+        /// Deliberately not the championship total — the board beat that follows this one is where
+        /// the total lands, and printing it here would answer that shot before it happens.
+        /// </summary>
+        public void ShowFinalRound(int place, int pointsGained)
+        {
+            if (resultsRank != null) resultsRank.text = Championship.Ordinal(place);
+            if (resultsTotal != null) resultsTotal.text = $"+{Mathf.Max(0, pointsGained)}";
+            if (resultsRosette != null)
+            {
+                int idx = Mathf.Clamp(place - 1, 0, 4);
+                if (rosetteByRank != null && idx < rosetteByRank.Length && rosetteByRank[idx] != null)
+                {
+                    resultsRosette.sprite = rosetteByRank[idx];
+                    resultsRosette.enabled = true;
+                }
+            }
         }
 
         void HandleVerdict(float total, string rank)

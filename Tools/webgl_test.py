@@ -25,7 +25,23 @@ import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUILD_DIR = os.path.join(ROOT, "Build", "WebGL")
+
+# Where DuckBuild actually writes the player. This said Build/WebGL, which is a folder left over
+# from an earlier layout and still had a build from days ago sitting in it — so the one tool whose
+# entire job is "prove the real build runs in a real browser" was loading a stale one, and would
+# have gone on passing however broken the current build was. The first candidate that has an
+# index.html wins, so an old layout still works.
+_CANDIDATE_BUILDS = [
+    # Development first when it exists: it is the only build that forwards Debug.Log to the browser
+    # console, which is the difference between diagnosing a WebGL-only fault and guessing at it.
+    os.path.join(ROOT, "Web_Dev"),
+    os.path.join(ROOT, "Web"),
+    os.path.join(ROOT, "Build", "WebGL"),
+]
+BUILD_DIR = next(
+    (d for d in _CANDIDATE_BUILDS if os.path.exists(os.path.join(d, "index.html"))),
+    _CANDIDATE_BUILDS[0],
+)
 OUT_DIR = os.path.join(ROOT, "Captures", "WebGL")
 
 CHROME_CANDIDATES = [
@@ -48,10 +64,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Encoding", "gzip")
         elif path.endswith(".br"):
             self.send_header("Content-Encoding", "br")
-        if path.endswith((".wasm", ".wasm.gz", ".wasm.br")):
-            self.send_header("Content-Type", "application/wasm")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def guess_type(self, path):
+        """
+        Content-Type has to be OVERRIDDEN, not appended.
+
+        This used to add a second Content-Type header from end_headers, and a browser reads the
+        first one — so the base handler's guess (application/octet-stream) won every time and
+        Chrome refused to stream-compile the module: "Incorrect response MIME type. Expected
+        'application/wasm'." The loader then fell back to ArrayBuffer instantiation and sat there
+        waiting on wasm-instantiate, which looks exactly like a build that will not start.
+        """
+        if path.endswith(".wasm") or path.endswith(".wasm.gz") or path.endswith(".wasm.br"):
+            return "application/wasm"
+        if path.endswith(".unityweb"):
+            # Unity's compressed payloads are named by role, not by type; the encoding header set
+            # above is what tells the browser how to unwrap them.
+            return "application/octet-stream"
+        return super().guess_type(path)
 
     def log_message(self, fmt, *args):
         pass
@@ -84,7 +116,21 @@ def main():
     ap.add_argument("--seconds", type=int, default=25)
     ap.add_argument("--serve-only", action="store_true")
     ap.add_argument("--port", type=int, default=0)
+    # Which build to serve. The default picks the development one when it exists, because that is
+    # the only build that forwards Debug.Log to the browser console — but a development player says
+    # nothing about frame rate or download size, so the release build needs to be reachable without
+    # deleting the other one first.
+    ap.add_argument("--build", default=None,
+                    help="Folder to serve (e.g. Web, Web_Dev). Default: first candidate present.")
     args = ap.parse_args()
+
+    global BUILD_DIR
+    if args.build:
+        cand = args.build if os.path.isabs(args.build) else os.path.join(ROOT, args.build)
+        if not os.path.exists(os.path.join(cand, "index.html")):
+            print(f"no index.html in {cand}")
+            return 2
+        BUILD_DIR = cand
 
     if not os.path.isdir(BUILD_DIR) or not os.path.exists(os.path.join(BUILD_DIR, "index.html")):
         print("NO BUILD: expected %s/index.html" % BUILD_DIR)

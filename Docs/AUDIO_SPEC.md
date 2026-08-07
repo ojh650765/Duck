@@ -1,6 +1,6 @@
 # DUCK MOW — Audio Spec
 
-63 clips, all **synthesised from scratch in Python** (numpy/scipy). No samples,
+74 clips, all **synthesised from scratch in Python** (numpy/scipy). No samples,
 no libraries, no AI providers. Sources live in `Art/Python/audio/`, renders in
 `Assets/Audio/<Category>/`.
 
@@ -19,7 +19,7 @@ bed and ambience. Every clip is peak-normalised to **−1.5 dBFS**; nothing clip
 ```
 cd C:\Duck\Art\Python\audio
 
-python render_all.py                  # all 63 clips, then verify (~2 min)
+python render_all.py                  # all 74 clips, then verify (~2 min)
 python render_all.py engine music     # just those modules
 python render_all.py --rate=22050     # same clips, half the bytes
 python analyze.py                     # verify only
@@ -35,7 +35,7 @@ module. Output only ever goes to `Assets/Audio/`.
 | `dsp.py` | oscillators, filters, envelopes, modal bodies, Karplus-Strong, loop tools, WAV writer |
 | `critter.py` | shared animal source-filter voice (goat, badger, heron, goose, sheep, cow, quack) |
 | `instruments.py` | the county-fair band + the step sequencer |
-| `engine.py` `blade.py` `mower.py` `ui.py` `crowd.py` `ambience.py` `duck.py` `judges.py` `music.py` | one per output folder |
+| `engine.py` `blade.py` `mower.py` `ui.py` `crowd.py` `ambience.py` `duck.py` `judges.py` `geese.py` `music.py` | one per output folder |
 | `analyze.py` | measurement + hard gates |
 | `levels.py` | mixer plan (targets → per-clip trims) |
 | `render_all.py` | driver |
@@ -208,6 +208,25 @@ relative to the 200–800 Hz band):
 | `music_menu_loop` | 0.019 % | −35.1 dB |
 | `music_round_loop` | 0.010 % | −37.5 dB |
 | `music_round_urgent_layer` | 0.003 % | −42.6 dB |
+| `music_rally_loop` | 0.014 % | −34.1 dB |
+| `music_bloom_loop` | 0.014 % | −33.8 dB |
+
+The two later stage loops sit a few dB above the round on the ratio column and
+that is not slack — it is the numerator staying put while the denominator
+changes. Their arrangements measure **0.053 %** and **0.049 %** in the band
+*before* the bus, against the round's 0.052 %; what moves is the 200–800 Hz
+reference, which shrinks as the mixes get brighter (a sixteenth shaker in the
+rally, a glockenspiel on top of it in Bloom Rush). The absolute share, which is
+the number the engine actually cares about, is 0.014 % for both.
+
+**Where the rest of it comes from is worth knowing before anyone tunes a third
+one.** `master()` filters and *then* convolves, so the room is applied after
+the carve and puts some of the energy back. Bloom Rush's first draft used a
+long, dark room (1.35 s, decay 0.38, 3 600 Hz) with a 0.24 send and 1.90 drive
+and measured **0.019 %**. Same notes, same carve, room opened to 4 000 Hz and
+the send and drive pulled back to 0.20/1.80: **0.014 %**. A third of what was
+in the mower's octave was the reverb and the saturator rather than anything
+written.
 
 The menu loop is not carved (no engine is running) — it lands there anyway
 because of the arrangement.
@@ -233,10 +252,57 @@ It has to be tense wherever you join it.
 | menu | G major | 120 BPM | 12 bars, `G G C G / Em C D D / C G D G`, fiddle tune with a wrapping pickup |
 | round | D major | 128 BPM | 16 bars, `D D G D / Bm G A A / D G D Bm / G A D A` |
 | urgent | D major | 128 BPM | same 16 bars: tremolo double-stops, climbing banjo figure, 16th shaker, beat stomp, drifting woodblock |
+| rally | D major | 128 BPM | 16 bars, `D A Bm F#m / G D Em A / Bm F#m G A / D A Bm A` — stage two: a chord a bar, eighth-note bass, the urgent layer's climbing banjo figure as a bar-by-bar fill |
+| bloom | **D Mixolydian** | 128 BPM | 16 bars, **two chords a bar**: `D C · G D · D C · G Am / Bm Am · G D · Em C · G D / D Em · C G · Bm Am · G C / D C · G D · Em Am · C` — stage three, at night: four stomps a bar, glockenspiel, and a turnaround on bVII → I |
 | reveal | G major | 100 BPM | IV → V → I with a suspension; arrives on beat 4 with glock sparkle |
 | judging bed | B minor | 120 BPM | 4 bars, pizz ostinato that drops a step in bar 3, minor-2nd rub in bar 4 |
+| cutscene | G major | 80 BPM | 12 bars, `G Em C G / Am D Em C / G Em Am D`, glockenspiel tune over a squeezebox pad, **no percussion** |
 | fanfare_good | G major | 126 BPM | pickup triplet, `G C D`, land on Gadd9 |
 | fanfare_bad | — | 96 BPM | `G → Gm → F#… ` sagging, then the bellows run out (real oscillator droop, not a pitch-shifted sample) |
+
+### The cutscene bed, and the hole it leaves for the narrator
+
+`music_cutscene_loop` is the menu's key and the menu's 12-bar form, because the
+story page and the menu are the two beats where nothing is at stake and they
+should read as the same place. What makes it wistful rather than jaunty is that
+five of the twelve bars are Em or Am and the loop turns around on **D**, so it
+never quite arrives.
+
+It carves for the **voice** where the round loop carves for the engine —
+`master(voice=True)`, two broad shallow dips at 700 Hz (where the squeezebox
+pad's fundamentals pile up) and 1900 Hz (consonants), −3.5 and −3.0 dB. Shallow
+on purpose: 6 dB out of the middle of a tune and the band sounds broken.
+
+That carve is there because the arrangement alone did not do the job, and it is
+worth writing down why I thought it would. The tune is a glockenspiel two
+octaves above the narration and the pad is a squeezebox below it, so on paper
+the voice's band is not written in — but a squeezebox chord voiced at MIDI
+67–86 *is* the speech band whatever the melody is doing, and measurement said
+so:
+
+| clip | share of energy in 300–3000 Hz |
+|---|---|
+| `music_cutscene_loop`, arrangement only | 70 % |
+| `music_cutscene_loop`, as shipped | **58 %** |
+| `music_menu_loop` (same key, same form) | 77 % |
+| `music_round_loop` | 85 % |
+
+There is also **no percussion anywhere in it**: every other cue in the game has
+a pulse, and a pulse under speech turns a reading into a rap. The tempo is
+carried by the harmony changing once a bar.
+
+The first draft had the banjo rolling under all twelve bars, as the menu does.
+A roll is eight plucks a bar, which is a pulse whatever its velocity, and it
+made the page sound like it was waiting for the round to start. The banjo is
+still there — it is what makes this the same band — but two picked notes a bar,
+quiet and off to one side.
+
+**Nothing else is audible while it plays.** `AudioDirector` gates the engine,
+the blade, drift, boost, birds, wind and the crowd bed to silence for the whole
+of `GameState.Intro`, and `NeighbourAmbience` scales the three rival engines by
+the same number (`AudioDirector.WorldAudio`). The gate is a single scalar that
+is re-applied every frame rather than a mute and an unmute, so there is no
+transition anyone can miss that leaves the venue silent afterwards.
 
 ---
 
@@ -383,20 +449,82 @@ goat = 245 Hz buzz with a hard **23 Hz bleat tremolo**; badger = 120 Hz and
 mostly **breath** (noise 0.55-0.62) in several bursts; heron = **88 Hz** with a
 very narrow pulse (width 0.13) and heavy roughness.
 
+### Geese/ - stage two, the Goose Rally. All one-shots, nine sources at once
+
+| clip | purpose | s | ch | loop | trim dB | volume |
+|---|---|---|---|---|---|---|
+| `Geese/goose_hiss.wav` | threat display: shaped air, sibilance rising 780 -> 3 400 Hz, **no pitch** | 0.72 | 1 | no | -15.3 | 0.171 |
+| `Geese/goose_honk_1.wav` | the standard call: 190 Hz, snaps on, holds, sags | 0.44 | 1 | no | -12.0 | 0.250 |
+| `Geese/goose_honk_2.wav` | shorter and higher (232 Hz), cut off - the bird is already moving | 0.30 | 1 | no | -11.4 | 0.269 |
+| `Geese/goose_honk_3.wav` | the low rude one: 158 Hz in two syllables, a grunt then a honk | 0.56 | 1 | no | -11.9 | 0.255 |
+| `Geese/goose_squawk.wav` | hit by the mower: a shriek, a register break, then a fall to 118 Hz | 0.58 | 1 | no | -9.6 | 0.331 |
+| `Geese/goose_wingbeat_1.wav` | one downstroke, mid - the default | 0.14 | 1 | no | -20.6 | 0.093 |
+| `Geese/goose_wingbeat_2.wav` | one downstroke, shorter and higher - a wing at rate | 0.10 | 1 | no | -24.3 | 0.061 |
+| `Geese/goose_wingbeat_3.wav` | one downstroke, heavier - a big stroke on take-off | 0.18 | 1 | no | -23.8 | 0.064 |
+
+Nothing in this folder loops, so the loop-seam gates do not apply to any of it.
+
+The goose is kept off the duck by pitch centre and by nasality, not by the
+vowel: the honks sit at **158 / 190 / 232 Hz** against the duck's 250-480, carry
+three times the breath, and have a **nasal anti-resonance notched out at
+940-1150 Hz** - which is why 73-79 % of a honk's energy lands in 320-640 Hz
+while every quack in `Duck/` puts 60-71 % in 640-1280 Hz. Round-robin the three
+honks and the three wing beats; `RallyFX.Pick` already does.
+
+The wing beats are the constraint the folder is built around - up to ~63 strokes
+a second across nine birds. Each one is a 13 ms air whump under a mid-band
+canvas flap and a 6 ms leather snap, highpassed at 105 Hz so a flock cannot sum
+in the engine's octave. Measured, nine birds at 7 strokes/s come out **+3.8 dB**
+over one stroke, keep a **16.4 dB** crest (i.e. still individual strokes, not a
+wall) and land their energy at a **1 646 Hz** centroid against the engine's
+164 Hz, with 1.9 % of it in the engine's 80-160 Hz band.
+
 ### Music/
 
 | clip | purpose | s | ch | loop | trim dB | volume |
 |---|---|---|---|---|---|---|
 | `Music/fanfare_bad.wav` | verdict, deflating | 3.00 | 2 | no | -10.1 | 0.312 |
 | `Music/fanfare_good.wav` | verdict, good | 3.00 | 2 | no | -10.9 | 0.286 |
+| `Music/music_bloom_loop.wav` | stage three: Bloom Rush at night - same tempo and tonic, D Mixolydian, two chords a bar, glockenspiel | 30.00 | 2 | yes | -16.9 | 0.143 |
+| `Music/music_cutscene_loop.wav` | under the opening story page - **no percussion**, sits below the narration | 36.00 | 2 | yes | -19.4 | 0.107 |
 | `Music/music_judging_bed_loop.wav` | under the judges | 8.00 | 2 | yes | -16.7 | 0.146 |
 | `Music/music_menu_loop.wav` | menu / briefing | 24.00 | 2 | yes | -13.8 | 0.203 |
+| `Music/music_rally_loop.wav` | stage two: the goose rally - same key/tempo as the round, a step up in drive | 30.00 | 2 | yes | -16.5 | 0.150 |
 | `Music/music_reveal.wav` | overhead reveal ta-daa (one-shot) | 6.00 | 2 | no | -10.5 | 0.297 |
 | `Music/music_round_loop.wav` | the 75 s round | 30.00 | 2 | yes | -16.7 | 0.146 |
 | `Music/music_round_urgent_layer.wav` | additive; fade in over the last 15 s | 30.00 | 2 | yes | -17.9 | 0.127 |
 
 `music_reveal` is 6 s and lands its big chord at **2.4 s** - fire it as the camera
 starts rising so the arrival coincides with the picture appearing.
+
+`music_cutscene_loop` is the only cue with a narrator on top of it, which is why it
+is the quietest thing in this folder and why it has no percussion at all. It is
+also the only cue that plays while the rest of the game is muted - see
+`AudioDirector.WorldAudio`.
+
+`music_rally_loop` is the same 16 bars/128 BPM/30 s grid as `music_round_loop`,
+carved the same way for the same reason - the engine is still running under it,
+see GooseDefence/RallyDirector - but with a chord change every bar instead of
+every two, an eighth-note bass and the urgent layer's climbing banjo figure
+worked in as a fill rather than a texture. It is stage two's own tune, not an
+additive layer like `music_round_urgent_layer` - see AudioDirector.musicRally.
+
+`music_bloom_loop` is the same 16 bars/128 BPM/30 s grid again, carved again for
+the same reason - Bloom Rush is four mowers in a walled arena, see Turf/ - and
+it is stage three's own tune, not a layer. Three things separate it from the
+other two, all of them arrangement rather than mix: it is in **D Mixolydian**,
+so the tonic is shared with the round and the rally but there is no leading note
+and the loop turns over on bVII -> I, a push rather than a full stop, which is
+what a stage with no downtime in it needs at its seam; there are **two chords a
+bar**, against the round's one every two bars and the rally's one a bar, so the
+harmony swings as often as possession does; and it is the **only cue with a
+running mower under it that lets the glockenspiel play**, two notes a bar and
+well down in the mix, because it is the only level played after dark and the
+lanterns needed an instrument the band already owned. It also reaches MIDI 88
+where the round tops out at 81 and the rally at 85, gets four boot-stomps a bar
+instead of two, and is played in the longest room any cue with an engine in it
+gets (1.35 s, against 0.9 and 0.80). There is no additive urgent layer for it -
+see AudioDirector.musicBloom.
 
 ---
 
@@ -409,7 +537,9 @@ Master  (+10.5 dB, see §4)
 │   ├── Engine   engine_* (+ RPM→volume curve, §2.5)
 │   ├── Blade    blade_*, debris_ping_*
 │   ├── Mower    bonk_*, horn, drift, boost_*, suspension_*
-│   └── Voice    quack_*, judge_*
+│   ├── Voice    quack_*, judge_*
+│   └── Geese    goose_* (stage two only — its own group so nine birds can be
+│                pulled down by one fader without touching the duck)
 ├── Crowd        crowd_*, applause_*
 ├── Ambience     birds, wind, pond, windmill
 └── UI           countdown_*, klaxon, ui_*, score_tick, card_*, stamp
@@ -422,31 +552,40 @@ Duck under Music by 3–4 dB during Reveal/Judging, and duck Music by ~2 dB whil
 
 ## 6. File size
 
-**63 clips, 27.64 MB uncompressed** at 44.1 kHz / 16-bit:
+**74 clips, 44.04 MB uncompressed** at 44.1 kHz / 16-bit:
 
-| folder | MB |
-|---|---|
-| Music | 17.50 |
-| Ambience | 4.04 |
-| Crowd | 3.48 |
-| Engine | 0.68 |
-| Mower | 0.50 |
-| UI | 0.42 |
-| Blade | 0.41 |
-| Judges | 0.40 |
-| Duck | 0.22 |
+| folder | MB | clips |
+|---|---|---|
+| Music | 33.65 | 10 |
+| Ambience | 4.04 | 4 |
+| Crowd | 3.48 | 7 |
+| Engine | 0.68 | 5 |
+| Mower | 0.50 | 11 |
+| UI | 0.42 | 11 |
+| Blade | 0.41 | 8 |
+| Judges | 0.40 | 6 |
+| Geese | 0.25 | 8 |
+| Duck | 0.22 | 4 |
 
 **This exceeds the 12 MB uncompressed target, and the target is not reachable
 with this clip list.** 12 MB at 44.1 kHz / 16-bit / stereo is 68 seconds of
-stereo audio *in total*; the requested music alone is 104 s of stereo
-(24 + 30 + 30 + 6 + 8 + 3 + 3), before any ambience or crowd. The arithmetic
-does not close, at any level of synthesis skill.
+stereo audio *in total*; the music alone is 170 s of stereo
+(24 + 30 + 30 + 30 + 6 + 8 + 36 + 3 + 3), before any ambience or crowd. The
+arithmetic does not close, at any level of synthesis skill.
+
+The two stage-two additions are on opposite sides of that arithmetic and it is
+worth being clear which is which. `music_rally_loop` is **5.05 MB** of source —
+another 30 s stereo tune, and the single largest thing added to the game's audio
+since the round loop. The whole of `Geese/` is **0.25 MB**: eight mono one-shots
+totalling **3.02 seconds**, about **0.06 MB in the build** at Vorbis q 70 and
+**0.26 MB resident** decompressed. Nine geese cost less than one second of the
+menu tune.
 
 Three ways to deal with it, in the order I would pick them:
 
 1. **Ignore the uncompressed number** — it is a source-asset figure, not a
    shipping one. Unity's WebGL builds encode to Vorbis. At quality 60
-   (≈128 kbps stereo, ≈80 kbps mono) this set is **≈2.6 MB in the build**.
+   (≈128 kbps stereo, ≈80 kbps mono) this set is **≈3.2 MB in the build**.
    Recommended import settings:
 
    | folder | load type | compression | quality |
@@ -455,25 +594,43 @@ Three ways to deal with it, in the order I would pick them:
    | Crowd / Ambience beds | Compressed In Memory | Vorbis | 55 |
    | Engine / Blade loops | Compressed In Memory | Vorbis | 70 |
    | short SFX, UI | Decompress On Load | Vorbis | 70 |
+   | Geese (all of it) | Decompress On Load | Vorbis | 70 |
 
-   Force To Mono on everything in Engine/Blade/Mower/UI/Duck/Judges (they are
-   already mono). Leave Preload Audio Data off for Music.
+   Force To Mono on everything in Engine/Blade/Mower/UI/Duck/Judges/Geese (they
+   are already mono). Leave Preload Audio Data off for Music.
+
+   **Never Streaming, anywhere** — see §8: a WebGL build has no file handles to
+   stream from. The Music row above is the one to watch when a `.meta` is
+   hand-authored.
+
+   `Geese/*.wav.meta` are hand-authored to exactly that row, with two
+   deliberate departures from the other SFX folders:
+
+   * `preloadAudioData: 1`, because the first honk of a rally must not be the
+     one that hitches;
+   * `forceToMono: 1` **with `normalize: 0`**. Unity's `normalize` flag only
+     acts when Force To Mono is on, and it normalises the downmix to full
+     scale — which would throw away the −1.5 dBFS peak every clip in this
+     document is authored to and silently break the §4 mixer plan for this
+     folder alone. The other folders get away with `normalize: 1` only because
+     their `forceToMono` is 0. If you ever turn Force To Mono on elsewhere,
+     turn Normalize off in the same edit.
 
 2. **`python render_all.py --rate=22050`** — re-renders every clip at
-   22.05 kHz for **13.8 MB**. The resampler is FFT-based (circular), so loops
+   22.05 kHz for **16.9 MB**. The resampler is FFT-based (circular), so loops
    stay sample-exact seamless at the lower rate. Measured energy above 11 kHz,
    which is what you would lose:
 
    | folder | worst clip | median |
    |---|---|---|
-   | Music (17.5 MB, the bulk) | 0.035 % (`music_reveal`) | 0.010 % |
+   | Music (23.6 MB, the bulk) | 0.035 % (`music_reveal`) | 0.010 % |
    | Ambience | 0.141 % (`wind_grass_loop`) | 0.043 % |
    | Crowd | 0.764 % (`applause_loop`) | 0.002 % |
    | worst in the whole set | 3.02 % (`blade_cut_grass_loop`) | — |
 
    So the honest version is: **halve the rate on Music, Crowd and Ambience
    only** (`python render_all.py music crowd ambience --rate=22050`, giving
-   **15.1 MB**) and leave the SFX at 44.1 kHz, because the shred layer, the
+   **18.2 MB**) and leave the SFX at 44.1 kHz, because the shred layer, the
    stone pings and the wastegate genuinely use the top octave. Halving
    everything to reach 13.8 MB costs `blade_cut_grass_loop` 3 % of its energy —
    audible as a slightly duller shred, which is a real cost on the one clip
@@ -489,7 +646,7 @@ Three ways to deal with it, in the order I would pick them:
 ## 7. Verification
 
 Every clip is measured; `python analyze.py` prints the table and runs hard
-gates. Current state: **all 63 clips pass**.
+gates. Current state: **all 74 clips pass**.
 
 Gates:
 
@@ -499,6 +656,11 @@ Gates:
 * for loops: a 1024-sample window straddling the wrap must sit between the 2nd
   and 98th percentile of interior window levels (this is what catches the
   fade-both-ends dip).
+
+The 18 loops registered in `analyze.LOOPS` are the only clips the last two gates
+run on. The other 56 clips are one-shots and are gated on peak alone — including
+the whole of `Geese/`, which contains no loop. That is a gate that **does not
+apply**, not a gate that passed.
 
 ### Loop seams — measured
 
@@ -523,7 +685,17 @@ versus the median interior window, and its percentile.
 | music_menu_loop | −49.6 | 3 | −0.41 dB | 42 |
 | music_round_loop | −36.7 | 28 | +0.34 dB | 58 |
 | music_round_urgent_layer | −37.3 | 30 | +0.30 dB | 56 |
+| music_rally_loop | −34.6 | 39 | −0.09 dB | 48 |
+| music_bloom_loop | −43.7 | 7 | −1.56 dB | 16 |
 | music_judging_bed_loop | −43.3 | 40 | +3.10 dB | 76 |
+| music_cutscene_loop | −40.6 | 39 | +5.90 dB | 91 |
+
+`music_cutscene_loop`'s +5.90 dB seam is the other end of the same story: its
+loop point is a bar-1 downbeat carrying the full pad, the bass and a two-beat
+glockenspiel note, so the window straddling the wrap is louder than the median
+window by design — the cue has no percussion, so its median window is quiet.
+Its sample step is −40.6 dBFS at the 39th percentile, i.e. mathematically
+continuous.
 
 `birds_loop`'s −10.2 dB seam level is not a defect: the loop point deliberately
 falls in a gap between bird calls (there is still a quiet air bed there, not
@@ -547,7 +719,15 @@ mathematically continuous.
 | judge_goat_low | 229.7 Hz | 248 falling to 182 | 0.31 | 778 Hz | 13.0 dB |
 | judge_heron_low | 84.3 Hz | 88 | 0.35 | 826 Hz | 18.0 dB |
 | judge_heron_high | 101.8 Hz | 92 rising to 112 | 0.31 | 1 003 Hz | 16.1 dB |
+| goose_honk_1 | 188.5 Hz | 205 falling to 160 | 0.78 | 835 Hz | 12.9 dB |
+| goose_honk_2 | 229.7 Hz | 248 falling to 206 | 0.26 | 898 Hz | 13.5 dB |
+| goose_honk_3 | 165.2 Hz | 176 falling to 128 | 0.70 | 694 Hz | 13.1 dB |
+| goose_hiss | — | **none, by design** | 0.01 | 3 514 Hz | 13.6 dB |
+| goose_wingbeat_1 | — | **none, by design** | 0.27 | 2 248 Hz | 20.3 dB |
+| goose_squawk | 469.1 Hz | 405 breaking, then falling to 118 | 0.14 | 985 Hz | 13.4 dB |
 | music_round_loop | — | D major, 128 BPM | — | 1 237 Hz | 14.3 dB |
+| music_rally_loop | — | D major, 128 BPM | — | 1 269 Hz | 13.5 dB |
+| music_bloom_loop | — | D Mixolydian, 128 BPM | — | 1 346 Hz | 12.6 dB |
 
 The engine layers' octave-band energy opens up exactly as intended — the
 progression from idle to high is the point:
@@ -561,7 +741,51 @@ progression from idle to high is the point:
 Every clip has a real attack transient rather than a noise wall: crest factors
 run 7.9 dB (klaxon, dense by design) to 23.2 dB (applause), and no clip in the
 set is a plain filtered-noise bed — the "shhh" failure mode is checked by the
-crest and centroid columns in `analyze.py`.
+crest and centroid columns in `analyze.py`. `goose_hiss` is the clip closest to
+that failure mode by construction, so it is the one to watch: it carries a
+harmonicity of **0.01** (there is genuinely no pitch in it, which is the brief)
+but a **13.6 dB** crest and a **5.8 ms** attack, because the first 45 ms is a
+burst of escaping air rather than the start of a band-passed bed.
+
+**Two measurement caveats on the goose clips**, both real and both worth knowing
+before anyone re-tunes them from the table above:
+
+* `analyze.py` windows each clip with a Hann window **over its own length**.
+  On a 0.10–0.18 s wing beat that window is at its own rising edge exactly where
+  the air whump lives, so the per-clip octave split *under-reads* the low end:
+  it reports 4 % of `goose_wingbeat_1` in 160–320 Hz, while the same file
+  measured centred in a 2 s window reports **12 %**. Neither number is wrong;
+  the short-clip one is just measured through a taper. Use it for comparison
+  between clips, not as an absolute.
+* `est_f0` is an autocorrelation estimate and takes the octave above on the
+  clips whose fundamental is weaker than their F1 — `goose_honk_2` read 459 Hz
+  (its own second harmonic) in an earlier revision and 229.7 Hz now, on a change
+  that moved its formants, not its pitch. `goose_squawk`'s
+  469 Hz is the shriek at the top, not the 118 Hz it ends on; the fall is
+  visible instead in the eight-frame contour: **401 → 350 → 271 → 208 → 167 →
+  138 Hz**.
+
+### The flock — the wing beats measured nine deep
+
+The wing beats are the only clips in the game authored against a *density*
+rather than against a moment, so they are verified against one. Nine birds at
+6–8 strokes/s with independent phase, random variant and random per-bird
+distance gain, over 2 s:
+
+| | RMS | crest | centroid | 80–160 Hz |
+|---|---|---|---|---|
+| one wing beat | −21.8 dBFS | 20.3 dB | 2 248 Hz | 0.6 % |
+| the flock, wings only | −18.1 dBFS | 16.4 dB | 1 646 Hz | 1.9 % |
+| the flock + 3 honks | −15.3 dBFS | 15.4 dB | 1 049 Hz | 1.5 % |
+| `engine_idle_loop`, for reference | −12.4 dBFS | 10.9 dB | 164 Hz | 23.6 % |
+
+Three things to read off that. The pile-up is **+3.8 dB** over a single stroke,
+not the +9.5 dB of nine coherent copies, because the strokes do not overlap.
+The flock keeps a **16.4 dB** crest, i.e. it is still a set of countable events
+and not a wall — 34 % of frames sit within 6 dB of the peak and the median frame
+is 7.5 dB below it. And the flock's energy sits an octave and a half above the
+engine's, with under 2 % of it in the 80–160 Hz band the engine owns, which is
+what stops nine flying geese from turning the mower into mud.
 
 ### Engine crossfade continuity — measured
 
@@ -613,7 +837,7 @@ Duck/3 · Rebuild opening cutscene (open scene)   # re-times the page around the
 
 The knobs are consts at the top of `Assets/Editor/DuckNarrationBaker.cs`:
 `VoiceId`, `Model` (`ssfm-v30`), `Tempo` (0.94), `TargetLufs` (−16). Note that
-`TargetLufs` is *not* the −1.5 dBFS peak normalisation the other 63 clips use —
+`TargetLufs` is *not* the −1.5 dBFS peak normalisation the other 72 clips use —
 speech wants a loudness target, not a peak target, and 13 separate API calls
 would otherwise land at 13 slightly different levels. The one runtime knob is
 `ComicSequence.narrationVolume` (0.85), which moves all 13 together.
@@ -645,7 +869,7 @@ behaves exactly as it did before there was a voice.
 | streaming | **never** | WebGL has no file handles to stream from |
 
 Roughly **3.5 MB** of source WAV, **≈0.4 MB** in the build, **≈0.4 MB** resident.
-Against the 27.6 MB / ≈2.6 MB the other 63 clips already cost, this is noise.
+Against the 44.0 MB / ≈3.8 MB the other 73 clips already cost, this is noise.
 
 ### Licensing — read before shipping
 

@@ -88,13 +88,40 @@ namespace DuckMow
 
             _cb = new CommandBuffer { name = "CutMask.Stamp" };
 
-            // Tell every lawn shader which way up this platform stores render textures.
+            Publish();
+            ClearAll();
+        }
+
+        void OnEnable() { if (_rt != null) Publish(); }
+
+        /// <summary>
+        /// Claim the lawn shaders' globals for THIS mask.
+        ///
+        /// There can be two of these alive at once: the rally loads additively over the round, and
+        /// the round's systems deliberately stay awake underneath it. The globals are a single set,
+        /// so somebody has to own them, and the rule is simply "the one that most recently woke up".
+        /// That is right in both directions — the arena claims them as it loads, and the round
+        /// reclaims them as the arena is unloaded, via <see cref="Reclaim"/>. Without the second
+        /// half the round's lawn would come back pointing at a render texture that no longer exists.
+        /// </summary>
+        public void Publish()
+        {
+            Instance = this;
             Shader.SetGlobalFloat(IdCutMaskFlipV, SystemInfo.graphicsUVStartsAtTop ? 1f : 0f);
             Shader.SetGlobalFloat(Field.IdFieldSize, Field.Size);
             Shader.SetGlobalFloat(Field.IdFieldHalf, Field.Half);
             Shader.SetGlobalTexture(Field.IdCutMask, _rt);
+        }
 
-            ClearAll();
+        /// <summary>Hand the globals to whichever other mask is still alive. Safe with none.</summary>
+        public static void Reclaim(CutMask leaving)
+        {
+            foreach (var m in FindObjectsByType<CutMask>(FindObjectsSortMode.None))
+            {
+                if (m == leaving || m == null || !m.isActiveAndEnabled) continue;
+                m.Publish();
+                return;
+            }
         }
 
         void OnDestroy()
@@ -104,6 +131,7 @@ namespace DuckMow
             if (_mesh != null) Destroy(_mesh);
             if (_stampMat != null) Destroy(_stampMat);
             _cb?.Release();
+            Reclaim(this);
         }
 
         /// <summary>Wipe the lawn back to fully uncut. Used by the instant retry path.</summary>

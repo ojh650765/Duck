@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b437a24add09ead45be01ca34c3098d7, type: 3}
+  m_Name: CurtainAudio
+  m_EditorClassIdentifier: Assembly-CSharp::DuckMow.CurtainAudioSet
+  leafSweep: {fileID: 8300000, guid: 5740f837a0337c64ebd8ca6a5bec6b97, type: 3}
+  bannerWhoosh: {fileID: 8300000, guid: 06abb8f12ea0d4843b4e9ad7469ee7c0, type: 3}
+  riser: {fileID: 8300000, guid: f43376beccb6ec04e9220fcf86a0a507, type: 3}
+  impact: {fileID: 8300000, guid: 9922dce5368c82a47b618f50ad5e3d10, type: 3}
+  stampSmall: {fileID: 8300000, guid: 2a90b485d533d784db0819fb790b0b1f, type: 3}
+  fanfareBig: {fileID: 8300000, guid: 8362878811c72d044811aa5fc6e2cc07, type: 3}
+  crowdSwell: {fileID: 8300000, guid: 314b6336c7b08a84d9891e8935b7940a, type: 3}
+  gateCreak: {fileID: 8300000, guid: 28cd28e72092a1b4fbd8ea69e3d84ac7, type: 3}

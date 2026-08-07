@@ -17,6 +17,34 @@ namespace DuckMow
         public Material groundMaterial;
         public Material bladeMaterial;
 
+        [Tooltip("Build the flat ground plane and its collider along with the blades.\n\n" +
+                 "True everywhere in the mowing round, where this IS the lawn. False for a scene " +
+                 "that already owns its own floor — Bloom Rush has a radial mesh with ramps in it " +
+                 "and a mesh collider to match, and a flat box laid over the top would be the " +
+                 "surface the mower's suspension actually found, flattening every climb in the " +
+                 "arena. The blade layer is the part that is worth reusing; the ground is not.")]
+        public bool buildGround = true;
+
+        [Header("Extent")]
+        [Tooltip("Side length of the field in metres. Zero means the venue's own Field.Size, which " +
+                 "is what every lawn in the mowing round wants. " +
+                 "Exists because the goose arena is ninety metres across and the mowing field is " +
+                 "sixty-four. The blade layer is the right way to draw a lot of grass — it bakes " +
+                 "chunked meshes with real LOD instead of one GameObject per plant — but it was " +
+                 "welded to a constant, so anything that is not a competition lawn could not use it " +
+                 "and had to scatter objects by hand instead. One field, two sizes.")]
+        public float fieldSize;
+
+        [Tooltip("Anything implementing IBareGround here has blades kept off it — the goose arena's " +
+                 "dirt strips and gardens. Left empty, the whole field is grassed, which is what " +
+                 "every lawn in the mowing round wants.")]
+        public MonoBehaviour bareGround;
+
+        /// <summary>The side this field actually covers.</summary>
+        public float Size => fieldSize > 0f ? fieldSize : Field.Size;
+        /// <summary>Half of it. Roots are laid out in [-Half, +Half].</summary>
+        public float HalfSize => Size * 0.5f;
+
         [Header("Chunking")]
         public int chunksPerSide = 8;
         [Tooltip("Blades per square metre at full detail.")]
@@ -62,7 +90,7 @@ namespace DuckMow
 
         void Awake()
         {
-            BuildGround();
+            if (buildGround) BuildGround();
             BuildBladeMeshes();
             BuildChunks();
             ApplyWind();
@@ -96,8 +124,8 @@ namespace DuckMow
                 for (int x = 0; x <= n; x++)
                 {
                     int i = z * (n + 1) + x;
-                    verts[i] = new Vector3(x / (float)n * Field.Size - Field.Half, 0f,
-                                           z / (float)n * Field.Size - Field.Half);
+                    verts[i] = new Vector3(x / (float)n * Size - HalfSize, 0f,
+                                           z / (float)n * Size - HalfSize);
                     norms[i] = Vector3.up;
                 }
             }
@@ -130,7 +158,7 @@ namespace DuckMow
             // A single flat collider for the whole lawn — the mower's suspension rays hit this.
             var box = go.AddComponent<BoxCollider>();
             box.center = new Vector3(0f, -0.5f, 0f);
-            box.size = new Vector3(Field.Size, 1f, Field.Size);
+            box.size = new Vector3(Size, 1f, Size);
         }
 
         // ------------------------------------------------------------------ blades
@@ -145,11 +173,12 @@ namespace DuckMow
             //
             // A strict subset means the swap only removes blades, and the shader has already faded
             // exactly those blades to nothing by the time it happens, so there is nothing to see.
-            float chunkSize = Field.Size / chunksPerSide;
+            float chunkSize = Size / chunksPerSide;
             _bladeMeshL0 = BakeBladeMesh("GrassBladesL0", chunkSize, density0, BladeSeed, 1f,
                                          bladeHeight, bladeWidth, bladeCurve);
             _bladeMeshL1 = BakeBladeMesh("GrassBladesL1", chunkSize, density0, BladeSeed, BladeIdCutoff,
                                          bladeHeight, bladeWidth, bladeCurve);
+            _bare = bareGround as IBareGround;
         }
 
         /// <summary>Blades with an id at or above this are dropped from the far LOD.</summary>
@@ -170,9 +199,16 @@ namespace DuckMow
         /// venue tour cuts straight from the player's lawn to a rival's, and any drift in height,
         /// width, curve or vertex layout between the two shows up as a different species of grass.
         /// </summary>
+        /// <param name="keepAt">
+        /// Optional test, in CHUNK-LOCAL space, for whether a blade may root at a point. Used to cut
+        /// the goose arena's dirt strips and gardens out of the lawn — grass growing through a bed
+        /// of soil is the sort of thing that reads as the level being unfinished. Null keeps
+        /// everything, which is every lawn in the mowing round.
+        /// </param>
         public static Mesh BakeBladeMesh(string name, float chunkSize, float density, int seed,
                                          float idCutoff, float bladeHeight, float bladeWidth,
-                                         float bladeCurve)
+                                         float bladeCurve,
+                                         System.Func<Vector3, bool> keepAt = null)
         {
             int perSide = Mathf.Max(1, Mathf.RoundToInt(Mathf.Sqrt(density * chunkSize * chunkSize)));
             int gridCount = perSide * perSide;
@@ -218,6 +254,10 @@ namespace DuckMow
                     float rx = -half + (gx + 0.5f + jx * 0.9f) * cell;
                     float rz = -half + (gz + 0.5f + jz * 0.9f) * cell;
 
+                    // Tested at the JITTERED root, not at the grid cell, so the edge of a dirt strip
+                    // is a ragged line of grass rather than a staircase.
+                    if (keepAt != null && !keepAt(new Vector3(rx, 0f, rz))) continue;
+
                     float bladeId = ids[cellIndex];
                     blade++;
                     float h = bladeHeight;
@@ -255,6 +295,21 @@ namespace DuckMow
                 }
             }
 
+            // Trimmed to what was actually emitted.
+            //
+            // The arrays are sized from the pre-count, and a keep test culls blades AFTER that — so a
+            // chunk with a dirt strip through it would otherwise upload a few thousand degenerate
+            // blades collapsed at the origin, and a fan of degenerate triangles with it. Invisible,
+            // but paid for on every draw.
+            if (blade < bladeCount)
+            {
+                System.Array.Resize(ref verts, blade * vertsPerBlade);
+                System.Array.Resize(ref norms, blade * vertsPerBlade);
+                System.Array.Resize(ref uvs, blade * vertsPerBlade);
+                System.Array.Resize(ref data, blade * vertsPerBlade);
+                System.Array.Resize(ref tris, blade * trisPerBlade * 3);
+            }
+
             var mesh = new Mesh { name = name };
             mesh.indexFormat = verts.Length > 65000
                 ? UnityEngine.Rendering.IndexFormat.UInt32
@@ -278,8 +333,9 @@ namespace DuckMow
             _chunkFilters = new MeshFilter[count];
             _chunkRenderers = new MeshRenderer[count];
             _chunkLod = new int[count];
+            _chunkOverride = new Mesh[count];
 
-            float chunkSize = Field.Size / chunksPerSide;
+            float chunkSize = Size / chunksPerSide;
             var root = new GameObject("BladeChunks").transform;
             root.SetParent(transform, false);
 
@@ -291,11 +347,19 @@ namespace DuckMow
                     var go = new GameObject($"Chunk_{x}_{z}");
                     go.transform.SetParent(root, false);
                     go.transform.position = new Vector3(
-                        -Field.Half + (x + 0.5f) * chunkSize, 0f,
-                        -Field.Half + (z + 0.5f) * chunkSize);
+                        -HalfSize + (x + 0.5f) * chunkSize, 0f,
+                        -HalfSize + (z + 0.5f) * chunkSize);
+
+                    // A chunk that lands on bare ground gets its OWN mesh with those blades removed.
+                    //
+                    // Only the chunks that actually straddle a dirt strip or a garden pay for this;
+                    // everything else keeps sharing the two common meshes, which is the whole reason
+                    // the blade layer is affordable. In the arena that is about a third of them.
+                    if (_bare != null)
+                        _chunkOverride[i] = BakeChunkOverride(chunkSize, go.transform.position);
 
                     var mf = go.AddComponent<MeshFilter>();
-                    mf.sharedMesh = _bladeMeshL0;
+                    mf.sharedMesh = _chunkOverride[i] != null ? _chunkOverride[i] : _bladeMeshL0;
                     var mr = go.AddComponent<MeshRenderer>();
                     mr.sharedMaterial = bladeMaterial;
                     mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -309,6 +373,57 @@ namespace DuckMow
                     _chunkLod[i] = -1;
                 }
             }
+        }
+
+        IBareGround _bare;
+        Mesh[] _chunkOverride;
+
+        /// <summary>
+        /// The stand-in for "this chunk has no grass on it". Shared, empty, never uploaded with
+        /// vertices — a sentinel rather than geometry, so a fully bare chunk costs one reference.
+        /// </summary>
+        static Mesh _empty;
+        static Mesh EmptyMesh => _empty != null ? _empty
+            : (_empty = new Mesh { name = "GrassBladesNone", hideFlags = HideFlags.DontSave });
+
+        /// <summary>
+        /// Bake a chunk-specific blade mesh with the bare ground cut out of it, or null if this
+        /// chunk is entirely grass.
+        ///
+        /// Returning null for the common case is the whole design. Baking every chunk its own mesh
+        /// would multiply the blade layer's memory by the chunk count for no benefit — the arena is
+        /// mostly lawn, and only the handful of chunks that overlap a defending strip or a garden
+        /// need to differ from the shared one.
+        /// </summary>
+        Mesh BakeChunkOverride(float chunkSize, Vector3 chunkWorld)
+        {
+            if (_bare == null) return null;
+
+            // Classify the chunk first: all grass, all bare, or mixed.
+            //
+            // The three cases have wildly different costs and the middle one is the important one.
+            // A chunk lying ENTIRELY on a dirt strip needs no mesh at all — the first version baked
+            // it a full unique blade mesh and then culled every blade out of it, which is thousands
+            // of vertices of empty geometry per chunk, uploaded and paid for. Across an arena with
+            // four strips and four gardens that was most of the memory and most of the build hitch
+            // that showed up as lag in the browser.
+            int bare = 0, total = 0;
+            const int probe = 5;
+            for (int pz = 0; pz <= probe; pz++)
+                for (int px = 0; px <= probe; px++)
+                {
+                    var p = chunkWorld + new Vector3((px / (float)probe - 0.5f) * chunkSize, 0f,
+                                                     (pz / (float)probe - 0.5f) * chunkSize);
+                    total++;
+                    if (_bare.IsBare(p)) bare++;
+                }
+
+            if (bare == 0) return null;              // all grass: share the common mesh
+            if (bare == total) return EmptyMesh;     // all bare: draw nothing at all
+
+            return BakeBladeMesh("GrassBladesCut", chunkSize, density0, BladeSeed, 1f,
+                                 bladeHeight, bladeWidth, bladeCurve,
+                                 root => !_bare.IsBare(chunkWorld + root));
         }
 
         void LateUpdate()
@@ -344,7 +459,22 @@ namespace DuckMow
                 else
                 {
                     _chunkRenderers[i].enabled = true;
-                    _chunkFilters[i].sharedMesh = lod == 0 ? _bladeMeshL0 : _bladeMeshL1;
+                    // A chunk with its own cut mesh keeps it at BOTH detail levels.
+                    //
+                    // This is what defeated the first attempt at keeping grass off the arena's dirt:
+                    // the override was assigned once at build and then overwritten by the very next
+                    // LOD tick, which swapped in the shared mesh and put every culled blade back.
+                    // The bare ground has to survive a distance change, so the swap has to know
+                    // about it.
+                    var cut = _chunkOverride != null ? _chunkOverride[i] : null;
+                    if (cut == EmptyMesh)
+                    {
+                        // Entirely bare ground. Nothing to draw, so do not draw anything.
+                        _chunkRenderers[i].enabled = false;
+                        continue;
+                    }
+                    _chunkFilters[i].sharedMesh = cut != null ? cut
+                                                : (lod == 0 ? _bladeMeshL0 : _bladeMeshL1);
                 }
             }
         }

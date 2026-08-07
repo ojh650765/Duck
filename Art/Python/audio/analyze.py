@@ -30,7 +30,9 @@ from dsp import SR, lin2db
 
 AUDIO_ROOT = dsp.AUDIO_ROOT
 
-# clips that must loop seamlessly
+# Clips that must loop seamlessly.  Anything not listed here is a one-shot and
+# the seam gates in check() are skipped for it - the whole of Geese/ is
+# one-shots (honks, wing beats, hiss, squawk), so none of it appears below.
 LOOPS = {
     "engine_idle_loop", "engine_mid_loop", "engine_high_loop",
     "blade_loop", "blade_cut_grass_loop",
@@ -38,7 +40,8 @@ LOOPS = {
     "crowd_ambient_loop", "applause_loop",
     "birds_loop", "wind_grass_loop", "pond_loop",
     "music_menu_loop", "music_round_loop", "music_round_urgent_layer",
-    "music_judging_bed_loop",
+    "music_judging_bed_loop", "music_cutscene_loop", "music_rally_loop",
+    "music_bloom_loop",
 }
 
 

@@ -128,11 +128,16 @@ namespace DuckMow.EditorTools
                 verts.Add(dir * innerRadius); norms.Add(Vector3.up); uvs.Add(new Vector2(i / (float)segments, 0f));
                 verts.Add(dir * outerRadius); norms.Add(Vector3.up); uvs.Add(new Vector2(i / (float)segments, 1f));
             }
+            // Wound to face UP, which is the only direction a ring lying on the ground is ever seen
+            // from. It was wound the other way and every ring built with it was invisible: the
+            // vertices ran anticlockwise as seen from above, so the whole annulus was back-facing and
+            // silently culled while the hierarchy showed a renderer with a perfectly good mesh on it.
+            // Nothing else in the project had ever called this, so the fault had never had to show.
             for (int i = 0; i < segments; i++)
             {
                 int a = i * 2;
-                tris.Add(a); tris.Add(a + 1); tris.Add(a + 3);
-                tris.Add(a); tris.Add(a + 3); tris.Add(a + 2);
+                tris.Add(a); tris.Add(a + 3); tris.Add(a + 1);
+                tris.Add(a); tris.Add(a + 2); tris.Add(a + 3);
             }
 
             var mesh = new Mesh();

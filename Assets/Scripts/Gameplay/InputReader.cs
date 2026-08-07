@@ -32,6 +32,8 @@ namespace DuckMow
         public bool Boost { get; private set; }
         public bool BoostPressed { get; private set; }
         public bool HornPressed { get; private set; }
+        /// <summary>Held to look over the machine's shoulder. C on the keyboard, right stick click.</summary>
+        public bool LookBack { get; private set; }
         public bool RetryPressed { get; private set; }
         public bool NextPressed { get; private set; }
         /// <summary>Escape. The way back to the front page — see GameDirector.BackToMenu.</summary>
@@ -42,6 +44,21 @@ namespace DuckMow
 
         /// <summary>Set false during countdown, klaxon and results so the mower ignores input.</summary>
         public bool DrivingEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Whether the ROUND's own verbs are live: the horn on E, the overhead check on F, and skip
+        /// on N. True everywhere by default, so nothing about the mowing round changes.
+        ///
+        /// It exists because a stage played in its own scene keeps the player's real input pipeline
+        /// — that is the point of it, so the machine handles identically wherever they are driving —
+        /// and inherits every key bound to the round along with it. Bloom Rush has no horn to sound
+        /// and no picture to check from the air, and a key that silently does something in one stage
+        /// and nothing in the next is worse than a key that does nothing in both.
+        ///
+        /// Driving is deliberately NOT in here. Steering, throttle, handbrake and boost are the
+        /// machine, and the machine is the same machine everywhere.
+        /// </summary>
+        public bool RoundActionsEnabled { get; set; } = true;
 
         /// <summary>When set, the autopilot supplies the driving inputs instead of the player.</summary>
         public bool OverrideActive { get; set; }
@@ -75,6 +92,7 @@ namespace DuckMow
             bool handbrake = false, boost = false, boostDown = false;
             bool horn = false, retry = false, next = false, confirm = false, aerial = false;
             bool menu = false;
+            bool lookBack = false;
 
             if (kb != null)
             {
@@ -92,6 +110,7 @@ namespace DuckMow
                 menu = kb.escapeKey.wasPressedThisFrame;
                 confirm = kb.enterKey.wasPressedThisFrame || kb.spaceKey.wasPressedThisFrame;
                 aerial = kb.fKey.wasPressedThisFrame;
+                lookBack = kb.cKey.isPressed;
             }
 
             if (pad != null)
@@ -109,6 +128,7 @@ namespace DuckMow
                 retry |= pad.buttonNorth.wasPressedThisFrame;
                 confirm |= pad.buttonSouth.wasPressedThisFrame || pad.startButton.wasPressedThisFrame;
                 aerial |= pad.leftShoulder.wasPressedThisFrame;
+                lookBack |= pad.rightStickButton.isPressed;
             }
 
             // Button edges pushed in from the on-screen controls, folded in alongside the devices.
@@ -142,14 +162,22 @@ namespace DuckMow
             Handbrake = handbrake;
             Boost = boost;
             BoostPressed = boostDown;
-            HornPressed = horn;
             RetryPressed = retry;
-            NextPressed = next;
             MenuPressed = menu;
             AnyConfirmPressed = confirm;
+
+            // The round's own verbs, gated together. Escape and retry stay live whatever stage is
+            // running — a player must always be able to get out — and driving is untouched.
+            HornPressed = horn && RoundActionsEnabled;
+            NextPressed = next && RoundActionsEnabled;
             // Read before the DrivingEnabled gate above would matter — the lift is not a driving
             // input, and it is deliberately still available in the moment the guide dissolves.
-            AerialPressed = aerial;
+            AerialPressed = aerial && RoundActionsEnabled;
+            // HELD, not an edge, and not gated with the round's verbs. Looking over your shoulder
+            // is a camera control, not a game action — it has to work while a menu is up, while the
+            // klaxon is sounding, and in every stage — and a glance that ends the moment you let go
+            // is the only version that never leaves the player facing the wrong way.
+            LookBack = lookBack;
         }
 
         /// <summary>

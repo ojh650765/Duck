@@ -31,7 +31,7 @@ namespace DuckMow
     /// </summary>
     public class DefenceImpactFX : MonoBehaviour
     {
-        const int FeatherCount = 20;
+        const int FeatherCount = 30;
         const int GritCount    = 14;
         const int SkidCount    = 16;
         const int RingCount    = 3;
@@ -153,7 +153,7 @@ namespace DuckMow
             if (dir.sqrMagnitude < 1e-4f) dir = Vector3.forward;
             dir.Normalize();
 
-            int feathers = Mathf.RoundToInt(6f + 10f * strength);
+            int feathers = Mathf.RoundToInt(9f + 14f * strength);
             for (int i = 0; i < feathers; i++)
             {
                 // Biased along the launch heading and upward, with enough spread that the frozen frame
@@ -344,7 +344,17 @@ namespace DuckMow
             b.t.rotation = Random.rotationUniform;
             // A feather is a flattened, elongated box; grit is chunky. Same mesh, different scale — the
             // silhouette difference is what separates plumage from soil at a glance.
-            b.t.localScale = flat ? new Vector3(size * 1.7f, size * 0.35f, size)
+            // A FEATHER SHAPE, not a card.
+            //
+            // This was 1.7 : 0.35 : 1.0 — twenty centimetres long, ten wide and four thick — which at
+            // the distance a parry is actually watched from is a slab of polystyrene. A feather is
+            // defined by being far longer than it is wide and far wider than it is thick; get that
+            // ratio wrong and no amount of colour or count rescues it.
+            //
+            // Not thinner than 0.16 of the size, though. These are boxes precisely so they stay
+            // visible while tumbling, and a genuinely feather-thin box goes to a hairline edge-on —
+            // which puts back the random blinking the box shape was chosen to avoid.
+            b.t.localScale = flat ? new Vector3(size * 2.8f, size * 0.16f, size * 0.6f)
                                   : new Vector3(size, size * 0.8f, size * 0.9f);
             b.vel = vel;
             b.life = b.maxLife = life;

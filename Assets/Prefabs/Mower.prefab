@@ -650,6 +650,8 @@ MonoBehaviour:
   suspensionTravel: 0.16
   suspensionStiffness: 24000
   suspensionDamping: 2400
+  bonkPitchKick: 2.6
+  bonkRollKick: 1.9
   wheelbase: {x: 0.4, y: 0, z: 0.52}
   groundMask:
     serializedVersion: 2

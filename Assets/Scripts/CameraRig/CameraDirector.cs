@@ -45,6 +45,15 @@ namespace DuckMow
         [Tooltip("How far ahead of the mower the camera looks, in seconds of travel.")]
         public float lookAhead = 0.42f;
         public float lookHeight = 0.75f;
+        [Tooltip("Metres the aim point is pushed down the machine's heading, REGARDLESS of speed.\n\n" +
+                 "Zero on the lawn, where the subject is the mower and the picture under it. The rally " +
+                 "needs it: aiming at a stationary mower puts the mower in the middle of frame and " +
+                 "fills the bottom half with the dirt between the lens and it, while the entire match " +
+                 "happens in the top half. Leading the aim drops the machine onto the lower third and " +
+                 "hands the rest of the screen to the pitch. Distinct from lookAhead, which is " +
+                 "velocity-scaled and therefore does nothing at the exact moment a defender is sat " +
+                 "still waiting for a bird.")]
+        public float lookForward = 0f;
 
         [Header("Lens")]
         public float fovBase = 46f;
@@ -210,6 +219,8 @@ namespace DuckMow
 
         float _modeEnteredAt;
 
+        float _lookBack;
+
         public void AddShake(float amount) => _shake = Mathf.Min(1.6f, _shake + amount);
 
         /// <summary>
@@ -340,17 +351,37 @@ namespace DuckMow
             if (heading.sqrMagnitude < 1e-4f) heading = Vector3.forward;
             heading.Normalize();
 
+            // Look over the shoulder, while held.
+            //
+            // Swung rather than snapped, and swung through the SIDE: at half travel the shot is
+            // side-on to the machine, which is a camera move a viewer can follow. A hard cut to the
+            // reverse angle on the frame the key goes down is indistinguishable from a bug, and in a
+            // mode where things are thrown at you from behind, losing your bearings for a beat is
+            // worse than not having the button.
+            //
+            // Held rather than toggled: a glance that ends when you let go can never leave the
+            // player driving forwards while facing backwards.
+            bool wantBack = InputReader.Instance != null && InputReader.Instance.LookBack;
+            _lookBack = Mathf.MoveTowards(_lookBack, wantBack ? 1f : 0f, dt * 4.5f);
+            if (_lookBack > 0.001f)
+                heading = Quaternion.AngleAxis(180f * _lookBack, Vector3.up) * heading;
+
             float dist = Mathf.Lerp(chaseDistance, chaseDistanceAtSpeed, speedFrac);
             float height = Mathf.Lerp(chaseHeight, chaseHeightAtSpeed, speedFrac);
 
             // A rally winds the shot up: further back, a little higher, a little wider. All three
             // ride the same energy value so the escalation reads as one gesture rather than as three
             // settings drifting apart.
-            if (_defenceSubject != null)
-            {
-                dist += defencePullBack * _defenceEnergy;
-                height += defenceLift * _defenceEnergy;
-            }
+            //
+            // Energy is NOT gated on there being a subject. It was, and that is wrong for a four-way:
+            // the board being busy is exactly when the shot needs to open up, and the frames where
+            // nothing is inbound at the player are the frames three geese are loose somewhere else.
+            // Tying the pull-back to the bias meant the camera tightened up the moment the player was
+            // no longer the target, which is the opposite of what a wide free-for-all needs.
+            _energySmoothed = Mathf.Lerp(_energySmoothed, _rallyEnergy,
+                                         1f - Mathf.Exp(-2.2f * dt));
+            dist += defencePullBack * _energySmoothed;
+            height += defenceLift * _energySmoothed;
 
             Vector3 pivot = target.position;
             Vector3 desired = pivot - heading * dist + Vector3.up * height;
@@ -360,7 +391,8 @@ namespace DuckMow
 
             _smoothPos = Vector3.Lerp(_smoothPos, desired, 1f - Mathf.Exp(-dt / Mathf.Max(positionLag, 1e-3f)));
 
-            Vector3 lookTarget = pivot + Vector3.up * lookHeight + flatVel * lookAhead;
+            Vector3 lookTarget = pivot + Vector3.up * lookHeight + flatVel * lookAhead
+                               + heading * lookForward;
 
             // Bias the aim toward the goose, and only toward it. The mower stays the subject of the
             // shot — this slides the aim point a bounded fraction of the way, weighted up while the
@@ -392,7 +424,7 @@ namespace DuckMow
 
             float wantFov = Mathf.Lerp(fovBase, fovAtSpeed, speedFrac);
             if (mower != null && mower.IsBoosting) wantFov += fovBoostKick;
-            if (_defenceSubject != null) wantFov += defenceFovWiden * _defenceEnergy;
+            wantFov += defenceFovWiden * _energySmoothed;
             _smoothFov = Mathf.Lerp(_smoothFov, wantFov, 1f - Mathf.Exp(-fovLag * dt));
 
             pos = _smoothPos; rot = _smoothRot; fov = _smoothFov;
@@ -465,13 +497,26 @@ namespace DuckMow
         {
             _defenceSubject = subject;
             _defenceEnergy = Mathf.Clamp01(energy01);
+            _rallyEnergy = _defenceEnergy;
             _defenceBiasScale = Mathf.Clamp(biasScale, 0f, 2f);
         }
+
+        /// <summary>
+        /// How busy the board is, 0..1, independent of whether anything is aimed at the player.
+        ///
+        /// The only thing the rally is allowed to say about framing besides offering a bias subject.
+        /// It opens the shot — boom, height, lens — and cannot rotate the camera, cannot pick a
+        /// target and cannot reach the pose. That asymmetry is the whole camera contract: the rig
+        /// owns where the lens is and what it is pointed at, and the mode owns nothing but how much
+        /// room to leave.
+        /// </summary>
+        public void SetRallyEnergy(float energy01) => _rallyEnergy = Mathf.Clamp01(energy01);
 
         public void ClearDefenceSubject()
         {
             _defenceSubject = null;
             _defenceEnergy = 0f;
+            _rallyEnergy = 0f;
             _punch = 0f;
         }
 
@@ -494,6 +539,10 @@ namespace DuckMow
 
         Transform _defenceSubject;
         float _defenceEnergy;
+        float _rallyEnergy;
+        /// <summary>Energy, eased. Stepping it raw made a goose being served pop the boom out 2.6 m
+        /// in one frame, which reads as a cut rather than as the shot making room.</summary>
+        float _energySmoothed;
         float _defenceBiasScale = 1f;
         float _punch;
 

@@ -40,6 +40,27 @@ namespace DuckMow
         [Tooltip("Speed cost per second of drifting.")]
         public float driftDrag = 2.6f;
 
+        [Header("Drift boost")]
+        [Tooltip("Off everywhere except the mode that opts in. With this false the handbrake behaves " +
+                 "exactly as it did before mini-turbos existed: a low-grip slide with a yaw bonus, " +
+                 "no hop, no direction lock, no charge and no payout.")]
+        public bool driftBoost;
+        [Tooltip("Upward kick on the hop that starts a drift.")]
+        public float driftHopImpulse = 1.7f;
+        public float driftMinSpeed = 2.5f;
+        [Tooltip("Steer authority when leaning into the drift, and when fighting it.")]
+        public float driftSteerInner = 1.0f;
+        public float driftSteerOuter = 0.30f;
+        [Tooltip("Charge per second at full inward lean.")]
+        public float driftChargeRate = 1.0f;
+        [Tooltip("Charge needed for each mini-turbo tier.")]
+        public Vector3 driftTierCharge = new Vector3(0.55f, 1.30f, 2.20f);
+        [Tooltip("Seconds of burst each tier pays out.")]
+        public Vector3 driftTierDuration = new Vector3(0.55f, 0.95f, 1.45f);
+        [Tooltip("Top-speed multiplier of each tier's burst.")]
+        public Vector3 driftTierSpeed = new Vector3(1.24f, 1.40f, 1.58f);
+        public float miniTurboAccelMultiplier = 2.6f;
+
         [Header("Boost")]
         public float boostSpeedMultiplier = 1.42f;
         public float boostAccelMultiplier = 1.9f;
@@ -96,6 +117,25 @@ namespace DuckMow
         public bool IsDrifting { get; private set; }
         public bool IsBoosting { get; private set; }
         public float BoostFuel { get; private set; } = 1f;
+
+        /// <summary>Charge banked by the current drift, and which tier it has reached (0..3).</summary>
+        public float DriftCharge { get; private set; }
+        public int DriftTier { get; private set; }
+        /// <summary>Which way the current drift is locked: -1 left, +1 right, 0 not drifting.</summary>
+        public float DriftSign { get; private set; }
+        /// <summary>0..1 progress toward the next tier, for the HUD and the sparks.</summary>
+        public float DriftCharge01
+        {
+            get
+            {
+                if (DriftTier >= 3) return 1f;
+                float lo = DriftTier == 0 ? 0f : Tier(DriftTier);
+                float hi = Tier(DriftTier + 1);
+                return hi > lo ? Mathf.Clamp01((DriftCharge - lo) / (hi - lo)) : 0f;
+            }
+        }
+        public bool IsMiniTurbo => _miniTurboTimer > 0f;
+        public int MiniTurboTier { get; private set; }
         /// <summary>0..1, how much uncut grass the blade removed on the last physics step.</summary>
         public float CutLoad { get; private set; }
         public float SmoothedCutLoad { get; private set; }
@@ -129,6 +169,10 @@ namespace DuckMow
         float _airborneTimer;
         float _yawRate;
         float _staggerTimer;
+        float _miniTurboTimer;
+        float _miniTurboSpeed = 1f;
+        bool _fuelBoost;
+        bool _driftLatched;
         readonly RaycastHit[] _hitBuffer = new RaycastHit[4];
         bool _rideVerified;
         Vector3 _spawnPos;
@@ -160,7 +204,8 @@ namespace DuckMow
             DriftMetres = 0f; BoostMetres = 0f; DistanceTravelled = 0f;
             _deckHistoryValid = false;
             _airborneTimer = 0f;
-            IsBoosting = false; IsDrifting = false;
+            IsBoosting = false;
+            ClearDrift();
             LastImpactStrength = 0f;
         }
 
@@ -182,7 +227,7 @@ namespace DuckMow
             Place(position, rotation);
             _yawRate = 0f;
             IsBoosting = false;
-            IsDrifting = false;
+            ClearDrift();
             _airborneTimer = 0f;
             _staggerTimer = 0f;
         }
@@ -220,14 +265,43 @@ namespace DuckMow
             TickPhysics(Time.fixedDeltaTime);
         }
 
+        /// <summary>
+        /// Where this machine's controls come from. Null means the player's — which is every mower
+        /// in the game except the three the rally puts opponents on. See <see cref="IMowerInput"/>.
+        /// </summary>
+        public IMowerInput inputSource;
+
+        /// <summary>
+        /// What this machine is being steered by, for the visuals to lean on.
+        ///
+        /// Exposed because <see cref="MowerVisuals"/> cannot reach the private input plumbing and
+        /// must not go back to the singleton: a mower driven by a bot has to turn its own wheel.
+        /// </summary>
+        public float VisualSteer => inputSource != null
+            ? inputSource.Steer
+            : (_input != null ? _input.Steer
+                              : (InputReader.Instance != null ? InputReader.Instance.Steer : 0f));
+
         public void TickPhysics(float dt)
         {
-            if (_input == null) _input = InputReader.Instance;
+            float steer, throttle;
+            bool handbrake, wantBoost;
 
-            float steer = _input != null ? _input.Steer : 0f;
-            float throttle = _input != null ? _input.Throttle : 0f;
-            bool handbrake = _input != null && _input.Handbrake;
-            bool wantBoost = _input != null && _input.Boost;
+            if (inputSource != null)
+            {
+                steer = inputSource.Steer;
+                throttle = inputSource.Throttle;
+                handbrake = inputSource.Handbrake;
+                wantBoost = inputSource.Boost;
+            }
+            else
+            {
+                if (_input == null) _input = InputReader.Instance;
+                steer = _input != null ? _input.Steer : 0f;
+                throttle = _input != null ? _input.Throttle : 0f;
+                handbrake = _input != null && _input.Handbrake;
+                wantBoost = _input != null && _input.Boost;
+            }
 
             ApplySuspension(dt);
             _rb.AddForce(Physics.gravity * gravityScale, ForceMode.Acceleration);
@@ -243,6 +317,7 @@ namespace DuckMow
                 ? Vector3.SignedAngle(fwd, flatVel.normalized, Vector3.up)
                 : 0f;
 
+            UpdateDrift(handbrake, steer, dt);
             HandleBoost(wantBoost, throttle, dt);
 
             _staggerTimer = Mathf.Max(0f, _staggerTimer - dt);
@@ -254,8 +329,8 @@ namespace DuckMow
                 // a hitch in the game rather than as a hit, and the machine slid on unaffected
                 // because nothing was scrubbing the lateral velocity either.
                 if (_staggerTimer <= 0f) ApplyDrive(throttle, dt);
-                ApplyGrip(handbrake, right, lateral, dt);
-                ApplySteering(steer, handbrake, dt);
+                ApplyGrip(right, lateral, dt);
+                ApplySteering(steer, dt);
             }
             else
             {
@@ -365,18 +440,22 @@ namespace DuckMow
 
         // ------------------------------------------------------------------ drive
 
+        float SpeedMultiplier => Mathf.Max(_fuelBoost ? boostSpeedMultiplier : 1f,
+                                           IsMiniTurbo ? _miniTurboSpeed : 1f);
+
+        float AccelMultiplier => IsMiniTurbo ? miniTurboAccelMultiplier
+                                             : (_fuelBoost ? boostAccelMultiplier : 1f);
+
         void ApplyDrive(float throttle, float dt)
         {
-            float topSpeed = maxSpeed * (IsBoosting ? boostSpeedMultiplier : 1f);
+            float topSpeed = maxSpeed * SpeedMultiplier;
             float targetSpeed;
             float rate;
 
             if (throttle > 0.01f)
             {
                 targetSpeed = topSpeed * throttle;
-                rate = ForwardSpeed < targetSpeed
-                    ? accelRate * (IsBoosting ? boostAccelMultiplier : 1f)
-                    : overspeedBleed;
+                rate = ForwardSpeed < targetSpeed ? accelRate * AccelMultiplier : overspeedBleed;
             }
             else if (throttle < -0.01f)
             {
@@ -394,10 +473,8 @@ namespace DuckMow
             _rb.linearVelocity += transform.forward * (newForward - ForwardSpeed);
         }
 
-        void ApplyGrip(bool handbrake, Vector3 right, float lateral, float dt)
+        void ApplyGrip(Vector3 right, float lateral, float dt)
         {
-            IsDrifting = handbrake && Mathf.Abs(ForwardSpeed) > 2.5f;
-
             float g = IsDrifting ? driftGrip : grip;
             // Grip eases off with speed so fast cornering already feels loose before you drift.
             g *= Mathf.Lerp(1f, 0.72f, SpeedFraction);
@@ -412,7 +489,7 @@ namespace DuckMow
             }
         }
 
-        void ApplySteering(float steer, bool handbrake, float dt)
+        void ApplySteering(float steer, float dt)
         {
             float speedFrac = Mathf.Clamp01(Mathf.Abs(ForwardSpeed) / maxSpeed);
             float yawRateDeg = Mathf.Lerp(yawRateLow, yawRateHigh, speedFrac * speedFrac);
@@ -423,7 +500,14 @@ namespace DuckMow
             float authority = Mathf.Clamp01(Mathf.Abs(ForwardSpeed) / steerCutIn);
             float dirSign = ForwardSpeed < -0.2f ? -1f : 1f;
 
-            float target = steer * yawRateDeg * Mathf.Deg2Rad * authority * dirSign;
+            // In a drift the wheel never crosses centre: the machine always turns the way the drift
+            // was started, and the stick only chooses how tightly. That is what makes a drift a line
+            // you commit to rather than a slide you can cancel by steering out of it.
+            float effectiveSteer = driftBoost && IsDrifting && DriftSign != 0f
+                ? DriftSign * Mathf.Lerp(driftSteerOuter, driftSteerInner, Inward(steer) * 0.5f + 0.5f)
+                : steer;
+
+            float target = effectiveSteer * yawRateDeg * Mathf.Deg2Rad * authority * dirSign;
 
             // While drifting, nudge the yaw target toward the direction we are actually sliding.
             // Without this a drift is a spin; with it, it is a tool.
@@ -441,15 +525,112 @@ namespace DuckMow
 
         void HandleBoost(bool wantBoost, float throttle, float dt)
         {
-            bool canBoost = wantBoost && throttle > 0.05f && BoostFuel > 0.001f
-                            && (IsBoosting || BoostFuel > boostMinimumToStart);
+            _fuelBoost = wantBoost && throttle > 0.05f && BoostFuel > 0.001f
+                         && (_fuelBoost || BoostFuel > boostMinimumToStart);
 
-            IsBoosting = canBoost;
-            if (IsBoosting)
+            if (_fuelBoost) BoostFuel = Mathf.Max(0f, BoostFuel - boostDrainPerSecond * dt);
+
+            _miniTurboTimer = Mathf.Max(0f, _miniTurboTimer - dt);
+            if (_miniTurboTimer <= 0f) MiniTurboTier = 0;
+
+            IsBoosting = _fuelBoost || IsMiniTurbo;
+            if (IsBoosting) BoostMetres += Mathf.Abs(ForwardSpeed) * dt;
+        }
+
+        float Tier(int n) => n == 1 ? driftTierCharge.x
+                          : n == 2 ? driftTierCharge.y
+                          : driftTierCharge.z;
+
+        /// <summary>Signed -1..1: how hard the stick is leaning INTO the drift.</summary>
+        float Inward(float steer) => DriftSign == 0f ? 0f : Mathf.Clamp(steer * DriftSign, -1f, 1f);
+
+        /// <summary>
+        /// The mini-turbo. Hold the handbrake through a corner and the slide banks charge; let go and
+        /// it pays out as a timed burst whose size is the tier the charge reached.
+        ///
+        /// The direction is LOCKED when the drift starts and never re-evaluated, which is the whole
+        /// reason this reads as Mario Kart rather than as a handbrake turn: a drift you can flip
+        /// mid-slide by pushing the other way has no line to commit to, so there is nothing to be
+        /// good at and nothing to reward.
+        /// </summary>
+        void UpdateDrift(bool handbrake, float steer, float dt)
+        {
+            if (!driftBoost)
             {
-                BoostFuel = Mathf.Max(0f, BoostFuel - boostDrainPerSecond * dt);
-                BoostMetres += Mathf.Abs(ForwardSpeed) * dt;
+                IsDrifting = handbrake && Mathf.Abs(ForwardSpeed) > driftMinSpeed;
+                return;
             }
+
+            bool fast = Mathf.Abs(ForwardSpeed) > driftMinSpeed;
+            bool wants = handbrake && fast && IsGrounded;
+
+            if (wants && !_driftLatched)
+            {
+                // A drift started with no steer input has no side to lock to, so it waits for one
+                // rather than picking arbitrarily.
+                float sign = Mathf.Abs(steer) > 0.15f ? Mathf.Sign(steer)
+                           : (Mathf.Abs(SlipAngle) > 4f ? Mathf.Sign(SlipAngle) : 0f);
+                if (sign != 0f)
+                {
+                    _driftLatched = true;
+                    DriftSign = sign;
+                    DriftCharge = 0f;
+                    DriftTier = 0;
+                    // The hop. It is what tells the player the drift took, before the slide is
+                    // visible — and it briefly unloads the springs, which is why the slide starts
+                    // loose instead of having to be scrubbed loose.
+                    _rb.linearVelocity += transform.up * driftHopImpulse;
+                }
+            }
+            else if (_driftLatched && (!handbrake || !fast))
+            {
+                Release();
+            }
+
+            IsDrifting = _driftLatched;
+            if (!_driftLatched) return;
+
+            // Charge only accrues for leaning into the slide, and it accrues faster the harder the
+            // lean and the faster the machine. Fighting the drift stalls the bank rather than
+            // draining it: punishing a correction would make the tiers about holding a stick still.
+            float lean = Mathf.Max(0f, Inward(steer));
+            DriftCharge += driftChargeRate * lean * Mathf.Lerp(0.5f, 1f, SpeedFraction) * dt;
+
+            int tier = DriftCharge >= Tier(3) ? 3
+                     : DriftCharge >= Tier(2) ? 2
+                     : DriftCharge >= Tier(1) ? 1 : 0;
+            DriftTier = tier;
+        }
+
+        void Release()
+        {
+            if (DriftTier > 0)
+            {
+                MiniTurboTier = DriftTier;
+                _miniTurboTimer = DriftTier == 1 ? driftTierDuration.x
+                                : DriftTier == 2 ? driftTierDuration.y
+                                : driftTierDuration.z;
+                _miniTurboSpeed = DriftTier == 1 ? driftTierSpeed.x
+                                : DriftTier == 2 ? driftTierSpeed.y
+                                : driftTierSpeed.z;
+            }
+            _driftLatched = false;
+            DriftSign = 0f;
+            DriftCharge = 0f;
+            DriftTier = 0;
+        }
+
+        void ClearDrift()
+        {
+            _driftLatched = false;
+            IsDrifting = false;
+            DriftSign = 0f;
+            DriftCharge = 0f;
+            DriftTier = 0;
+            MiniTurboTier = 0;
+            _miniTurboTimer = 0f;
+            _miniTurboSpeed = 1f;
+            _fuelBoost = false;
         }
 
         // ------------------------------------------------------------------ cutting
@@ -583,11 +764,26 @@ namespace DuckMow
             OnImpact?.Invoke(strength, impactPoint);
         }
 
+        /// <summary>
+        /// Hand the machine some boost it did not earn from cutting grass.
+        ///
+        /// Additive, and nothing in the round or the rally calls it. It exists because Bloom Rush
+        /// is played on ground that is not grass — the blade is locked and <see cref="CutMask"/> is
+        /// not in that scene at all, so the refill path above never runs and a mower there would
+        /// spend its starting tank and then have no boost for the rest of the match. That mode pays
+        /// boost for taking ground off an opponent instead, which is the same bargain the lawn
+        /// makes (do the thing the mode is about, get the thing that makes it feel fast) settled in
+        /// its own currency.
+        /// </summary>
+        public void AddBoostFuel(float amount)
+            => BoostFuel = Mathf.Clamp01(BoostFuel + Mathf.Max(0f, amount));
+
         /// <summary>Called by the game director so the mower coasts to a stop when time runs out.</summary>
         public void CutEngine()
         {
             BladeEngaged = false;
             IsBoosting = false;
+            ClearDrift();
         }
     }
 }

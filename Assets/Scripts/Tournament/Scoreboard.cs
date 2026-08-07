@@ -16,6 +16,14 @@ namespace DuckMow
         [HideInInspector] public Vector3 restPosition;
         [HideInInspector] public bool restCaptured;
         [HideInInspector] public Material plateInstance;
+
+        // ---- the count-up ----
+        [HideInInspector] public float countFrom, countTo, countShown;
+        [HideInInspector] public bool counting, rally;
+        [HideInInspector] public int lastPrinted = int.MinValue;
+        [HideInInspector] public float punch;
+        [HideInInspector] public Vector3 baseScale = Vector3.one;
+        [HideInInspector] public bool baseCaptured;
     }
 
     /// <summary>
@@ -49,6 +57,8 @@ namespace DuckMow
         [Tooltip("Seconds before the first row lands, so the camera arrives to a blank board.")]
         public float revealDelay = 0.5f;
         public float winnerDelay = 0.7f;
+        [Tooltip("Seconds a row's number takes to climb from the picture's mark to the round total.")]
+        public float countSeconds = 0.9f;
 
         public bool Finished { get; private set; }
 
@@ -118,6 +128,24 @@ namespace DuckMow
         public void Post(Standing s) { }
 
         /// <summary>
+        /// Walk the player's line from one total to another, for the ceremony's final beat.
+        ///
+        /// The row is found by the isPlayer flag captured at Settle rather than by name, because the
+        /// name on the plate is display text and has been reformatted more than once.
+        /// </summary>
+        public void BlendPlayerTotal(int from, int to, float k)
+        {
+            if (_final == null) return;
+            for (int i = 0; i < _final.Count && i < rows.Length; i++)
+            {
+                if (!_final[i].isPlayer || rows[i]?.total == null) continue;
+                rows[i].total.text = Mathf.RoundToInt(Mathf.Lerp(from, to, Mathf.Clamp01(k)))
+                                          .ToString();
+                return;
+            }
+        }
+
+        /// <summary>
         /// All results are in. Write them in rank order and reveal from the bottom up.
         ///
         /// <paramref name="winnerLabel"/> is what the bottom line calls the contestant on top. It has
@@ -173,6 +201,8 @@ namespace DuckMow
                 _landed++;
             }
 
+            TickCounts(dt);
+
             // Fade in whatever has landed. Indices at or below (filled - _landed) are still to come.
             for (int i = 0; i < filled; i++)
             {
@@ -210,10 +240,75 @@ namespace DuckMow
             if (r == null) return;
             if (r.place != null) r.place.text = Place(place);
             if (r.name != null) r.name.text = s.isPlayer ? $"{s.name}  (YOU)" : s.name;
-            if (r.total != null) r.total.text = $"{s.total:0} / 30";
+            // The SUM, shown as a sum. The board's job at the end of stage two is to say what the
+            // rally was worth on top of what the lawn was worth, and printing the picture alone hid
+            // exactly the number the player has just spent seventy-eight seconds earning.
+            // The number is COUNTED, not stated.
+            //
+            // "24 +6 = 30" is a sentence about a result. A number rolling up from 24 to 30, swelling
+            // on each tick and settling back, is the result happening — and this is the one beat in
+            // stage two whose entire job is to pay out. The row starts on the picture's own mark and
+            // climbs by the rally's; see Tick.
+            r.rally = s.rallyMarked;
+            r.countFrom = s.total;
+            r.countTo = s.rallyMarked ? s.RoundScore : s.total;
+            r.countShown = r.countFrom;
+            r.counting = false;
+            r.lastPrinted = int.MinValue;
+            r.punch = 0f;
+            if (r.total != null) r.total.text = Label(r, r.countFrom);
             if (r.grade != null) { r.grade.text = s.rank; r.grade.color = s.livery; }
             if (r.plate != null)
                 r.plateInstance?.SetColor("_BaseColor", s.isPlayer ? PlayerPlate : RivalPlate);
+        }
+
+        static string Label(ScoreboardRow r, float value)
+            => r.rally ? $"{value:0}" : $"{value:0} / 30";
+
+        /// <summary>
+        /// Roll every landed row's number up to its final mark, with a swell on each tick.
+        ///
+        /// Driven off the row rather than a global clock so rows that land at different moments each
+        /// get their own climb. The swell is on the WHOLE row, not the digits: a number that grows
+        /// on its own reads as a text effect, while a plate that thumps reads as the board reacting.
+        /// </summary>
+        void TickCounts(float dt)
+        {
+            int filled = Mathf.Min(_final.Count, rows.Length);
+            for (int i = 0; i < filled; i++)
+            {
+                var r = rows[i];
+                if (r == null) continue;
+                if (!r.baseCaptured && r.root != null)
+                {
+                    r.baseScale = r.root.localScale;
+                    r.baseCaptured = true;
+                }
+
+                bool landed = i >= filled - _landed;
+                if (landed && !r.counting) r.counting = true;
+
+                if (r.counting && r.countShown < r.countTo)
+                {
+                    // A fixed number of SECONDS rather than a fixed step, so a one-point climb and a
+                    // ten-point climb take the same time and the beat does not stretch with the score.
+                    float span = Mathf.Max(r.countTo - r.countFrom, 0.001f);
+                    r.countShown = Mathf.MoveTowards(r.countShown, r.countTo, span / countSeconds * dt);
+                }
+
+                int now = Mathf.RoundToInt(r.countShown);
+                if (now != r.lastPrinted)
+                {
+                    r.lastPrinted = now;
+                    if (r.total != null) r.total.text = Label(r, now);
+                    if (r.counting && r.countShown < r.countTo) r.punch = 1f;
+                    else if (r.counting) r.punch = 1.6f;      // the last tick lands hardest
+                }
+
+                r.punch = Mathf.MoveTowards(r.punch, 0f, dt * 5f);
+                if (r.root != null && r.baseCaptured)
+                    r.root.localScale = r.baseScale * (1f + r.punch * 0.09f);
+            }
         }
 
         static void SetRowAlpha(ScoreboardRow r, float a)

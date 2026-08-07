@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: M_BloomBlades
+  m_Shader: {fileID: 4800000, guid: b53745273299f64418160ba6290339e8, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _AO: 0.42
+    - _AmbientFloor: 0.035
+    - _AmbientGain: 1.05
+    - _BloomTip: 0.62
+    - _FadeEnd: 44
+    - _FadeStart: 26
+    - _GateIntensity: 1.25
+    - _GateRange: 11
+    - _GrowHeight: 1.75
+    - _HeightVar: 0.45
+    - _NormalBias: 0.55
+    - _RootJitter: 0.16
+    - _ThinEnd: 42
+    - _ThinStart: 15
+    - _Wrap: 0.42
+    m_Colors:
+    - _GateColor: {r: 1, g: 0.74, b: 0.41999996, a: 1}
+    - _Translucency: {r: 0.54999995, g: 0.85, b: 0.21999997, a: 1}
+    - _WildBase: {r: 0.020288562, g: 0.06847818, b: 0.011612245, a: 1}
+    - _WildTip: {r: 0.07618539, g: 0.22322798, b: 0.03189603, a: 1}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1

@@ -933,9 +933,22 @@ namespace DuckMow.EditorTools
         public static void RegisterBuildScenes()
         {
             var scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+            // Every scene this method is about to insert must first be removed, INCLUDING the rally.
+            //
+            // It was missing from this list while being inserted below, so each call appended one
+            // more copy of GooseRally. By the time anybody looked, the build settings held
+            // thirty-seven of it — a list that ships the same scene dozens of times and pushes every
+            // index after it around. Nothing complains: duplicates are legal, so the only symptom is
+            // a bloated build and scene indices that mean nothing, both of which only show up in the
+            // browser. Insert-after-remove is only idempotent if the remove covers the same set.
             scenes.RemoveAll(s => s.path == ScenePath ||
                                   s.path == DuckSceneBuilder.ScenePath ||
-                                  s.path == DuckArenaBuilder.ScenePath);
+                                  s.path == DuckArenaBuilder.ScenePath ||
+                                  s.path == DuckRallyBuilder.ScenePath);
+
+            // Belt and braces: strip any duplicate that got in some other way, keeping the first.
+            var seen = new HashSet<string>();
+            scenes.RemoveAll(s => !seen.Add(s.path));
 
             int at = 0;
             // Only ever list a scene that is on disk. A build settings entry pointing at a missing
@@ -950,18 +963,32 @@ namespace DuckMow.EditorTools
             // builder so there is exactly one place that decides what ships.
             if (File.Exists(DuckArenaBuilder.ScenePath))
                 scenes.Insert(at, new EditorBuildSettingsScene(DuckArenaBuilder.ScenePath, true));
+            if (File.Exists(DuckRallyBuilder.ScenePath))
+                scenes.Insert(at, new EditorBuildSettingsScene(DuckRallyBuilder.ScenePath, true));
 
             EditorBuildSettings.scenes = scenes.ToArray();
         }
 
-        /// <summary>The scenes a player build ships, in the order it opens them.</summary>
+        /// <summary>
+        /// The scenes a player build ships, in the order it opens them.
+        ///
+        /// The rally is in here, and it has to be. A scene that is only ever entered mid-round is
+        /// easy to forget, and forgetting it does not fail the build — it fails in the BROWSER,
+        /// three rounds in, as a LoadSceneAsync that returns null and a championship that skips
+        /// straight from the klaxon to the reveal with a warning nobody is looking at the console
+        /// for. This list is the one place that decides what ships; if a scene can be reached at
+        /// runtime it belongs here whether or not the game can open on it.
+        /// </summary>
         public static string[] PlayerScenes()
         {
-            var list = new List<string>(2);
+            var list = new List<string>(3);
             if (File.Exists(ScenePath)) list.Add(ScenePath);
             else Debug.LogWarning("[Duck] Menu.unity has not been built, so this player will open " +
                                   "straight into a round. Run Duck/4 · Build Menu Scene.");
             list.Add(DuckSceneBuilder.ScenePath);
+            if (File.Exists(DuckRallyBuilder.ScenePath)) list.Add(DuckRallyBuilder.ScenePath);
+            else Debug.LogWarning("[Duck] GooseRally.unity has not been built, so the final round " +
+                                  "will go straight to the reveal. Run Duck/3 · Build goose rally scene.");
             return list.ToArray();
         }
 

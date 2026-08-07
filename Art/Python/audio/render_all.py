@@ -20,7 +20,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 MODULES = ["engine", "blade", "mower", "ui", "crowd", "ambience",
-           "duck", "judges", "music"]
+           "duck", "judges", "geese", "music", "transition"]
 
 
 def main(argv):

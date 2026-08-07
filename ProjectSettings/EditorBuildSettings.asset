@@ -12,8 +12,14 @@ EditorBuildSettings:
     path: Assets/Scenes/Main.unity
     guid: 8cfd56015212e0e4081e19acc5c0d885
   - enabled: 1
+    path: Assets/Scenes/GooseRally.unity
+    guid: baa09912fb80f8f48990b74168189234
+  - enabled: 1
     path: Assets/Scenes/Arena.unity
     guid: d2efccd6b7da14542bf9e762073fc5c3
+  - enabled: 1
+    path: Assets/Scenes/BloomRush.unity
+    guid: 074857f337c1ef842bb5037e48c412d9
   m_configObjects:
     com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

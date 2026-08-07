@@ -81,6 +81,12 @@ namespace DuckMow
         /// <summary>False until a round has actually been banked, so the card knows not to print places.</summary>
         public bool HasResults => RoundsRecorded > 0;
 
+        /// <summary>The player's place, points gained and points held in the round just recorded.
+        /// The ceremony shows the final round alone before it shows the championship total.</summary>
+        public int LastRoundPlace { get; private set; }
+        public int LastRoundPoints { get; private set; }
+        public int PointsBeforeLastRound { get; private set; }
+
         public IReadOnlyList<ChampionshipEntry> Table => _entries;
         readonly List<ChampionshipEntry> _entries = new List<ChampionshipEntry>(4);
 
@@ -207,10 +213,20 @@ namespace DuckMow
                 // Rounded rather than carried as a float: every mark is already a whole number out of
                 // ten (see Scoring.Mark) and so is the defence award, so this loses nothing and keeps
                 // the running total something the board can print without a decimal point.
-                e.points += Mathf.RoundToInt(s.RoundScore);
+                int gained = Mathf.RoundToInt(s.RoundScore);
+                e.points += gained;
                 e.marks += s.total;
                 if (places[i] == 1) e.wins++;
                 _entries[idx] = e;
+
+                if (s.isPlayer)
+                {
+                    LastRoundPlace = places[i];
+                    LastRoundPoints = gained;
+                    // Banked before the round is added, so the ceremony can count the board up from
+                    // where it stood to where it stands.
+                    PointsBeforeLastRound = e.points - gained;
+                }
             }
 
             RoundsRecorded++;

@@ -710,6 +710,11 @@ namespace DuckMow.EditorTools
             // than in front of one that happens to be created later.
             director.intro = DuckCutsceneBuilder.Build(cam);
 
+            // Same rule as the intro: this builder owns Main.unity, so it has to rebuild every page
+            // the scene carries or a scene rebuild silently deletes the endings.
+            director.endingWin = DuckEndingBuilder.Build(cam, "win");
+            director.endingLose = DuckEndingBuilder.Build(cam, "lose");
+
             // ---- Audio ----
             var audioGO = new GameObject("~ Audio");
             var audio = audioGO.AddComponent<AudioDirector>();
@@ -829,10 +834,23 @@ namespace DuckMow.EditorTools
             a.heronLow = Clip("Judges/judge_heron_low");
             a.heronHigh = Clip("Judges/judge_heron_high");
 
+            // Stage two. Three honks and three wing beats as arrays, because RallyFX round-robins
+            // them: nine birds calling every 2-5 s with one honk between them is the fastest way to
+            // make a soundscape unbearable. See AUDIO_SPEC.md §4 (Geese/).
+            a.gooseHonks = Clips("Geese/goose_honk_1", "Geese/goose_honk_2",
+                                 "Geese/goose_honk_3");
+            a.gooseWingBeats = Clips("Geese/goose_wingbeat_1", "Geese/goose_wingbeat_2",
+                                     "Geese/goose_wingbeat_3");
+            a.gooseHiss = Clip("Geese/goose_hiss");
+            a.gooseSquawk = Clip("Geese/goose_squawk");
+
             a.musicRound = Clip("Music/music_round_loop");
             a.musicRoundUrgent = Clip("Music/music_round_urgent_layer");
             a.musicReveal = Clip("Music/music_reveal");
             a.musicJudgingBed = Clip("Music/music_judging_bed_loop");
+            a.musicCutscene = Clip("Music/music_cutscene_loop");
+            a.musicRally = Clip("Music/music_rally_loop");
+            a.musicBloom = Clip("Music/music_bloom_loop");
             a.fanfareGood = Clip("Music/fanfare_good");
             a.fanfareBad = Clip("Music/fanfare_bad");
         }

@@ -26,6 +26,12 @@ namespace DuckMow
         public float benchBeat = 3.0f;
         /// <summary>Seconds on the trophy, or in flight over the winner's lawn.</summary>
         public float prizeBeat = 3.6f;
+        /// <summary>Seconds on the champion with the final round's card beside them.</summary>
+        public float championBeat = 3.4f;
+        /// <summary>Seconds on the board while the championship total is applied.</summary>
+        public float boardBeat = 4.2f;
+        /// <summary>Seconds the total takes to count from where it stood to where it finished.</summary>
+        public float countSeconds = 1.5f;
         /// <summary>Seconds after the title card lands before the way onward is offered.</summary>
         public float promptDelay = 1.6f;
 
@@ -35,7 +41,7 @@ namespace DuckMow
         /// <summary>True once the player may leave. Held back so the card is read before it is dismissed.</summary>
         public bool PromptUp { get; private set; }
 
-        enum Beat { Bench, Prize, Portrait }
+        enum Beat { Bench, Prize, Champion, Board, Portrait }
 
         Beat _beat;
         float _time;
@@ -45,6 +51,11 @@ namespace DuckMow
         SpectatorCrowd[] _crowds;
         int _reacted;
         PlotSpec _championPlot;
+        Championship _championship;
+        HUD _hud;
+        CeremonyNight _night;
+        Scoreboard _board;
+        float _countTimer;
 
         /// <summary>
         /// Take over the screen. Everything the sequence needs is resolved here rather than kept as
@@ -54,14 +65,18 @@ namespace DuckMow
         public void Begin(Championship championship, JudgePanel judges, CameraDirector camera)
         {
             PlayerWon = championship != null && championship.PlayerIsChampion;
+            _championship = championship;
             _judges = judges;
             _camera = camera;
             _beat = Beat.Bench;
             _time = 0f;
             _crowdTimer = 0f;
             _reacted = 0;
+            _countTimer = 0f;
             CardUp = false;
             PromptUp = false;
+            _hud = Object.FindFirstObjectByType<HUD>();
+            _night = CeremonyNight.Ensure();
 
             // The seats are found once, here. There is no singleton for the crowd and nothing has
             // ever asked it to react before — Excite existed and was never called from anywhere, so
@@ -86,6 +101,7 @@ namespace DuckMow
         public void Tick(float dt)
         {
             _time += dt;
+            _night?.Tick(dt);
 
             switch (_beat)
             {
@@ -99,7 +115,18 @@ namespace DuckMow
 
                 case Beat.Prize:
                     Swell(dt, PlayerWon ? 1.4f : 0f);
-                    if (_time >= prizeBeat) EnterPortrait();
+                    if (_time >= prizeBeat) EnterChampion();
+                    break;
+
+                case Beat.Champion:
+                    Swell(dt, PlayerWon ? 1.6f : 0.2f);
+                    if (_time >= championBeat) EnterBoard();
+                    break;
+
+                case Beat.Board:
+                    CountUp(dt);
+                    Swell(dt, PlayerWon ? 1.6f : 0.2f);
+                    if (_time >= boardBeat) EnterPortrait();
                     break;
 
                 case Beat.Portrait:
@@ -107,6 +134,51 @@ namespace DuckMow
                     if (_time >= promptDelay) PromptUp = true;
                     break;
             }
+        }
+
+        /// <summary>
+        /// The champion, framed right, with the FINAL ROUND's card on the left.
+        ///
+        /// Only the last round. The championship total gets its own beat on the board a moment later,
+        /// and showing a running total here would answer the board's question before it is asked —
+        /// the point of the two shots is that you see what you just earned, then watch it land.
+        /// </summary>
+        void EnterChampion()
+        {
+            _beat = Beat.Champion;
+            _time = 0f;
+
+            if (_camera != null)
+            {
+                _camera.SetMode(CameraMode.Verdict, 0.9f);
+            }
+
+            if (_hud == null || _championship == null) return;
+            _hud.ceremonyResultsHold = true;
+            _hud.ShowFinalRound(_championship.LastRoundPlace, _championship.LastRoundPoints);
+        }
+
+        void EnterBoard()
+        {
+            _beat = Beat.Board;
+            _time = 0f;
+            _countTimer = 0f;
+            if (_hud != null) _hud.ceremonyResultsHold = false;
+            if (_camera == null) return;
+            _camera.SetMode(CameraMode.Scoreboard, 1.1f);
+        }
+
+        /// <summary>Walk the board's total from what it was before the last round to what it is now.</summary>
+        void CountUp(float dt)
+        {
+            if (_championship == null) return;
+            if (_board == null) _board = Object.FindFirstObjectByType<Scoreboard>();
+            if (_board == null) return;
+            _countTimer += dt;
+            float k = Mathf.Clamp01(_countTimer / Mathf.Max(countSeconds, 0.01f));
+            k = k * k * (3f - 2f * k);
+            _board.BlendPlayerTotal(_championship.PointsBeforeLastRound,
+                                    _championship.PlayerPoints, k);
         }
 
         void EnterPrize()
@@ -137,6 +209,11 @@ namespace DuckMow
             _beat = Beat.Portrait;
             _time = 0f;
             CardUp = true;
+            if (_hud != null) _hud.ceremonyResultsHold = false;
+            // Night falls on the last beat, win or lose. The fireworks only go up for a champion,
+            // which is handled inside CeremonyNight by simply not asking for them.
+            _night?.Begin();
+            if (!PlayerWon && _night != null) _night.shellsPerBurst = 0;
             AudioDirector.Instance?.PlayFanfare(PlayerWon);
             if (PlayerWon) AudioDirector.Instance?.CrowdCheer(1f, applaud: true);
 

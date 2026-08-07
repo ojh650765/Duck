@@ -374,7 +374,7 @@ namespace DuckMow.EditorTools
         /// Overwriting _BaseColor and switching the vertex colours off instead would have thrown
         /// away the model and left a flat silhouette.
         /// </summary>
-        static Material LiveryMower(PlotSpec spec)
+        internal static Material LiveryMower(PlotSpec spec)
         {
             string path = $"{MatDir}/M_Livery_{spec.contestant}.mat";
             var m = AssetDatabase.LoadAssetAtPath<Material>(path);
@@ -448,9 +448,10 @@ namespace DuckMow.EditorTools
             // props underground and in mid-air everywhere else in this venue.
             //
             // Worth being clear about what these are: they are the RIVALS' obstacles, fed to
-            // RivalContestant.CheckObstacles so a rival swerves and loses time. They deliberately
-            // have no collider, because the player never drives on a rival's plot — so matching the
-            // size is about the venue reading as one place, not about player collision.
+            // RivalContestant.CheckObstacles so a rival swerves and loses time. They now carry the
+            // same collider, body and Gnome.cs the meadow's ornaments do — see the note where they
+            // are added — so the venue has one kind of gnome rather than two that look identical
+            // and behave differently.
             const float targetHeight = 1.2f;
             float meshHeight = Mathf.Max(mesh.bounds.size.y, 0.01f);
             float scale = targetHeight / meshHeight;
@@ -512,6 +513,34 @@ namespace DuckMow.EditorTools
                             $"{half:0.0} m across. Its visual has escaped its plot — check which " +
                             $"space the pose passed to Spawn is in.");
                 }
+
+                // The parts that make it an OBSTACLE rather than a picture of one.
+                //
+                // These were built as visuals only, on the reasoning that the player never drives on
+                // a rival's plot — which was true of where they are, and not true of what they are.
+                // The venue ended up with two populations of the same ornament: the meadow's, which
+                // carry a capsule, a body and Gnome.cs and go flying when hit, and these twelve,
+                // which a mower passes straight through. That is the "some obstacles do not collide"
+                // report, and it is the kind of inconsistency that reads as a bug even when the
+                // player never reaches it, because a rival mower CAN.
+                //
+                // Same three components and the same derivation as DuckEnvironmentBuilder's, so the
+                // two populations cannot drift apart again.
+                float tall = mesh.bounds.size.y * scale;
+                float wide = Mathf.Max(mesh.bounds.size.x, mesh.bounds.size.z) * scale;
+
+                var col = go.AddComponent<CapsuleCollider>();
+                col.height = tall;
+                // Clamped so it stays a capsule: below twice the radius it collapses to a sphere,
+                // and a mower rides up over a sphere instead of hitting it.
+                col.radius = Mathf.Min(wide * 0.5f, tall * 0.45f);
+                col.center = new Vector3(0f, tall * 0.5f, 0f);
+
+                var rb = go.AddComponent<Rigidbody>();
+                rb.mass = 22f;
+                rb.isKinematic = false;
+
+                go.AddComponent<Gnome>();
 
                 list.Add(go.transform);
             }
@@ -758,7 +787,7 @@ namespace DuckMow.EditorTools
         /// Vertically everything lives inside the inlay, which is inside the face — the winner line
         /// used to hang off the bottom edge into thin air.
         /// </summary>
-        static void BuildScoreboard(Transform plaza)
+        public static Transform BuildScoreboard(Transform plaza)
         {
             var b = new GameObject("Scoreboard").transform;
             b.SetParent(plaza, false);
@@ -794,7 +823,7 @@ namespace DuckMow.EditorTools
             titleGO.transform.SetParent(b, false);
             titleGO.transform.localPosition = new Vector3(0f, 9.15f, 0.38f);
             titleGO.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
-            board.title = MakeText(titleGO, "GARDENER OF THE YEAR - LAWN ART", 3.6f, new Color(1f, 0.94f, 0.78f), 9.4f);
+            board.title = MakeText(titleGO, "GARDENER OF THE YEAR - ROUND TOTALS", 3.6f, new Color(1f, 0.94f, 0.78f), 9.4f);
 
             board.rows = new ScoreboardRow[4];
             const float rowTop = 8.25f, rowStep = 1.28f;
@@ -841,6 +870,7 @@ namespace DuckMow.EditorTools
             winnerGO.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
             board.winnerLine = MakeText(winnerGO, "", 4.0f, new Color(1f, 0.92f, 0.72f), 9.2f);
             board.winnerLine.alpha = 0f;
+            return b;
         }
 
         /// <summary>

@@ -111,6 +111,79 @@ namespace DuckMow
             if (cardNumber != null) cardNumber.text = value.ToString();
         }
 
+        Transform _portrait;
+        Material _portraitMat;
+
+        /// <summary>
+        /// Put a PICTURE on the scorecard instead of a mark.
+        ///
+        /// The rally is not scored out of ten — it is won — so the bench's job at the end of it is
+        /// to name a winner rather than to grade a performance. Everything else about the beat is
+        /// unchanged: the same three characters, the same lean-in, the same card coming up off the
+        /// desk and slamming to a stop. Only what is printed on the card is different, and that is
+        /// exactly the right amount of difference. A player who has watched the panel mark three
+        /// rounds already knows how to read this one.
+        ///
+        /// The quad is built on the NUMBER's transform rather than at an authored offset, because
+        /// the number is already sitting on the card face at the right angle in every judge's rig —
+        /// it is the one thing in the hierarchy that has solved this problem already.
+        /// </summary>
+        public void ShowPortrait(Texture portrait)
+        {
+            if (portrait == null) return;
+
+            var anchor = cardNumber != null ? cardNumber.transform : card;
+            if (anchor == null) return;
+
+            if (_portrait == null)
+            {
+                var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                go.name = "CardPortrait";
+                var col = go.GetComponent<Collider>();
+                if (col != null) Destroy(col);
+                _portrait = go.transform;
+                _portrait.SetParent(anchor.parent != null ? anchor.parent : anchor, false);
+                _portrait.localRotation = anchor.localRotation;
+                // Lifted a few millimetres off the card face along the number's own forward, so the
+                // picture cannot z-fight with the plate it is printed on.
+                _portrait.localPosition = anchor.localPosition + anchor.localRotation * (Vector3.back * 0.004f);
+                // Sized off the card so a bigger prop gets a bigger picture, rather than a constant
+                // that is right for one of the three rigs and wrong for the other two.
+                float s = card != null ? Mathf.Max(card.localScale.x, 0.2f) * 0.62f : 0.34f;
+                _portrait.localScale = new Vector3(s, s, s);
+
+                // Sprites/Default, and specifically for its CULLING: it draws both faces.
+                //
+                // A quad has a front and a back, and which way round it ends up depends on the
+                // rotation it inherited from a scorecard prop nobody authored with this in mind. Half
+                // the rigs would show a face and half would show nothing, and the failure looks
+                // exactly like "the portrait did not load". Double-sided removes the question.
+                var sh = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Texture");
+                _portraitMat = new Material(sh) { name = "CardPortrait", hideFlags = HideFlags.DontSave };
+                _portrait.GetComponent<MeshRenderer>().sharedMaterial = _portraitMat;
+            }
+
+            _portraitMat.mainTexture = portrait;
+            // Sprites/Default multiplies by the vertex/instance colour, which is black on a bare
+            // primitive quad — the picture would be there and invisible.
+            if (_portraitMat.HasProperty("_Color")) _portraitMat.SetColor("_Color", Color.white);
+            _portrait.gameObject.SetActive(true);
+            // The number and the picture are alternatives, never both — a card carrying a face and
+            // a nine is a card that has not decided what it is announcing.
+            if (cardNumber != null) cardNumber.text = "";
+        }
+
+        /// <summary>Take the picture back off, so a scored round after a rally is a scored round.</summary>
+        public void ClearPortrait()
+        {
+            if (_portrait != null) _portrait.gameObject.SetActive(false);
+        }
+
+        void OnDestroy()
+        {
+            if (_portraitMat != null) Destroy(_portraitMat);
+        }
+
         /// <summary>React to a mark. Positive applauds, negative is a disapproving head shake.</summary>
         public void Punch(float amount)
         {

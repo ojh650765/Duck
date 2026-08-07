@@ -205,6 +205,14 @@ Shader "Duck/GrassBlades"
                 half3 ambient = SampleSH(N) * _AmbientGain
                                 + half3(0.62, 0.76, 1.0) * _AmbientFloor;
 
+                // NO SPECULAR ON THE GRASS.
+                //
+                // A sheen was added here and it was wrong. The wide lobe it needed — a tight one on
+                // a million blades is a field of sparkles — put a pale wash across every blade
+                // facing anywhere near the sun, and the field stopped being green. Round one's lawn
+                // is flat green and reads better for it: at the density this shader draws, the
+                // shape of the field comes from the blades themselves, and any highlight big enough
+                // to see is big enough to grey the colour out.
                 half3 color = IN.color * (lighting + ambient) + trans * mainLight.color * shadow;
                 color = MixFog(color, IN.fogCoord);
                 return half4(color, 1);

@@ -119,7 +119,12 @@ namespace DuckMow
                 // near edge of their lawn is audibly closer than one on the far side.
                 src.transform.position = new Vector3(r.MowerPosition.x, 0.6f, r.MowerPosition.z);
 
+                // Scaled by the venue gate, which is zero while the opening story page is on
+                // screen. A neighbour's engine is still an engine: three of them idling under a
+                // storybook about a duck is the same bug as the player's own mower doing it, and
+                // AudioDirector cannot fix it from over there because these sources are ours.
                 float want = r.Finished ? 0f : engineVolume;
+                if (audioDirector != null) want *= audioDirector.WorldAudio;
                 src.volume = Mathf.MoveTowards(src.volume, want, dt * 0.8f);
             }
         }

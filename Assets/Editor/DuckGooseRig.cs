@@ -30,12 +30,24 @@ namespace DuckMow.EditorTools
         public const string PrefabPath = "Assets/Prefabs/Goose.prefab";
         const string ControllerPath = "Assets/Animations/GooseController.controller";
 
-        /// <summary>Clip names as authored. Only the two continuous ones loop.</summary>
+        /// <summary>
+        /// Clip names as authored, and whether each one loops.
+        ///
+        /// The three continuous ones loop; the reactions are one-shots. The rally drives these by
+        /// name — see <see cref="RallyGoose"/> — so this table is also the contract with the model:
+        /// a clip missing from Goose.fbx is reported loudly at import rather than discovered later as
+        /// a bird that slides across the grass without moving its legs.
+        /// </summary>
         static readonly Dictionary<string, bool> Loops = new()
         {
             { "Fly", true },
             { "Glide", true },
+            { "Charge", true },
+            { "Land", false },
+            { "Brace", false },
             { "Struck", false },
+            { "Recover", false },
+            { "KO", false },
         };
 
         [MenuItem("Duck/4 · Import + rig the goose", priority = 4)]
@@ -94,12 +106,24 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
-        /// Fly and Glide on a blend, Struck as a one-shot over the top.
+        /// One state per clip, flat, with no transitions between them.
         ///
-        /// A blend rather than two states, because the anticipation pose the phase already computes is a
-        /// CONTINUOUS value: the wings flare and the beat stills as the bird commits, and a hard switch
-        /// between flapping and gliding would step through that instead of easing across it. `Struck` sits
-        /// on its own layer so a hit reads over whatever the wings were doing.
+        /// This replaces a blend tree and a trigger layer, and the change is not a simplification for
+        /// its own sake — it is what the rally's goose actually needs. That bird has EIGHT distinct
+        /// things it does and the code already knows which one it is doing, because the state machine
+        /// that decides is the same one that flies it: fly in, land badly, charge, brace, get struck,
+        /// tumble, recover, get knocked out. Encoding those transitions a second time in an animator
+        /// graph means two state machines that have to agree, and the one in the graph has no way to
+        /// know why it is being asked to move.
+        ///
+        /// So the graph holds poses and nothing else, and <see cref="RallyGoose"/> cross-fades to them
+        /// by name. Every parameter-driven transition is gone; the deformation that used to need a
+        /// continuous blend — the wing beat, the neck, the squash — is now driven procedurally in
+        /// LateUpdate on top of whichever clip is playing, which is both cheaper and able to react to
+        /// a hit that arrives mid-stride.
+        ///
+        /// The two old parameters are still declared. They cost nothing, and the previous phase still
+        /// writes them; a Set on a parameter that does not exist is a console error per frame.
         /// </summary>
         static AnimatorController BuildController()
         {
@@ -114,46 +138,33 @@ namespace DuckMow.EditorTools
 
             ctrl.AddParameter("Settle", AnimatorControllerParameterType.Float);
             ctrl.AddParameter("Struck", AnimatorControllerParameterType.Trigger);
-
-            // ---- layer 0: the wingbeat, blended against the held glide ----
-            var tree = new BlendTree { name = "Air", blendParameter = "Settle", hideFlags = HideFlags.None };
-            AssetDatabase.AddObjectToAsset(tree, ctrl);
-            if (clips.TryGetValue("Fly", out var fly)) tree.AddChild(fly, 0f);
-            if (clips.TryGetValue("Glide", out var glide)) tree.AddChild(glide, 1f);
+            // Read by nothing in the graph; written by the rally so a later blend tree has it ready.
+            ctrl.AddParameter("Speed", AnimatorControllerParameterType.Float);
 
             var root = ctrl.layers[0].stateMachine;
-            var air = root.AddState("Air");
-            air.motion = tree;
-            root.defaultState = air;
+            AnimatorState first = null;
+            var made = new List<string>();
 
-            // ---- layer 1: the strike, over the top ----
-            if (clips.TryGetValue("Struck", out var struckClip))
+            // Ordered by the table rather than by whatever the FBX enumerates, so the graph opens in
+            // a sensible reading order and the default state is always Fly.
+            foreach (var name in Loops.Keys)
             {
-                ctrl.AddLayer("Strike");
-                var layers = ctrl.layers;
-                var strike = layers[1];
-                strike.defaultWeight = 1f;
-                strike.blendingMode = AnimatorLayerBlendingMode.Override;
-                ctrl.layers = layers;
-
-                var sm = ctrl.layers[1].stateMachine;
-                var idle = sm.AddState("None");
-                var hit = sm.AddState("Struck");
-                hit.motion = struckClip;
-                sm.defaultState = idle;
-
-                var go = idle.AddTransition(hit);
-                go.AddCondition(AnimatorConditionMode.If, 0f, "Struck");
-                go.hasExitTime = false;
-                go.duration = 0.04f;
-
-                var back = hit.AddTransition(idle);
-                back.hasExitTime = true;
-                back.exitTime = 0.95f;
-                back.duration = 0.18f;
+                if (!clips.TryGetValue(name, out var clip) || clip == null) continue;
+                var state = root.AddState(name);
+                state.motion = clip;
+                // Nothing leaves a state on its own. The bird is cross-faded out of it the moment its
+                // own state machine moves on, and a one-shot that ran off the end into a transition
+                // would fight that.
+                state.writeDefaultValues = true;
+                if (first == null || name == "Fly") first = state;
+                made.Add(name);
             }
 
+            if (first != null) root.defaultState = first;
+            else Debug.LogError("[Duck] the goose controller has no states — Goose.fbx carries no clips.");
+
             AssetDatabase.SaveAssets();
+            Debug.Log($"[Duck] goose controller: states [{string.Join(", ", made)}].");
             return ctrl;
         }
 
@@ -199,14 +210,118 @@ namespace DuckMow.EditorTools
                 smr.sharedMaterials = mats;
                 smr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
                 smr.receiveShadows = true;
-                // The bird is thrown fifty metres and the bounds are authored around the bind pose;
-                // without this a launched goose vanishes when its bind-pose box leaves the frustum.
-                smr.updateWhenOffscreen = true;
+                // Fixed, generous bounds — NOT updateWhenOffscreen.
+                //
+                // The bird is squashed, stretched, whipped and thrown fifty metres, so the bind-pose
+                // box does not describe where it actually is and a goose in flight would pop out of
+                // existence the moment that stale box left the frustum. The obvious answer is
+                // updateWhenOffscreen, and it was what was here, and it is the wrong one twice over:
+                // it re-skins the mesh on the CPU every frame purely to measure it — on a platform
+                // where that is the most expensive thing in the loop — and it is the same code path
+                // that has been failing to draw these birds at all in WebGL.
+                //
+                // A box three metres each way costs nothing, is correct for every pose this bird can
+                // reach including a full launch stretch, and the only thing it gives up is culling a
+                // goose slightly later than strictly necessary. There are at most nine of them.
+                smr.updateWhenOffscreen = false;
+                smr.localBounds = new Bounds(new Vector3(0f, 0.18f, 0.14f), new Vector3(6f, 6f, 6f));
             }
 
-            PrefabUtility.SaveAsPrefabAsset(inst, PrefabPath);
-            Object.DestroyImmediate(inst);
+            // ------------------------------------------------------------------ standing it up
+            //
+            // Three nodes, and each one exists because the other two cannot do its job.
+            //
+            //   Goose   the gameplay root. RallyGoose rotates this to face travel, and nothing else
+            //           ever touches it.
+            //   Body    squash and stretch, and the walk's roll and sway. Its axes must AGREE with
+            //           the root's, because the squash stretches along local +Z meaning "down the
+            //           direction of travel" — put the mesh's own rotation here and a stretched
+            //           goose flattens sideways.
+            //   Model   the imported hierarchy, pitched back ninety degrees so the bird stands up
+            //           and holds its head up. The mesh comes out of the FBX lying on its face; the
+            //           correction has to be BELOW everything that reasons about direction, or every
+            //           piece of that reasoning has to know about it.
+            //
+            // The Animator stays on the imported node. Its clips address bones by path relative to
+            // the GameObject it sits on, so it can be re-parented freely but never separated from
+            // the hierarchy it animates — moving it up to the new root would silently break every
+            // clip in the controller.
+            inst.name = "Model";
+            inst.transform.localRotation = Quaternion.Euler(ModelPitchFix, 0f, 0f);
+
+            var root = new GameObject("Goose");
+            var bodyNode = new GameObject("Body");
+            bodyNode.transform.SetParent(root.transform, false);
+            inst.transform.SetParent(bodyNode.transform, true);
+            inst.transform.localPosition = Vector3.zero;
+            inst.transform.localRotation = Quaternion.Euler(ModelPitchFix, 0f, 0f);
+            inst.transform.localScale = Vector3.one;
+
+            FitForRally(root, anim, bodyNode.transform);
+
+            PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
+            Object.DestroyImmediate(root);
             Debug.Log($"[Duck] wrote {PrefabPath}.");
+        }
+
+        /// <summary>
+        /// Degrees of pitch that turn the imported mesh into a goose that is standing up.
+        ///
+        /// Not a taste call and not a guess: the model arrives nose-down, and at zero the bird runs
+        /// at the gardens staring into the lawn. Held here as one named number rather than typed
+        /// into the prefab by hand, so re-exporting the FBX cannot quietly lose it.
+        /// </summary>
+        const float ModelPitchFix = -55f;
+
+        /// <summary>
+        /// Make the bird playable in the four-way rally.
+        ///
+        /// The rig's procedural half — squash and stretch down travel, the neck whip, the wing beat —
+        /// is driven off bones found BY NAME rather than off serialized references picked in the
+        /// inspector, because this prefab is regenerated from the FBX whenever the model changes and
+        /// hand-picked references do not survive that. Missing a bone is not an error: every one of
+        /// these is optional in <see cref="RallyGoose"/> and the bird simply deforms less.
+        ///
+        /// Body deliberately is NOT the prefab root. RallyGoose writes a non-uniform localScale for
+        /// the squash, and the root is what the director positions and rotates — squashing it would
+        /// scale the collider-free bird along world axes rather than along its own travel, so a
+        /// stretched goose would flatten sideways whenever it turned.
+        /// </summary>
+        static void FitForRally(GameObject inst, Animator anim, Transform bodyNode)
+        {
+            var goose = inst.GetComponent<RallyGoose>();
+            if (goose == null) goose = inst.AddComponent<RallyGoose>();
+            goose.animator = anim;
+
+            // The dedicated node, not a bone. Squash, roll and sway are all expressed in the frame
+            // the machine reasons in — "along travel", "onto the planted foot" — and a bone found by
+            // name sits in the mesh's own frame, which is pitched. Deforming there means every one
+            // of those has to be re-derived through the correction, and the first time the model is
+            // re-exported at a different rest angle they all silently mean something else.
+            goose.body = bodyNode;
+            goose.neck = FindBone(inst.transform, "neck", "head");
+            goose.wingLeft = FindBone(inst.transform, "wing_l", "wingl", "wing.l", "leftwing");
+            goose.wingRight = FindBone(inst.transform, "wing_r", "wingr", "wing.r", "rightwing");
+
+            if (goose.body == inst.transform) goose.body = null;
+
+            Debug.Log($"[Duck] goose fitted for the rally: body={Name(goose.body)}, " +
+                      $"neck={Name(goose.neck)}, wings={Name(goose.wingLeft)}/{Name(goose.wingRight)}.");
+        }
+
+        static string Name(Transform t) => t != null ? t.name : "—";
+
+        /// <summary>First transform whose lowercased name contains any of the fragments, breadth-ish.</summary>
+        static Transform FindBone(Transform root, params string[] fragments)
+        {
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == root) continue;
+                string n = t.name.ToLowerInvariant();
+                foreach (var f in fragments)
+                    if (n.Contains(f)) return t;
+            }
+            return null;
         }
 
         /// <summary>
