@@ -66,9 +66,11 @@ namespace DuckMow
         public float shuntThreshold = 1.8f;
 
         [Header("Staying on the pitch")]
-        [Tooltip("Metres INSIDE the touchline at which the arena starts pushing back. Generous on " +
-                 "purpose — a mower that has reached the fence has already lost several seconds, " +
-                 "and this is a hand on the shoulder well before it is a wall.")]
+        [Tooltip("Metres SHORT OF THE BARRIER WALL at which the arena starts pushing back — not " +
+                 "metres inside the touchline. The wall is at 45.5, so 2.5 puts the hand on the " +
+                 "shoulder at 43 m, which is outside all 42 metres of paintable ground. Measured " +
+                 "in from the touchline instead it lands at 39.5, two metres inside the loop's own " +
+                 "centre line, and shoves the player off the main road for no visible reason.")]
         public float recoverMargin = 2.5f;
         [Tooltip("How hard the push is, per metre over the line.")]
         public float recoverPush = 26f;
@@ -248,12 +250,19 @@ namespace DuckMow
         /// <summary>
         /// Nudge a machine that has ended up somewhere the arena does not exist.
         ///
-        /// Hedges are scenery with colliders, and the outfield has a barrier, so this almost never
-        /// fires. It is here for the almost: a mower launched off a ramp into the top of a hedge, or
-        /// squeezed through a choke by two others at once, would otherwise sit inside geometry
-        /// unable to paint while the clock ran. A shove back toward open ground, proportional and
-        /// applied to everyone including the player — a bot that can be rescued and a player who
-        /// cannot are two different games on the same pitch.
+        /// Hedges are scenery with colliders, the core is walled, and the outfield has a barrier, so
+        /// this almost never fires — and for a long time that sentence was simply untrue. The two
+        /// bands were measured INTO the pitch, from the touchline inward and from the core wall
+        /// outward, which put the outer one at 39.5 m: two metres inside the centre line of the
+        /// outer loop, which is the road everybody drives. So the rescue ran during ordinary fast
+        /// driving, and the mower was pushed toward the middle by something with no model, no sound
+        /// and no explanation while the fence was still three metres away. Measured back from the
+        /// walls instead, the sentence is true again and this is here for the almost: a mower
+        /// launched off a ramp into the top of a hedge, or squeezed through a choke by two others at
+        /// once, would otherwise sit inside geometry unable to paint while the clock ran. A shove
+        /// back toward open ground, proportional and applied to everyone including the player — a
+        /// bot that can be rescued and a player who cannot are two different games on the same
+        /// pitch.
         /// </summary>
         void Recover()
         {
@@ -264,8 +273,8 @@ namespace DuckMow
             Vector3 dir;
             float over;
 
-            // OUTSIDE THE TOUCHLINE: always pushed straight back INWARD, and the push starts before
-            // the line rather than at it.
+            // OFF THE PITCH, HEADING FOR THE BARRIER: always pushed straight back INWARD, and the
+            // push starts before the wall rather than at it.
             //
             // Inward specifically, not "toward the nearest playable point". Out here the nearest
             // playable point is the touchline itself, so a machine sliding along the outside gets a
@@ -273,18 +282,46 @@ namespace DuckMow
             // Aiming at the middle of the arena instead means the correction always has a component
             // against whatever took it out there.
             //
-            // The margin is generous on purpose: a mower that reaches the fence has already lost
-            // several seconds, and letting it drift a metre further before anything happens only
-            // adds to that. It is a hand on the shoulder well before it is a wall.
+            // The margin is measured back from THE WALL, which is what the tooltip beside it always
+            // said it was — a hand on the shoulder two and a half metres before the barrier, at
+            // 43 m. It used to be measured in from the touchline, and the difference between those
+            // two readings is the pitch: 42 - 2.5 is 39.5, and 39.5 is INSIDE the outer loop, whose
+            // centre line is 37.5. The rescue fired continuously on the fastest and most ordinary
+            // driving in the mode and dragged machines off their own line, two metres out from where
+            // a mower running the rim naturally sits. Nothing about where the fence stands changed;
+            // a band bitten out of playable ground is a band nobody agreed to. All 42 paintable
+            // metres are freely driveable now, with a metre of run-off past the touchline before
+            // anything touches the wheel and another 2.5 before the wall at 45.9 does.
+            //
+            // So this is a restoration and not a tuning pass. TurfArena.IsPlayable is the single
+            // answer to "can you be here" precisely so that the shader, the CPU grid, the bots'
+            // planner AND THE RECOVERY PUSH cannot disagree — its own comment names this method in
+            // that list, and warns that the last time the stage had two answers "the mask happily
+            // painted ground the player could not reach". That is exactly what had come back:
+            // IsPlayable said yes out to 42, TurfMask scored it, the shader drew it, and Recover
+            // said no from 39.5 — a 2.5 m annulus of the board, some 640 m2 of it, that counted
+            // toward the result and could not be driven. The touchline is a painted ring on the
+            // ground with turf continuing past it, so the player could see the line they were being
+            // stopped short of. Reading the wall's radius here is what puts Recover back inside the
+            // one definition rather than beside it.
+            //
+            // Clamped to the touchline so that a hand-edited margin larger than the 3.5 m of run-off
+            // cannot walk the soft edge back into the pitch, and — since the core band below is at
+            // 8 m — cannot cross it and leave a machine shoved inward and outward at once.
             float r = new Vector2(p.x, p.z).magnitude;
-            float softEdge = TurfArena.ArenaRadius - recoverMargin;
-            float coreEdge = TurfArena.CoreRadius + recoverMargin;
+            float softEdge = Mathf.Max(TurfArena.BarrierRadius - recoverMargin, TurfArena.ArenaRadius);
+            float coreEdge = TurfArena.CoreRadius;
             if (r < coreEdge)
             {
-                // INSIDE THE CORE: pushed straight back OUT, and again before the wall rather than
-                // at it. The bench is in there and there is a stone wall around it, so a machine
-                // that has found its way in has clipped through something — the right correction is
-                // the one that gets it back onto turf without waiting for the collider to argue.
+                // INSIDE THE CORE: pushed straight back OUT — at the wall this time, not before it.
+                // The bench is in there and there is a stone wall around it, so a machine that has
+                // found its way in has clipped through something, and that is the only case worth
+                // acting on. A margin here buys nothing and costs turf: the plaza runs right up to
+                // the kerb, and the annulus just outside it is what TurfArena.CoreRadius calls the
+                // best ground in the arena. Painting it is the reward for daring to drive the
+                // roundabout, and the old +2.5 shoved gardeners off it while they were collecting.
+                // Genuinely inside the geometry, the right correction is still the one that gets the
+                // machine back onto turf without waiting for the collider to argue.
                 dir = r > 1e-3f ? p / r : Vector3.forward;
                 over = coreEdge - r;
             }
