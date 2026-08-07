@@ -18,7 +18,34 @@ namespace DuckMow.EditorTools
         const string MeshDir = "Assets/Meshes";
         const string MatDir = "Assets/Materials";
 
-        static Material Mat(string name) => AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{name}.mat");
+        /// <summary>
+        /// Load an authored material by name, and SAY SO when it is not there.
+        ///
+        /// This was a bare LoadAssetAtPath, and a bare LoadAssetAtPath returns null without a word.
+        /// That is how the judges' bench and the scoreboard came to be baked into BloomRush.unity
+        /// with m_Materials: [{fileID: 0}] — sixteen renderers, magenta on screen, and a completely
+        /// clean console, because a null material is not a missing shader and nothing on this path
+        /// ever reached the error EnsureMaterial would have raised.
+        ///
+        /// The reason it went unnoticed for so long is that the neighbouring idiom hides it: things
+        /// built through DuckSceneBuilder.EnsureLit CREATE the asset when it is absent, so in the
+        /// same scene, in the same frame, the crowd stands were perfect while the bench was not.
+        /// A builder that half-heals is worse than one that fails, because the half that healed is
+        /// the evidence you look at first.
+        ///
+        /// Deliberately an error and not an exception: a rebuild that stops dead on the first
+        /// missing material tells you about one, where a rebuild that finishes noisily tells you
+        /// about all of them, and this ran the whole way through producing sixteen.
+        /// </summary>
+        static Material Mat(string name)
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{name}.mat");
+            if (m == null)
+                Debug.LogError($"[Duck] Material not found: {MatDir}/{name}.mat — whatever is being " +
+                               "built now will bake a null material and render magenta. Run " +
+                               "Duck/2 · Build Materials first.");
+            return m;
+        }
 
         static void EnsureFolder(string path)
         {

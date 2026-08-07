@@ -21,7 +21,21 @@ namespace DuckMow.EditorTools
         const string MatDir = "Assets/Materials";
         const string MeshDir = "Assets/Meshes/Generated";
 
-        static Material Mat(string n) => AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{n}.mat");
+        /// <summary>
+        /// Load an authored material by name, loudly. Twin of <c>DuckMeshLibrary.Mat</c>, and it
+        /// failed in exactly the same silence — this is the copy that built the scoreboard's face,
+        /// inlay, crest, legs and four row plates as null materials, which is nine of the sixteen
+        /// magenta renderers that ended up in BloomRush.unity with nothing in the console.
+        /// </summary>
+        static Material Mat(string n)
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{n}.mat");
+            if (m == null)
+                Debug.LogError($"[Duck] Material not found: {MatDir}/{n}.mat — the object being " +
+                               "built will bake a null material and render magenta. Run " +
+                               "Duck/2 · Build Materials first.");
+            return m;
+        }
 
         static System.Random _rng;
         static float Rand => (float)_rng.NextDouble();

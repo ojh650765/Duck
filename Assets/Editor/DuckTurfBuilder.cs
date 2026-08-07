@@ -85,6 +85,25 @@ namespace DuckMow.EditorTools
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
+            // Make the materials before anything asks for them, because this builder cannot survive
+            // their absence and does not say so when it happens.
+            //
+            // BuildMaterials is what creates M_WoodWarm, M_WoodDark and the rest, and every other
+            // entry point calls it — Duck/2 is nothing else, Duck/3 opens with it, the menu builder
+            // and the pipeline both do. This one did not, and simply assumed another menu item had
+            // been run first. That assumption held right up until the day the folder was empty.
+            //
+            // What it cost: the bench and the scoreboard fetch their materials through
+            // DuckMeshLibrary.Mat / DuckVenueBuilder.Mat, which are a bare LoadAssetAtPath and
+            // return NULL SILENTLY. The crowd stands go through EnsureLit, which CREATES the asset
+            // when it is missing. So a rebuild against an empty folder produced a scene in which the
+            // stands were perfect and the judges' bench and the scoreboard were baked with
+            // m_Materials: [{fileID: 0}] — magenta, with nothing in the console, because a null
+            // material is not a missing shader and EnsureMaterial's error never got the chance to
+            // fire. Sixteen renderers in BloomRush.unity, none in any other scene, all explained by
+            // which of the two idioms fetched them.
+            DuckSceneBuilder.BuildMaterials();
+
             DuckSceneBuilder.BuildLighting();
             DuckSceneBuilder.BuildEnvironmentLighting();
             DuckSceneBuilder.BuildPostProcessing();
@@ -1176,6 +1195,30 @@ namespace DuckMow.EditorTools
             float moonIntensity = defaults.moonIntensity;
             Vector3 moonAngles = defaults.moonAngles;
             Object.DestroyImmediate(defaults.gameObject);
+
+            // AND HERE THE ARENA'S NIGHT PARTS COMPANY WITH THE CEREMONY'S, deliberately, against
+            // the advice directly above.
+            //
+            // They were kept identical so the two could never drift, which is the right instinct and
+            // the wrong answer, because they are not doing the same job. The ceremony is a held beat
+            // where the player looks at a trophy under a moon and the darkness IS the point. This is
+            // seventy-five seconds of driving in which they have to read a hedge line, a touchline,
+            // a plaza edge and four liveries at speed — and at the ceremony's levels they could not.
+            // The stage came back from a playtest as unreadable murk.
+            //
+            // The lift is mostly AMBIENT rather than key, and that distinction is the whole trick.
+            // Reading was being lost in the shadowed ground, not on the lit faces, so ambient roughly
+            // doubles and opens those up. The moon goes 0.42 -> 0.92 and stays blue: raising the key
+            // to a daylight value instead was tried first and it did make the arena legible, by
+            // taking the night away with it, which nobody asked for. Sky, fog and reflection are
+            // untouched below, so the palette stays cool and the lanterns stay the warm things in
+            // frame — it reads as a floodlit night match, which is what it always wanted to be.
+            //
+            // CeremonyNight's own defaults are NOT edited, so the championship's closing night is
+            // exactly as it was. Checked on screen at all three settings: murk, daylight, then this.
+            moonIntensity = 0.92f;
+            moon = new Color(0.72f, 0.80f, 1.00f);
+            ambient = new Color(0.27f, 0.32f, 0.45f);
 
             CeremonyNight.ApplyNightNow(ambient, fog, moon, moonIntensity, moonAngles);
 
