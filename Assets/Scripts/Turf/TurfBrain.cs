@@ -107,7 +107,7 @@ namespace DuckMow
         /// Combined with each contestant's own <see cref="skill"/>, so raising it lifts the whole
         /// field WITHOUT flattening HORACE, MARGOT and BRAMBLE into one another. See <see cref="Edge"/>.
         /// </summary>
-        public static float Difficulty = 0.85f;
+        public static float Difficulty = 0.90f;
 
         // =============================================================================================
         //  SERIALIZED — every one of these is already baked into BloomRush.unity.
@@ -276,6 +276,102 @@ namespace DuckMow
         /// <summary>Dot product between consecutive legs that counts as a straight worth boosting.</summary>
         const float StraightDot = 0.62f;
 
+        // ---- boost -------------------------------------------------------------------------------
+        //
+        // The gate used to be "the waypoint is more than seven metres away", and 396 traced samples
+        // say the objective is nine metres away by MEDIAN and inside seven metres 43% of the time.
+        // So the second gate was shut almost as often as the gateway band was — bots boosted on 4% of
+        // samples and averaged 4.5 m/s against a top speed of ten. Distance to the next waypoint was
+        // never the right question anyway: what makes a boost worth spending is how far the machine
+        // can keep going BEFORE THE NEXT REAL TURN, which on the outer loop is most of a lap and on a
+        // six-metre hop between neighbouring sectors is nothing. See RunAhead.
+
+        /// <summary>Metres of straight running that make a boost worth starting.</summary>
+        const float BoostArmRun = 13f;
+        /// <summary>Metres of straight left at which a burst is abandoned.</summary>
+        const float BoostDropRun = 5f;
+        /// <summary>
+        /// Seconds a burst stays lit once started.
+        ///
+        /// Boost that is re-decided every frame is boost nobody can see. It flickers on for three
+        /// frames at a hedge mouth and off again, which costs the same fuel as a real burst and reads
+        /// as nothing at all. Committing to about a second means every burst is long enough to be a
+        /// visible event — the engine note changes, the machine pulls away, and the player can tell
+        /// that somebody over there decided to go for it.
+        /// </summary>
+        const float BoostCommit = 1.1f;
+        /// <summary>
+        /// Tank needed before a burst may START, 0..1.
+        ///
+        /// The economy will not pay for continuous boost and it is not supposed to: a full tank is
+        /// 2.4 seconds, painting fresh neutral earns about 0.05 a second against a drain of 0.42, and
+        /// only stealing (0.33 a second) comes close to sustaining it. Dribbled out at the 0.12 the
+        /// mower will start on, that buys a third of a second every few seconds — a stutter. Saved to
+        /// a third of a tank it buys most of a second in one go, on a straight the bot has actually
+        /// looked for. Same fuel, spent where it can be seen.
+        /// </summary>
+        const float BoostArmFuel = 0.30f;
+
+        // ---- getting unstuck ---------------------------------------------------------------------
+        //
+        // Measured on the same three runs: of every sample where a gardener was below 3 m/s — and
+        // that was 46% OF ALL SAMPLES — half were under NEGATIVE throttle, which is this recovery
+        // firing. The old numbers declared a machine stuck after 0.9 s and reversed it for 0.8 s
+        // without changing its mind about anything, so it backed up, drove at the identical objective,
+        // hit the identical obstruction and did it again: a 1.7 s loop that eats a fifth of the match
+        // and looks exactly like a machine with nobody in it. Confirm for longer, reverse for less,
+        // and — the part that was actually missing — THINK AGAIN AFTERWARDS.
+
+        /// <summary>Seconds of no progress before a machine admits it is stuck.</summary>
+        const float StuckConfirm = 1.35f;
+        /// <summary>Seconds of reverse. Enough to come off whatever it is on, not enough to tour.</summary>
+        const float ReverseSeconds = 0.55f;
+        /// <summary>Seconds before the same machine may declare itself stuck again.</summary>
+        const float UnstickRest = 1.6f;
+
+        /// <summary>
+        /// Corner, in degrees, at which a gardener will pull the handbrake — and it is deliberately
+        /// almost never.
+        ///
+        /// The drift model is the player's toy. It drops grip to 0.035 and bleeds 2.6 m/s every
+        /// second, and a bot collects none of the mini-turbo that is supposed to pay for that, so
+        /// every flick is a straight donation of speed. With objectives nine metres apart the old
+        /// 88-degree trigger was being met constantly, and a machine that flicks, loses grip, slides
+        /// to a stop and then declares itself stuck is most of the crawling in the trace. Kept only
+        /// for a genuine hairpin taken fast, with a rest between, because it is worth seeing once a
+        /// match and worth nothing twice a lap.
+        /// </summary>
+        const float HandbrakeAngle = 104f;
+        /// <summary>Seconds the flick is held. Shorter than this and no slide ever starts.</summary>
+        const float HandbrakeFlick = 0.35f;
+        const float HandbrakeRest = 2.4f;
+
+        // ---- what a route is worth -----------------------------------------------------------------
+
+        /// <summary>Points sampled along the way to a candidate sector, to see what is on the route.</summary>
+        const int CorridorSamples = 5;
+        /// <summary>
+        /// How much of the corridor the roller really collects, as a fraction of its full width.
+        ///
+        /// Not 1: the machine wanders off the straight line between two points, overlaps its own
+        /// swath and takes corners wide. Not a half either — on a long committed run across open
+        /// ground most of that 3.3 m really does land on turf the sampling says is there.
+        ///
+        /// It is also the single lever that decides whether long runs beat short ones, so it is worth
+        /// writing down what it buys. Early match, everything neutral, BRAMBLE's weights, comparing a
+        /// six-metre hop to the next sector against a thirty-metre run and a forty-five:
+        ///
+        ///     yield 0.66   28.9   28.3   28.0     near wins — still shuffling
+        ///     yield 0.78   30.0   31.2   31.4     long wins, and keeps winning
+        ///
+        /// Distance comes out close to NEUTRAL at 0.78, which is the property actually wanted: the
+        /// choice stops being about how far away something is and becomes about how good the ground
+        /// is. And since a gardener has just painted the sector it is standing in, the ground nearest
+        /// it is the worst on the board — one pass of a 3.3 m roller through a 6 m sector drops its
+        /// worth by a factor of seven — so "best ground" and "not right here" are the same answer.
+        /// </summary>
+        const float CorridorYield = 0.78f;
+
         /// <summary>The band of the outer loop a gardener will run a lane in.</summary>
         const float LaneInner = 35.2f, LaneOuter = 43.0f;
 
@@ -334,6 +430,20 @@ namespace DuckMow
         /// <summary>Square metres per second the current objective was worth when it was chosen.</summary>
         public float ObjectiveValue { get; private set; }
 
+        /// <summary>
+        /// Metres of roughly-straight running left before the next real turn. What arms the boost.
+        ///
+        /// Exposed because "the bots do not use the booster" is a claim about the screen and the
+        /// trace had no field that could confirm or deny it — the nearest thing was speed, and
+        /// inferring boost from speed is how a shut gate went unnoticed for two rounds. A property,
+        /// so it costs nothing and Unity cannot serialise it. See the note on TurfDirector's trace in
+        /// the report: printing this beside Boost is what makes the fix checkable rather than
+        /// arguable.
+        /// </summary>
+        public float StraightRun { get; private set; }
+        /// <summary>True while a boost burst is lit. Distinct from wanting one.</summary>
+        public bool BoostArmed => Boost;
+
         System.Random _rng;
         float _thinkTimer;
         Vector3 _waypoint;
@@ -341,6 +451,10 @@ namespace DuckMow
         float _gapJitter;
         float _stuckTimer;
         float _reverseTimer;
+        float _unstickRest;
+        float _handbrakeRest;
+        float _handbrakeHold;
+        float _boostHold;
         TurfCompetitor _barging;
         float _bargeTimer;
         float _bargeRest;
@@ -398,6 +512,8 @@ namespace DuckMow
             _thinkTimer = 0f;
             _reviewTimer = 0f;
             _stuckTimer = _reverseTimer = 0f;
+            _unstickRest = _handbrakeRest = _handbrakeHold = _boostHold = 0f;
+            StraightRun = 0f;
             _barging = null;
             _bargeTimer = _bargeRest = 0f;
             _path.Clear();
@@ -656,6 +772,64 @@ namespace DuckMow
             // Zero and not negative infinity: a sector whose prize is negative is one this gardener
             // would be REPAINTING, and driving to the least bad of those is not a plan. If nothing on
             // the board scores at all the old objective simply stands.
+            // ---- PASS ONE: what is a square metre of each sector worth to this gardener? ----
+            //
+            // Two numbers per sector. WORTH is the average value of a cell there, near enough
+            // dimensionless and near enough 1.0 for fresh neutral ground — that is what makes it
+            // sampleable along a route. PRIZE is the whole sector in square-metre equivalents, which
+            // is what arriving is worth.
+            for (int sz = 0; sz < TurfMask.SectorRes; sz++)
+            for (int sx = 0; sx < TurfMask.SectorRes; sx++)
+            {
+                int idx = sz * TurfMask.SectorRes + sx;
+                int playable = mask.SectorPlayable(sx, sz);
+                if (playable < MinSectorCells)
+                {
+                    _worth[idx] = 0f; _prize[idx] = 0f; _mineFrac[idx] = 1f; _takeable[idx] = 0;
+                    continue;
+                }
+
+                int mineC = mask.SectorOwned(sx, sz, slot);
+                int enemyC = mask.SectorEnemy(sx, sz, slot);
+                int freeC = playable - mineC - enemyC;
+                int leadC = iLead ? 0 : mask.SectorOwned(sx, sz, _leader);
+
+                float weighted = freeC * wFree
+                               + enemyC * wEnemy
+                               + leadC * wLead
+                               + Mathf.Min(mineC, enemyC) * wFront
+                               - mineC * wMine;
+
+                float radius = _sectorRadius[idx];
+                float band = radius > TurfArena.HedgeOuter ? bandLoop
+                           : radius < TurfArena.HedgeInner ? bandIn : 1f;
+
+                _worth[idx] = weighted / playable;
+                _prize[idx] = weighted * CellArea * band;
+                _mineFrac[idx] = mineC / (float)playable;
+                _takeable[idx] = freeC + enemyC;
+            }
+
+            // ---- PASS TWO: value each sector as a DRIVE, not as a destination ----
+            //
+            // This is the correction that matters most in this file, and the first version had it
+            // plainly wrong. It charged travel purely as cost — prize over seconds — when a mower
+            // with the roller down is PAINTING THE WHOLE WAY THERE. A forty metre run lays down about
+            // 87 m2 of swath before it arrives; the six-metre sector at the end of it holds 36 m2 at
+            // the very most. Costing the journey and banking only the destination therefore made the
+            // nearest sector win almost every time, and the trace shows exactly that: a median
+            // objective distance of NINE METRES across 396 samples, 43% of them inside seven. That is
+            // not a gardener choosing where to work, it is one shuffling between its own feet — and
+            // it is simultaneously why the boost never fired, because there was never a straight long
+            // enough to spend one on.
+            //
+            // So the route is priced too. Sample the corridor, find what a square metre is worth
+            // along it, and multiply by the swath the machine will actually lay down getting there.
+            // Long runs across rich ground now beat short hops, long runs across ground the gardener
+            // already owns still lose — the corridor worth goes negative there — and committing to a
+            // real line across the arena becomes the correct play rather than an accident.
+            float swath = competitor.ActiveWidth * CorridorYield;
+
             float bestValue = 0f;
             Vector3 best = Objective;
             int bestSx = -1, bestSz = -1, bestPrizeCells = 0;
@@ -663,28 +837,9 @@ namespace DuckMow
             for (int sz = 0; sz < TurfMask.SectorRes; sz++)
             for (int sx = 0; sx < TurfMask.SectorRes; sx++)
             {
-                int playable = mask.SectorPlayable(sx, sz);
-                if (playable < MinSectorCells) continue;
-
-                int mineC = mask.SectorOwned(sx, sz, slot);
-                int enemyC = mask.SectorEnemy(sx, sz, slot);
-                int freeC = playable - mineC - enemyC;
-                int leadC = iLead ? 0 : mask.SectorOwned(sx, sz, _leader);
-
-                // The prize, in square metres of ground actually worth putting a roller over.
-                float prize = (freeC * wFree
-                             + enemyC * wEnemy
-                             + leadC * wLead
-                             + Mathf.Min(mineC, enemyC) * wFront
-                             - mineC * wMine) * CellArea;
-
                 int idx = sz * TurfMask.SectorRes + sx;
-                float radius = _sectorRadius[idx];
-                prize *= radius > TurfArena.HedgeOuter ? bandLoop
-                       : radius < TurfArena.HedgeInner ? bandIn : 1f;
+                if (_takeable[idx] <= 0 && _prize[idx] <= 0f) continue;
 
-                // The drive. Distance, plus the price of turning round to face it, plus the time it
-                // takes to work the place once there.
                 Vector3 centre = _sectorCentre[idx];
                 float dx = centre.x - me.x, dz = centre.z - me.z;
                 float dist = Mathf.Sqrt(dx * dx + dz * dz);
@@ -692,13 +847,23 @@ namespace DuckMow
                 float ahead = (dx * fwd.x + dz * fwd.z) * inv;          // 1 straight on, -1 behind
                 float seconds = WorkSeconds + dist / CruiseEstimate + (1f - ahead) * 0.5f * TurnSeconds;
 
-                float value = prize / seconds;
+                // What the drive itself collects.
+                float route = 0f;
+                for (int s = 1; s <= CorridorSamples; s++)
+                {
+                    float t = s / (float)CorridorSamples;
+                    int at = SectorIndexAt(me.x + dx * t, me.z + dz * t);
+                    if (at >= 0) route += _worth[at];
+                }
+                route = route / CorridorSamples * dist * swath;
+
+                float value = (route + _prize[idx]) / seconds;
 
                 // The hub. Note this rides on hub-wide need, not on this sector's own paint, so it
                 // does not switch itself off halfway to the threshold; the per-sector "how much of
                 // it is not already mine" only decides WHICH part of the hub to go and take.
-                if (crownPull > 0f && radius < TurfArena.PlazaRadius)
-                    value += crownPull * (1f - mineC / (float)playable);
+                if (crownPull > 0f && _sectorRadius[idx] < TurfArena.PlazaRadius)
+                    value += crownPull * (1f - _mineFrac[idx]);
 
                 // Everything below scales the value, so a negative one has to leave first — a
                 // discount applied to a loss is an improvement, and a gardener that reasons its way
@@ -714,7 +879,7 @@ namespace DuckMow
                 bestValue = value;
                 best = centre;
                 bestSx = sx; bestSz = sz;
-                bestPrizeCells = freeC + enemyC;
+                bestPrizeCells = _takeable[idx];
             }
 
             ObjectiveValue = bestValue;
@@ -806,12 +971,39 @@ namespace DuckMow
         static Vector3[] _sectorCentre;
         static float[] _sectorRadius;
 
+        // Scratch for the two-pass valuation. Shared, because only one gardener is ever inside
+        // ChooseObjective at a time — it runs on the main thread and does not yield — and four
+        // private copies of the same 256 floats would be three copies of nothing useful.
+        static float[] _worth, _prize, _mineFrac;
+        static int[] _takeable;
+
+        /// <summary>Metres across one coarse sector. Six, and the arithmetic should say so once.</summary>
+        const float SectorStep = TurfMask.Size / TurfMask.SectorRes;
+
+        /// <summary>Which coarse sector a world point falls in, or -1 off the map.</summary>
+        static int SectorIndexAt(float x, float z)
+        {
+            int sx = (int)((x + TurfMask.Half) / SectorStep);
+            int sz = (int)((z + TurfMask.Half) / SectorStep);
+            if (sx < 0 || sz < 0 || sx >= TurfMask.SectorRes || sz >= TurfMask.SectorRes) return -1;
+            return sz * TurfMask.SectorRes + sx;
+        }
+
         static void BuildSectorTable()
         {
-            if (_sectorCentre != null) return;
+            // Guarded on the LAST array allocated rather than the first. The editor keeps statics
+            // alive across a Play session when domain reload is off, and a guard that trips on
+            // _sectorCentre would happily skip the scratch buffers if the two ever came to be
+            // allocated in different places — a null-reference that would only ever appear on the
+            // second run, in the editor, and never in a build.
+            if (_takeable != null) return;
             int n = TurfMask.SectorRes * TurfMask.SectorRes;
             _sectorCentre = new Vector3[n];
             _sectorRadius = new float[n];
+            _worth = new float[n];
+            _prize = new float[n];
+            _mineFrac = new float[n];
+            _takeable = new int[n];
             for (int sz = 0; sz < TurfMask.SectorRes; sz++)
             for (int sx = 0; sx < TurfMask.SectorRes; sx++)
             {
@@ -1088,10 +1280,11 @@ namespace DuckMow
         /// Crawl the lane across the outfield band as the gardener drives it.
         ///
         /// Tied to distance travelled rather than to the clock, so a machine parked in a choke does
-        /// not silently drift its line across twelve metres of arena while standing still. At the
-        /// rate here a gardener sweeps the band about twice over a hundred second match, which with a
-        /// 3.3 m roller is roughly the coverage the outfield deserves, and it bounces off both edges
-        /// rather than wrapping so the sweep is continuous.
+        /// not silently drift its line across twelve metres of arena while standing still. Over the
+        /// seventy-five seconds a match actually runs, a gardener out on the loop covers some six
+        /// hundred metres and so sweeps the 7.8 m band about one and a half times — which with a
+        /// 3.3 m roller is roughly the coverage the outfield deserves. It bounces off both edges
+        /// rather than wrapping, so the sweep is continuous.
         /// </summary>
         void TickLane(float dt)
         {
@@ -1113,11 +1306,19 @@ namespace DuckMow
             if (fwd.sqrMagnitude < 1e-4f) return;
             fwd.Normalize();
 
-            // Wedged. Measured as "not getting closer to the waypoint while asking for throttle",
-            // which catches a nose in a hedge and a shoving match against another machine alike.
+            // Wedged. Measured as "asking for throttle and not moving", which catches a nose in a
+            // hedge and a shoving match against another machine alike.
+            if (_unstickRest > 0f) _unstickRest -= dt;
+            if (_handbrakeRest > 0f) _handbrakeRest -= dt;
+
             if (Throttle > 0.25f && competitor.Speed < 1.2f) _stuckTimer += dt;
             else _stuckTimer = Mathf.Max(0f, _stuckTimer - dt * 2f);
-            if (_stuckTimer > 0.9f) { _reverseTimer = 0.8f; _stuckTimer = 0f; }
+            if (_stuckTimer > StuckConfirm && _unstickRest <= 0f)
+            {
+                _reverseTimer = ReverseSeconds;
+                _stuckTimer = 0f;
+                _unstickRest = UnstickRest;
+            }
 
             if (_reverseTimer > 0f)
             {
@@ -1125,6 +1326,14 @@ namespace DuckMow
                 Throttle = -0.85f;
                 Steer = Mathf.Sign(Vector3.SignedAngle(fwd, to.sqrMagnitude > 1e-4f ? to : fwd, Vector3.up)) * -0.7f;
                 Handbrake = Boost = false;
+                _boostHold = 0f;
+
+                // AND THINK AGAIN ON THE WAY OUT. This is the line the old recovery was missing and
+                // it is the whole difference between a reverse and a loop: backing off an obstruction
+                // and then driving at the identical objective puts the machine straight back into it,
+                // which the trace caught doing 1.7 s laps for a fifth of the match. Whatever was over
+                // there is unreachable from here, so the next review picks something else.
+                if (_reverseTimer <= 0f) _thinkTimer = 0f;
                 return;
             }
 
@@ -1138,6 +1347,11 @@ namespace DuckMow
                 Throttle = Mathf.MoveTowards(Throttle, ArriveThrottle, dt * ThrottleRate);
                 Steer *= 0.85f;
                 Handbrake = Boost = false;
+                // The burst is over, not paused. Only the final leg of a route ever reaches this —
+                // earlier ones are counted done at legRadius, well outside arriveRadius — so there is
+                // no straight left to relight onto, and a latch left standing here would flicker back
+                // on for a frame as the next objective is chosen.
+                _boostHold = 0f;
                 return;
             }
 
@@ -1177,21 +1391,106 @@ namespace DuckMow
             float floorThr = Mathf.Lerp(ThrottleFloorSoft, ThrottleFloorSharp, _edge);
             Throttle = Mathf.MoveTowards(Throttle, Mathf.Lerp(1f, floorThr, tight), dt * ThrottleRate);
 
-            // BOOST, on a straight worth spending it on: pointed roughly the right way, with room,
-            // not threading a gateway, and with a leg after this one that carries on the same way.
-            // The gateway test is the one fixed in Route — until it was, this line was dead on the
-            // entire outer loop, which is over half the board.
+            // BOOST.
+            //
+            // Armed on how far the machine can keep going before the next real turn — see RunAhead —
+            // and NOT on how far away the next waypoint happens to be. That old test asked a
+            // question whose answer is nine metres by median, so it was shut 43% of the time on its
+            // own and much more often than that in combination; measured across three runs the
+            // gardeners boosted on 4% of samples and averaged 4.5 m/s against a top speed of ten.
+            //
+            // Then it LATCHES. A burst that is re-decided every frame flickers on and off at every
+            // waypoint and reads as nothing, while costing the same fuel as a burst that reads as a
+            // decision. Once lit it stays lit for about a second unless the line genuinely runs out,
+            // and it will not light at all without a third of a tank to spend — because the economy
+            // pays for roughly one good burst every few seconds and the choice is between one
+            // visible one and four invisible ones.
             float align = Mathf.Clamp01(1f - need / 90f);
-            bool straightAhead = align > 0.72f && dist > 7f && RoutingVia < 0 && LegsAlign();
-            Boost = _barging != null
-                ? align > 0.66f && dist > 4f
-                : straightAhead && _edge > 0.3f && competitor.Speed > 3f;
+            StraightRun = RunAhead(pos);
+            float fuel = competitor.mower != null ? competitor.mower.BoostFuel : 0f;
 
-            // A handbrake flick for a corner that is genuinely too tight to steer round, and close
-            // enough that steering round it is not an option. Sparingly: the drift model is the
-            // player's toy, it bleeds 2.6 m/s per second, and a bot using it constantly makes the
-            // arena look like it is on ice.
-            Handbrake = !behind && need > 88f && dist > 4f && dist < 16f && competitor.Speed > 7f;
+            if (_barging != null)
+            {
+                Boost = align > 0.66f && dist > 4f && fuel > 0.05f;
+                _boostHold = 0f;
+            }
+            else
+            {
+                bool lineGone = align < 0.45f || RoutingVia >= 0 || StraightRun < BoostDropRun;
+                bool arm = align > 0.66f && RoutingVia < 0 && LegsAlign()
+                           && StraightRun > BoostArmRun && competitor.Speed > 3f
+                           && fuel > BoostArmFuel && _edge > 0.3f;
+
+                if (arm) _boostHold = BoostCommit;
+                else if (lineGone || fuel <= 0.001f) _boostHold = 0f;
+                else _boostHold = Mathf.Max(0f, _boostHold - dt);
+
+                Boost = _boostHold > 0f;
+            }
+
+            // A handbrake flick for a corner genuinely too tight to steer round, with a rest between.
+            // Almost never, and the trace is why: drift drops grip to 0.035 and bleeds 2.6 m/s a
+            // second, a bot banks none of the mini-turbo that is meant to pay for it, and at the old
+            // 88-degree trigger — met constantly when objectives are nine metres apart — the machine
+            // flicked, slid to a halt, declared itself stuck and reversed. That was half of all the
+            // crawling on the board.
+            //
+            // Held for a flick rather than latched to the trigger condition. A handbrake that is
+            // true on the one frame the angle is met and then locked out is a handbrake nobody ever
+            // pulled: the drift model needs a slide to start, and a single frame of input is not a
+            // slide. So it commits to a third of a second and then rests.
+            if (_handbrakeHold > 0f)
+            {
+                _handbrakeHold -= dt;
+                Handbrake = true;
+            }
+            else
+            {
+                Handbrake = !behind && need > HandbrakeAngle && dist > 5f && dist < 14f
+                            && competitor.Speed > 8f && _handbrakeRest <= 0f;
+                if (Handbrake)
+                {
+                    _handbrakeHold = HandbrakeFlick;
+                    _handbrakeRest = HandbrakeRest;
+                }
+            }
+        }
+
+        /// <summary>
+        /// How far this machine can keep going before the next real turn, in metres.
+        ///
+        /// The number the boost gate should always have been asking for. "Distance to the next
+        /// waypoint" is a property of how finely the route happens to be chopped up — the loop ring
+        /// is twenty nodes, so a full-speed lap of it is twenty waypoints eleven metres apart and
+        /// never once "far away", even though it is the longest uninterrupted run on the board. This
+        /// walks forward through the route instead and adds up the legs while they keep pointing the
+        /// same way, so a lap of the loop reports fifty-odd metres and a six-metre hop to the next
+        /// sector reports six.
+        ///
+        /// Capped at four legs ahead. It runs every frame for four gardeners, and beyond about fifty
+        /// metres the answer stops changing any decision.
+        /// </summary>
+        float RunAhead(Vector3 pos)
+        {
+            Vector3 first = _waypoint - pos; first.y = 0f;
+            float run = first.magnitude;
+            if (_path.Count == 0 || run < 1e-3f) return run;
+
+            Vector3 dir = first / run;
+            Vector3 at = _waypoint;
+
+            for (int i = _leg + 1; i < _path.Count && i <= _leg + 4; i++)
+            {
+                Vector3 seg = _path[i] - at; seg.y = 0f;
+                float len = seg.magnitude;
+                if (len < 1e-3f) continue;
+                seg /= len;
+                if (Vector3.Dot(dir, seg) < StraightDot) break;
+                run += len;
+                at = _path[i];
+                dir = seg;
+            }
+            return run;
         }
 
         /// <summary>
