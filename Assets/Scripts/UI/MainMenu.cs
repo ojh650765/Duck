@@ -43,7 +43,7 @@ namespace DuckMow
     public class MainMenu : MonoBehaviour
     {
         /// <summary>
-        /// What the four plates on the front page do.
+        /// What the five plates on the front page do.
         ///
         /// APPENDED rather than slotted in next to Play, even though THE CLASSES sits second on the
         /// board. This enum is serialized into Menu.unity as an integer per plate, so inserting a
@@ -51,8 +51,29 @@ namespace DuckMow
         /// would come back as Stages and the credits card would open the class list. The builder
         /// rewrites the scene anyway, but a value that only survives if somebody remembers to
         /// rebuild is a trap laid for whoever does not.
+        ///
+        /// SETTINGS is the second value to arrive this way, and it went on the END for exactly the
+        /// same reason even though it is pinned up FOURTH on the board, above CREDITS. The order on
+        /// the board is a fact about the board and lives in DuckMenuBuilder.BuildChoices; the numbers
+        /// in here are a storage format, and the two are allowed to disagree. They must, in fact:
+        /// the day they are made to agree is the day somebody renumbers this enum to tidy it up.
         /// </summary>
-        public enum Choice { Play, Controls, Credits, Stages }
+        public enum Choice { Play, Controls, Credits, Stages, Settings }
+
+        /// <summary>
+        /// What can be adjusted on the settings board.
+        ///
+        /// Serialized per row in <see cref="SettingRow"/>, so the append-only rule above applies
+        /// here from the first day rather than from the first time it bites.
+        ///
+        /// Deliberately SHORT. Every entry here has to be a real dial on a real system, and this
+        /// project has exactly one of those: <see cref="MasterAudio"/>. There is no mixer, so there
+        /// are no music/effects buses to expose (see MasterAudio's class comment for why), no
+        /// quality tiers worth offering in a browser build that is already tuned for one, and no
+        /// key rebinding to hand out when the whole game is polled off two devices by hand. A
+        /// settings page padded with controls that do nothing is worse than a short one.
+        /// </summary>
+        public enum Setting { MasterVolume, Mute }
 
         [Serializable]
         public class Item
@@ -101,6 +122,40 @@ namespace DuckMow
                      "board is meant to read as a class list pinned up at a county show.")]
             public float restTilt;
             public RectTransform shadow;
+        }
+
+        /// <summary>
+        /// One row of the settings board: a name on the left and its current value on the right.
+        ///
+        /// ---- why these are lines of type and not plates ----
+        ///
+        /// The class list is built out of the same cream plates as the front page, because every row
+        /// on it is a CHOICE and the game has already taught the player what a choice looks like.
+        /// These are not choices. They are dials that hold a value, and dressing a dial as a button
+        /// promises a press that does not exist — the player would hit Enter on MASTER VOLUME and
+        /// nothing would happen, which is the exact failure the plate artwork exists to prevent.
+        ///
+        /// So this board is laid out like CONTROLS: a name in cream, a value in gold, on the dark
+        /// card. The difference from CONTROLS is that one row at a time is LIVE, and that is carried
+        /// by the same chevron and the same colour lift the rest of the menu uses, rather than by a
+        /// highlight bar this page would otherwise have had to invent.
+        ///
+        /// The rect is the LABEL LINE only, not the whole row including the volume bar. That is what
+        /// makes the chevron land beside the name rather than halfway down a gap, and it is why the
+        /// bar is a sibling on the card rather than a child of the volume row — see
+        /// <see cref="volumeBar"/>, which is hit-tested separately precisely because it is not part
+        /// of this rect.
+        /// </summary>
+        [Serializable]
+        public class SettingRow
+        {
+            public Setting setting;
+            public RectTransform rect;
+            [Tooltip("The name on the left. Coloured by selection.")]
+            public TextMeshProUGUI label;
+            [Tooltip("The reading on the right. Its TEXT is written every frame from MasterAudio — " +
+                     "anything typed here is overwritten, exactly as the class list's titles are.")]
+            public TextMeshProUGUI value;
         }
 
         /// <summary>
@@ -270,6 +325,66 @@ namespace DuckMow
         [Tooltip("Pixels the class pointer sits to the left of the rows.")]
         public float stagePointerGap = 22f;
 
+        [Tooltip("The one-liner under each class title, at rest.\n\n" +
+                 "It is a COLOUR of its own rather than labelIdle at reduced alpha, and that is the " +
+                 "whole fix for a line that shipped unreadable. See ApplyStagePlates.")]
+        public Color kickerIdle = new Color(0.431f, 0.290f, 0.173f);      // Wood dark #6E4A2C
+        [Tooltip("The same line under the class the marker is on.")]
+        public Color kickerSelected = new Color(0.62f, 0.24f, 0.18f);
+
+        [Header("Settings")]
+        [Tooltip("The settings board. A CARD, on the same mechanism as the class list, for the same " +
+                 "reasons — see the Card enum.")]
+        public CanvasGroup settingsCard;
+        [Tooltip("One row per adjustable thing, top to bottom. This order is the order the arrow " +
+                 "keys walk.")]
+        public SettingRow[] settingRows = Array.Empty<SettingRow>();
+        public RectTransform settingsPointer;
+        [Tooltip("Pixels the settings pointer sits to the left of the rows.")]
+        public float settingsPointerGap = 22f;
+
+        [Tooltip("The whole bar group under MASTER VOLUME, used ONLY as a mouse target.\n\n" +
+                 "Bigger than the trough on purpose. This game ships to a browser where a player " +
+                 "may never touch the keyboard, so the bar has to be grabbable, and a 48-pixel " +
+                 "trough is a thin thing to ask somebody to hit with a mouse in one go.")]
+        public RectTransform volumeBar;
+        [Tooltip("The filled part of the trough. Its fillAmount is the SLIDER POSITION, not the " +
+                 "amplitude — see the curve note on ApplySettings — and its own rect is the frame a " +
+                 "click is mapped through, so what the player grabs and what they see cannot " +
+                 "disagree by the trough's own inset.")]
+        public Image volumeFill;
+        [Tooltip("The two ASCII arrow-heads either side of the trough. They fade in with the row " +
+                 "rather than being painted on permanently, because they are an instruction and an " +
+                 "instruction that is always on is decoration.")]
+        public TextMeshProUGUI volumeLeftMark;
+        public TextMeshProUGUI volumeRightMark;
+
+        [Tooltip("A settings row's name at rest, and under the marker.")]
+        public Color settingIdle = new Color(0.97f, 0.94f, 0.86f);        // Cream
+        public Color settingSelected = new Color(1f, 0.85f, 0.45f);       // Gold
+        [Tooltip("A settings row's reading at rest, and under the marker.")]
+        public Color settingValueIdle = new Color(0.86f, 0.72f, 0.40f);
+        public Color settingValueSelected = new Color(1f, 0.85f, 0.45f);
+        [Tooltip("The reading and the bar while the game is muted. Warm brown rather than grey: " +
+                 "the art bible rejects grey outright, and a muted control still belongs to the " +
+                 "same painted board it did a moment ago.")]
+        public Color settingMuted = new Color(0.72f, 0.53f, 0.34f);
+        public Color barFill = new Color(1f, 0.82f, 0.42f);
+        public Color barMuted = new Color(0.60f, 0.42f, 0.26f);           // Wood warm #9A6B41
+
+        [Header("Markers at other aspects")]
+        [Tooltip("Canvas width, in reference units, at or above which every chevron is drawn at its " +
+                 "authored size.\n\n" +
+                 "1728 is a 16:10 frame. THE CANVAS IS ALWAYS 1080 UNITS TALL and never anything " +
+                 "else — the scaler matches height — so every fraction in this menu's layout is " +
+                 "aspect-proof and only the WIDTH moves. The chevrons are the one thing on the page " +
+                 "sized and placed in fixed pixels, which means they are the one thing that can walk " +
+                 "off the left of what they are pointing at when the frame narrows. See MarkerScale.")]
+        public float markerFullWidth = 1728f;
+        [Tooltip("Floor on that scaling. A narrow window gets a smaller marker rather than a marker " +
+                 "over the edge of the board, but never one small enough to be a speck.")]
+        public float markerMinScale = 0.55f;
+
         [Header("Transition")]
         public Image fade;
         [Tooltip("Seconds to come up from black when the menu loads.")]
@@ -319,10 +434,17 @@ namespace DuckMow
         /// remember to hide when the menu leaves, and two overlays free to be up at once. The only
         /// thing it needs that CONTROLS and CREDITS do not is that it must not be dismissed by ANY
         /// key, because it has choices on it; that is one branch in HandleInput, not a subsystem.
+        ///
+        /// SETTINGS is the second of those and appended for the same storage reason as
+        /// <see cref="Choice"/>. It needs one thing more than the class list: the left and right
+        /// arrows have to mean something, which is why <see cref="HandleInput"/> reads them at all.
+        /// Everything else it wanted — a board that fades up, a marker walking rows, Escape taking
+        /// it away — was already here.
         /// </summary>
-        enum Card { None, Controls, Credits, Stages }
+        enum Card { None, Controls, Credits, Stages, Settings }
 
         Camera _uiCamera;
+        RectTransform _canvasRect;
         Camera _camera;
         float _clock;
         int _index;
@@ -349,6 +471,26 @@ namespace DuckMow
         int _stagePressed = -1;
         float[] _stageSel, _stageSelVel, _stagePress, _stagePressVel;
 
+        // And once more for the settings board. Only the selection channel: nothing on it is
+        // pressed, so there is no press spring to drive and no pressed sprite to swap.
+        int _setIndex;
+        float[] _setSel, _setSelVel;
+
+        // WHERE THE VOLUME BAR IS, which is deliberately not the same number as how loud the game is.
+        //
+        // MasterAudio.Master is an AMPLITUDE, because that is what AudioListener.volume is. This is
+        // the SLIDER POSITION, and the two are a power apart — see VolumeCurve. Keeping the position
+        // here rather than deriving it from the amplitude every frame is not a cache: Nudge rounds
+        // the amplitude it stores to a thousandth, and at the bottom of a 2.5-power curve a
+        // thousandth of amplitude is a whole step of slider. Round-tripping through the amplitude
+        // would make the readout jump from 10% to 6% when the player pressed Left once, which is a
+        // control that visibly disobeys. ReadVolumePosition puts the two back in step whenever
+        // anything other than this menu has moved the master.
+        float _volumePos = 1f;
+        int _adjustDir;
+        float _adjustRepeat;
+        bool _draggingVolume;
+
         // Camera kick, in degrees and metres, and its velocities. Post-multiplied onto the vista
         // pose rather than folded into it, so the drift stays exactly what the framing says it is.
         Vector3 _kick, _kickVel;
@@ -364,6 +506,10 @@ namespace DuckMow
         {
             var canvas = GetComponentInParent<Canvas>();
             _uiCamera = canvas != null ? canvas.worldCamera : null;
+            // Kept for MarkerScale. The canvas rect, NOT Screen.width: the scaler puts the page in
+            // reference units and the layout is authored in those, so a marker measured against real
+            // device pixels would be wrong by the scale factor on every machine but one.
+            _canvasRect = canvas != null ? canvas.transform as RectTransform : null;
             EnsureSprings();
 
             if (pennants.Length > 0)
@@ -387,6 +533,12 @@ namespace DuckMow
             ApplyCard();
             ApplyHighlight();
             ApplyStageHighlight();
+            // The bar is put where the stored master actually is before the first frame, for the
+            // same reason: the settings card can be opened on the first frame the player is allowed
+            // to press anything, and a bar that spends that frame at whatever the builder baked and
+            // then snaps is a control that looks like it moved on its own.
+            ReadVolumePosition(true);
+            ApplySettingHighlight();
         }
 
         void Start()
@@ -441,6 +593,7 @@ namespace DuckMow
             // against a target they already sit on for the whole of a thirty-second camera cycle is
             // work done for a board nobody is looking at.
             if (_shown == Card.Stages || _card == Card.Stages) TickStagePlates(dt);
+            if (_shown == Card.Settings || _card == Card.Settings) TickSettingRows(dt);
 
             if (_leaving)
             {
@@ -469,7 +622,7 @@ namespace DuckMow
                 ApplyFade();
             }
 
-            HandleInput();
+            HandleInput(dt);
         }
 
         // ------------------------------------------------------------------ framing
@@ -645,7 +798,7 @@ namespace DuckMow
 
         // ------------------------------------------------------------------ input
 
-        void HandleInput()
+        void HandleInput(float dt)
         {
             var kb = Keyboard.current;
             var mouse = Mouse.current;
@@ -653,13 +806,21 @@ namespace DuckMow
 
             if (DebugTools) FramingKeys(kb);
 
-            int move = 0;
+            int move = 0, adjust = 0, held = 0;
             bool confirm = false, back = false;
 
             if (kb != null)
             {
                 if (kb.downArrowKey.wasPressedThisFrame || kb.sKey.wasPressedThisFrame) move++;
                 if (kb.upArrowKey.wasPressedThisFrame || kb.wKey.wasPressedThisFrame) move--;
+                // Left and right are read for the settings board and are ignored everywhere else.
+                // Two channels, because a dial needs both: `adjust` is the press, which must land
+                // exactly once, and `held` is the state, which is what lets a player sweep the
+                // volume from nothing to full without pressing a key twenty times.
+                if (kb.rightArrowKey.wasPressedThisFrame || kb.dKey.wasPressedThisFrame) adjust++;
+                if (kb.leftArrowKey.wasPressedThisFrame || kb.aKey.wasPressedThisFrame) adjust--;
+                if (kb.rightArrowKey.isPressed || kb.dKey.isPressed) held++;
+                if (kb.leftArrowKey.isPressed || kb.aKey.isPressed) held--;
                 confirm = kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame ||
                           kb.spaceKey.wasPressedThisFrame;
                 back = kb.escapeKey.wasPressedThisFrame;
@@ -668,11 +829,16 @@ namespace DuckMow
             {
                 if (pad.dpad.down.wasPressedThisFrame) move++;
                 if (pad.dpad.up.wasPressedThisFrame) move--;
+                if (pad.dpad.right.wasPressedThisFrame) adjust++;
+                if (pad.dpad.left.wasPressedThisFrame) adjust--;
+                if (pad.dpad.right.isPressed) held++;
+                if (pad.dpad.left.isPressed) held--;
                 confirm |= pad.buttonSouth.wasPressedThisFrame || pad.startButton.wasPressedThisFrame;
                 back |= pad.buttonEast.wasPressedThisFrame;
             }
 
             bool clicked = mouse != null && mouse.leftButton.wasPressedThisFrame;
+            bool down = mouse != null && mouse.leftButton.isPressed;
 
             if (_card == Card.Stages)
             {
@@ -682,11 +848,23 @@ namespace DuckMow
                 return;
             }
 
+            if (_card == Card.Settings)
+            {
+                // Same exemption, one step further: on this board the arrows do not merely move a
+                // marker, they change the value under it. A card where every key is meaningful
+                // cannot also be a card that any key dismisses.
+                HandleSettings(move, adjust, held, confirm, back, clicked, down, mouse, dt);
+                return;
+            }
+
             if (_card != Card.None)
             {
                 // Anything at all closes it. A card of key bindings is not a dialogue box and must
-                // never be somewhere the player has to work out how to leave.
-                if (back || confirm || clicked || move != 0) CloseCard();
+                // never be somewhere the player has to work out how to leave — and the footer on it
+                // says PRESS ANYTHING TO GO BACK, so left and right have to count as well. They did
+                // not until the settings board made this page read them at all, which meant two keys
+                // on the board quietly disagreed with the only instruction on screen.
+                if (back || confirm || clicked || move != 0 || adjust != 0) CloseCard();
                 return;
             }
 
@@ -775,6 +953,24 @@ namespace DuckMow
                     _card = Card.Stages;
                     break;
 
+                case Choice.Settings:
+                    Play(clickClip, 0.39f);
+                    KickCamera(-0.4f, 0.22f, 0.14f);
+                    // Re-read on the way in as well as on load, for the same reason the class list
+                    // re-titles itself: MasterAudio is the authority and this board is only ever a
+                    // view of it. Anything else in the project that moved the master while the menu
+                    // was up — nothing does today, and the pause board is one row away from doing
+                    // it tomorrow — is picked up here rather than being silently overwritten by a
+                    // stale bar the moment the player touches an arrow.
+                    ReadVolumePosition(true);
+                    ApplySettingHighlight();
+                    // _pointerSeen left alone, exactly as the class list leaves it, and exactly as
+                    // deliberately: the mouse is at this instant resting on the plate that opened
+                    // the card, and the rule is that a pointer must actually MOVE before it takes a
+                    // highlight away from the keyboard.
+                    _card = Card.Settings;
+                    break;
+
                 case Choice.Controls:
                     Play(clickClip, 0.39f);
                     KickCamera(-0.4f, 0.22f, 0.14f);
@@ -797,8 +993,78 @@ namespace DuckMow
 
         void CloseCard()
         {
+            // Leaving the settings board is the moment its edits are worth putting on disk.
+            //
+            // MasterAudio rate-limits its own flushes — see MarkDirty — so the value the player is
+            // dragging is written through about once a second and the LAST edit of a burst may still
+            // be sitting in PlayerPrefs' memory when they let go. Save() is a no-op when nothing
+            // changed, so this costs nothing on the way out of a card nobody touched, and it closes
+            // the one gap the rate limit leaves: in WEBGL the flush is an asynchronous IndexedDB
+            // sync and the tab can be shut at any moment, so "eventually" is not a policy.
+            if (_card == Card.Settings)
+            {
+                _draggingVolume = false;
+                _adjustDir = 0;
+                MasterAudio.Save();
+            }
             _card = Card.None;
             Play(backClip, 0.25f);
+        }
+
+        /// <summary>
+        /// How far down the chevrons are drawn from their authored size, in this frame.
+        ///
+        /// ---- the bug this exists for ----
+        ///
+        /// The canvas scaler matches HEIGHT, so the page is always 1080 reference units tall and its
+        /// WIDTH is 1080 × the aspect: 1920 at 16:9, 1728 at 16:10, 1440 at 4:3. Every rect in this
+        /// menu is authored as a FRACTION of that, so every one of them shrinks with the frame and
+        /// none of them can escape anything.
+        ///
+        /// The chevrons are the exception, and they were the reported bug. Each is placed in fixed
+        /// pixels — a 44-pixel sprite sitting 22 pixels to the left of its column — against a gutter
+        /// that is a PERCENTAGE of the width. At 16:9 the class list's marker lands ten pixels
+        /// inside the dark card. At 4:3 that same gutter is a quarter narrower, the fixed 66 pixels
+        /// do not, and the marker is drawn eight pixels off the left edge of the board onto the
+        /// lawn: a button, outside the UI. Below about a 1.53 aspect the arithmetic simply runs out.
+        ///
+        /// So the marker is measured in the same currency as the gutter it lives in. At 16:10 and
+        /// anything wider this returns exactly 1 and nothing whatsoever changes; narrower than that
+        /// the marker and its gap come down together, which keeps the ratio the layout was drawn at
+        /// instead of letting one term of it stand still. Floored, because a marker that scales all
+        /// the way to nothing has solved the overflow by deleting the control.
+        ///
+        /// Clamped at the top as well: an ultrawide frame gets the authored marker, not a bigger
+        /// one. It is a chevron beside a word, not a thing that should grow with the monitor.
+        /// </summary>
+        float MarkerScale
+        {
+            get
+            {
+                if (_canvasRect == null || markerFullWidth <= 1f) return 1f;
+                float w = _canvasRect.rect.width;
+                if (w <= 1f) return 1f;
+                return Mathf.Clamp(w / markerFullWidth, Mathf.Clamp01(markerMinScale), 1f);
+            }
+        }
+
+        /// <summary>
+        /// Park a chevron at a height beside its column, at whatever size this frame's width allows.
+        ///
+        /// The height is worked out by the caller, because each of the three columns holds its rows
+        /// in a different kind of object and building an array of rects to pass in here would be an
+        /// allocation every frame for the sake of tidiness. What is shared is everything that has to
+        /// be IDENTICAL between them: the gap, the breathing, and the narrow-frame scaling above,
+        /// which is the part that was wrong in three places at once.
+        /// </summary>
+        void PlaceMarker(RectTransform marker, float gap, float y)
+        {
+            if (marker == null) return;
+            float s = MarkerScale;
+            marker.anchoredPosition = new Vector2(-gap * s, y);
+            // Breathes, so it is never a static arrow sitting on a moving page.
+            float pulse = (1f + Mathf.Sin(_clock * 4.4f) * 0.06f) * s;
+            marker.localScale = new Vector3(pulse, pulse, 1f);
         }
 
         void Play(AudioClip clip, float volume)
@@ -1049,13 +1315,25 @@ namespace DuckMow
                 if (c.title != null) c.title.color = Color.Lerp(labelIdle, labelSelected, sel);
                 if (c.kicker != null)
                 {
-                    // The one-liner stays quieter than the title at every point in the transition,
-                    // because it is a description and the title is the choice. Faded rather than
-                    // greyed: a second ink on a cream plate is a second material, and the board
-                    // already has two.
-                    var idle = labelIdle; idle.a = 0.62f;
-                    var hot = labelSelected; hot.a = 0.85f;
-                    c.kicker.color = Color.Lerp(idle, hot, sel);
+                    // ---- the one-liner, which shipped unreadable ----
+                    //
+                    // This used to be labelIdle with its alpha taken down to 0.62, on the reasoning
+                    // that a description should be quieter than the choice it describes. The
+                    // reasoning is right and the mechanism was wrong, and the arithmetic says by how
+                    // much. The project renders in LINEAR colour, so a 0.62 alpha of near-black ink
+                    // over the cream plate does not blend where the eye expects — it lands at about
+                    // sRGB #A49E8F, which is a contrast ratio of 2.4:1 against the plate. Small
+                    // bold type at 2.4:1 is not "quiet", it is a line that has to be worked out
+                    // rather than read, and the art bible's eighth automatic rejection is the word
+                    // "grey", which is exactly what alpha-fading a neutral ink produces.
+                    //
+                    // So the subordination is carried by HUE and SIZE, which is how a signwriter
+                    // does it, rather than by transparency. kickerIdle is the palette's wood dark —
+                    // a warm brown that is unmistakably lighter than the title's near-black ink and
+                    // still reads at 6.9:1 on cream — and the line is already at half the title's
+                    // point size and none of its letter spacing. Full alpha in both states: the
+                    // plate is a painted object and paint is opaque.
+                    c.kicker.color = Color.Lerp(kickerIdle, kickerSelected, sel);
                 }
                 if (c.plate != null)
                 {
@@ -1081,9 +1359,432 @@ namespace DuckMow
                     w += weight;
                 }
                 if (w > 1e-3f) y /= w;
-                stagePointer.anchoredPosition = new Vector2(-stagePointerGap, y);
-                float pulse = 1f + Mathf.Sin(_clock * 4.4f) * 0.06f;
-                stagePointer.localScale = new Vector3(pulse, pulse, 1f);
+                PlaceMarker(stagePointer, stagePointerGap, y);
+            }
+        }
+
+        // ------------------------------------------------------------------ settings
+        //
+        // THE SETTINGS BOARD, and the one number on it that is not what it looks like.
+        //
+        // ---- the curve, which is the whole reason this section is longer than two rows deserve ----
+        //
+        // AudioListener.volume is a LINEAR AMPLITUDE. A slider wired straight to it is the classic
+        // broken volume control: amplitude is not loudness, and roughly the bottom fifth of the
+        // travel carries most of the audible change while the top half does almost nothing. Every
+        // player who has ever said "the volume only works at the very bottom" was using one.
+        //
+        // So the slider position and the amplitude are two different numbers with a power between
+        // them: amplitude = position ^ 2.5. Half travel is then 0.177 amplitude, which is about
+        // −15 dB, and each further step down the bar takes off a similar number of decibels rather
+        // than a similar number of amplitude — which is what makes the control feel even under the
+        // hand. 2.5 rather than 2 or 3 because a square is still bottom-heavy at this range and a
+        // cube pushes the useful part of the travel up into the last quarter of the bar.
+        //
+        // THE PERCENTAGE ON SCREEN IS THE POSITION, NOT THE AMPLITUDE, and that is not a cosmetic
+        // choice. Showing the amplitude would put "18%" against a bar drawn half full, and a readout
+        // that disagrees with the control beside it is worse than no readout: the player stops
+        // trusting both. What the number means is "how far up this control is", which is the only
+        // thing it can honestly mean once there is a curve in the way — the alternative, decibels,
+        // is correct and is not a thing to put on a county fair board.
+        //
+        // ---- what this board does not own ----
+        //
+        // Not one line here writes AudioListener.volume, and none of it may ever start. MasterAudio
+        // is the single owner of that field and documents at length what a second writer costs; this
+        // page is a VIEW of MasterAudio.Master with a curve in front of it, and every change it
+        // makes goes through Nudge. Persistence is MasterAudio's too — it debounces its own
+        // PlayerPrefs flushes, so nothing here calls Save except CloseCard, once, on the way out.
+
+        /// <summary>
+        /// The power between the bar's position and the amplitude underneath it. See the section
+        /// comment; the short version is that 1.0 is a control that only works at the bottom.
+        /// </summary>
+        const float VolumeCurve = 2.5f;
+
+        /// <summary>How far one press of Left or Right moves the BAR. A twentieth, so a full sweep
+        /// is twenty presses and every stop is a round number on screen.</summary>
+        const float VolumeStep = 0.05f;
+
+        /// <summary>Seconds a direction must be held before it starts repeating, and the interval
+        /// once it does. Slow enough that a single tap is never read as two, fast enough that
+        /// holding Right takes about a second and three quarters from silence to full.</summary>
+        const float AdjustDelay = 0.38f, AdjustRepeat = 0.085f;
+
+        static float AmplitudeFor(float position) => Mathf.Pow(Mathf.Clamp01(position), VolumeCurve);
+
+        static float PositionFor(float amplitude) => Mathf.Pow(Mathf.Clamp01(amplitude), 1f / VolumeCurve);
+
+        /// <summary>
+        /// Put the bar back in step with the master volume.
+        ///
+        /// Unconditionally when the card opens, and every frame it is up as a guard. The guard is
+        /// there because <see cref="MasterAudio.Master"/> is a global that this page does not own —
+        /// today nothing else in the menu scene moves it, and the pause board is one row away from
+        /// moving it in the next scene along — and a bar that has quietly stopped describing the
+        /// thing it controls is the worst kind of settings screen, because it looks fine.
+        ///
+        /// The tolerance is what stops the guard undoing the player's own edit. Nudge rounds the
+        /// amplitude it stores to a thousandth, so a position written by this page and read back
+        /// through the curve can differ from itself by half a thousandth of amplitude; anything
+        /// larger than that was somebody else and is adopted. Below it, the stored POSITION wins,
+        /// which is what keeps the readout from stepping 10% → 6% on a single press near the bottom
+        /// of a 2.5-power curve.
+        /// </summary>
+        void ReadVolumePosition(bool force)
+        {
+            float amp = MasterAudio.Master;
+            if (force || Mathf.Abs(AmplitudeFor(_volumePos) - amp) > 0.004f)
+                _volumePos = PositionFor(amp);
+        }
+
+        /// <summary>
+        /// Move the bar, and the game's loudness with it, live.
+        ///
+        /// Through <see cref="MasterAudio.Nudge"/> rather than by assigning Master, and the delta is
+        /// computed rather than passed in, because Nudge is where the API keeps its guard against
+        /// the drift that repeated float addition puts into a value a menu steps by hand — it snaps
+        /// the result to a thousandth so a bar taken all the way up reads 100% instead of 99%. Doing
+        /// the stepping in POSITION space and handing Nudge the resulting change in AMPLITUDE is
+        /// what lets both be true at once: the steps are even to the ear, and the stored number is
+        /// still clean.
+        ///
+        /// Nudge ignores a delta of exactly zero, so calling this every frame of a mouse drag that
+        /// has not actually moved costs nothing, and Master's own epsilon and flush rate limit take
+        /// care of the rest. Nothing here is throttled by hand.
+        /// </summary>
+        void SetVolumePosition(float position)
+        {
+            _volumePos = Mathf.Clamp01(position);
+            MasterAudio.Nudge(AmplitudeFor(_volumePos) - MasterAudio.Master);
+        }
+
+        int RowFor(Setting setting)
+        {
+            if (settingRows == null) return -1;
+            for (int i = 0; i < settingRows.Length; i++)
+                if (settingRows[i] != null && settingRows[i].setting == setting) return i;
+            return -1;
+        }
+
+        /// <summary>
+        /// The settings board's own input.
+        ///
+        /// Up and down walk the rows, left and right change the row under the marker, Enter presses
+        /// it where pressing means anything, and Escape — or the pad's B, or a click that lands off
+        /// the card entirely — puts it away. The mouse can do all of it without the keyboard being
+        /// touched once, and that is not a flourish: this game ships to a browser, and a settings
+        /// page reachable only by keyboard is a settings page half the players never operate.
+        ///
+        /// The one rule worth stating is that HOLDING a direction repeats on the volume and does NOT
+        /// repeat on the mute. A dial with twenty stops has to be sweepable; a toggle that fires
+        /// eleven times a second while a key is down is a light switch being vandalised.
+        /// </summary>
+        void HandleSettings(int move, int adjust, int held, bool confirm, bool back,
+                            bool clicked, bool down, Mouse mouse, float dt)
+        {
+            if (back) { CloseCard(); return; }
+
+            // The master may have moved under us. Cheap, and see ReadVolumePosition for why it
+            // cannot fight the player's own hand.
+            ReadVolumePosition(false);
+
+            int n = settingRows != null ? settingRows.Length : 0;
+            if (n == 0)
+            {
+                // A board with no rows is a trap, exactly as an empty class list is, and for the
+                // same reason it is worth a branch: it cannot happen to a scene the builder made and
+                // it absolutely can happen to one somebody is halfway through editing by hand.
+                if (confirm || clicked) CloseCard();
+                return;
+            }
+
+            if (move != 0) { SelectSetting(((_setIndex + move) % n + n) % n); _pointerSeen = false; }
+
+            int over = -1;
+            bool onBar = false;
+            Vector2 p = Vector2.zero;
+
+            if (mouse != null)
+            {
+                p = mouse.position.ReadValue();
+                // The pointer only takes the highlight while it is MOVING — this page's rule
+                // everywhere, and it matters most here, because the card opens under a mouse that
+                // has just clicked and a resting cursor that re-selected every frame would pin the
+                // marker wherever that click happened to land.
+                bool moved = !_pointerSeen || (p - _lastPointer).sqrMagnitude > 4f;
+                _lastPointer = p;
+                _pointerSeen = true;
+
+                onBar = volumeBar != null && PointerOver(volumeBar, p);
+                for (int i = 0; i < n; i++)
+                {
+                    if (settingRows[i]?.rect == null || !PointerOver(settingRows[i].rect, p)) continue;
+                    over = i;
+                    if (moved) SelectSetting(i);
+                    break;
+                }
+                if (over < 0 && onBar && moved) SelectSetting(RowFor(Setting.MasterVolume));
+            }
+
+            // ---- the drag ----
+            //
+            // Held across frames rather than being re-tested, so that once the bar has been grabbed
+            // the player may drag straight off the end of it — or off the card — without the value
+            // stopping dead under their hand, which is what every slider anybody has ever used does
+            // and what makes 0% and 100% reachable at all.
+            if (_draggingVolume)
+            {
+                if (!down) { _draggingVolume = false; MasterAudio.Save(); }
+                else { DragVolume(p); return; }
+            }
+
+            if (clicked)
+            {
+                if (onBar)
+                {
+                    _draggingVolume = true;
+                    SelectSetting(RowFor(Setting.MasterVolume));
+                    DragVolume(p);
+                    return;
+                }
+                if (over >= 0) { ActivateSetting(over); return; }
+                // Off the board goes back, and ONLY off the board. The footer says so in those
+                // words, and unlike the class list — where any stray click closes the card — a
+                // player on this page is aiming a mouse at a thin bar, so a near miss that landed on
+                // the card must not throw them out of the screen they were adjusting.
+                var cardRect = settingsCard != null ? settingsCard.transform as RectTransform : null;
+                if (cardRect == null || !PointerOver(cardRect, p)) CloseCard();
+                return;
+            }
+
+            // ---- key repeat ----
+            int step = 0;
+            if (adjust != 0)
+            {
+                step = adjust;
+                _adjustDir = adjust;
+                _adjustRepeat = AdjustDelay;
+            }
+            else if (held != 0 && held == _adjustDir)
+            {
+                _adjustRepeat -= dt;
+                if (_adjustRepeat <= 0f) { _adjustRepeat = AdjustRepeat; step = held; }
+            }
+            else
+            {
+                // Either nothing is held or the direction has changed, and both mean the run is
+                // over. Cleared rather than left, so releasing Right and immediately pressing Left
+                // starts a fresh delay instead of inheriting a timer that is already expired.
+                _adjustDir = 0;
+            }
+
+            if (step != 0) AdjustSetting(_setIndex, step, adjust != 0);
+            if (confirm) ActivateSetting(_setIndex);
+        }
+
+        void SelectSetting(int index)
+        {
+            if (index < 0 || index == _setIndex) return;
+            _setIndex = index;
+            Play(hoverClip, 0.19f);
+        }
+
+        /// <summary>
+        /// Left or right on a row. <paramref name="discrete"/> is false when this is a repeat rather
+        /// than a fresh press, which is the flag a control that must not repeat checks.
+        /// </summary>
+        void AdjustSetting(int index, int direction, bool discrete)
+        {
+            if (settingRows == null || index < 0 || index >= settingRows.Length) return;
+            var row = settingRows[index];
+            if (row == null) return;
+
+            switch (row.setting)
+            {
+                case Setting.Mute:
+                    // Right is ON and left is OFF rather than either direction toggling. On a board
+                    // where every other row's right-hand end is "more", a mute that flips on both
+                    // arrows is the one control the player cannot predict, and pressing right twice
+                    // to end up unmuted is a bug report.
+                    if (!discrete) return;
+                    bool want = direction > 0;
+                    if (want == MasterAudio.Muted) return;
+                    MasterAudio.Muted = want;
+                    Play(clickClip, 0.30f);
+                    break;
+
+                default:
+                    float before = _volumePos;
+                    SetVolumePosition(_volumePos + direction * VolumeStep);
+                    // Silent when the bar is already against its end, so holding Right at 100% is
+                    // not a stuck rattle.
+                    if (!Mathf.Approximately(before, _volumePos)) Play(hoverClip, 0.16f);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Enter on a row.
+        ///
+        /// Only the mute has anything to do here — a bar has no "pressed" state, and inventing one
+        /// (jump to full? to half?) would be a keystroke that destroys a setting the player spent
+        /// twenty presses arriving at. So Enter on MASTER VOLUME does nothing, deliberately, and the
+        /// footer tells the player the arrows are what that row wants.
+        /// </summary>
+        void ActivateSetting(int index)
+        {
+            if (settingRows == null || index < 0 || index >= settingRows.Length) return;
+            var row = settingRows[index];
+            if (row == null) return;
+
+            _setIndex = index;
+            if (row.setting != Setting.Mute) return;
+
+            MasterAudio.Muted = !MasterAudio.Muted;
+            Play(clickClip, 0.30f);
+        }
+
+        /// <summary>
+        /// Follow the mouse along the bar.
+        ///
+        /// Mapped through the FILL's rect rather than the trough's, because the fill is inset inside
+        /// the trough by the artwork's own rim: mapping against the trough would put the grab point
+        /// a couple of pixels off the drawn edge at both ends, which is exactly the amount that
+        /// makes 100% feel unreachable.
+        ///
+        /// The width guard is not paranoia. A degenerate rect here is a division by zero, the NaN
+        /// travels through the curve into MasterAudio.Master, and MasterAudio.Sane documents what
+        /// arrives at the other end: Clamp01 passes NaN straight through, AudioListener.volume takes
+        /// it, and the entire game goes silent with nothing in the console. It is caught twice on
+        /// purpose; this is the end that knows why the number would be bad.
+        /// </summary>
+        void DragVolume(Vector2 screen)
+        {
+            var frame = volumeFill != null ? volumeFill.rectTransform : volumeBar;
+            if (frame == null) return;
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(frame, screen, _uiCamera,
+                                                                        out Vector2 local)) return;
+            var r = frame.rect;
+            if (r.width <= 1e-3f) return;
+
+            // A twentieth, so the drag ticks at the same resolution the arrow keys step at and a
+            // full sweep is twenty notes rather than a rattle.
+            int before = Mathf.FloorToInt(_volumePos * 20f);
+            SetVolumePosition((local.x - r.xMin) / r.width);
+            if (Mathf.FloorToInt(_volumePos * 20f) != before) Play(hoverClip, 0.14f);
+        }
+
+        void EnsureSettingSprings()
+        {
+            int n = settingRows != null ? settingRows.Length : 0;
+            if (_setSel != null && _setSel.Length == n) return;
+            _setSel = new float[n];
+            _setSelVel = new float[n];
+        }
+
+        /// <summary>
+        /// Settle the settings rows on the current selection without animating into it.
+        ///
+        /// Public for the same reason <see cref="ApplyStageHighlight"/> is: the builder calls it so
+        /// the saved card is the settled pose with real readings on it, rather than two rows of
+        /// whatever the last edit left behind and a marker at the origin.
+        /// </summary>
+        public void ApplySettingHighlight()
+        {
+            EnsureSettingSprings();
+            if (_setIndex >= _setSel.Length) _setIndex = 0;
+            for (int i = 0; i < _setSel.Length; i++)
+            {
+                _setSel[i] = i == _setIndex ? 1f : 0f;
+                _setSelVel[i] = 0f;
+            }
+            ApplySettings();
+        }
+
+        void TickSettingRows(float dt)
+        {
+            EnsureSettingSprings();
+            for (int i = 0; i < _setSel.Length; i++)
+                Spring(ref _setSel[i], ref _setSelVel[i], i == _setIndex ? 1f : 0f, dt,
+                       springStiffness, springDamping);
+            ApplySettings();
+        }
+
+        /// <summary>
+        /// Paint the board from MasterAudio.
+        ///
+        /// Both readings are written every frame from the authority rather than only when something
+        /// changes them here, because they are not only changed here: raising the bar off zero
+        /// clears the mute all by itself inside MasterAudio — dragging a volume up is an unambiguous
+        /// request to hear something — and a MUTE row that still said ON after that would be the
+        /// page contradicting the game. Two text assignments a frame on a card that is on screen for
+        /// seconds at a time is not a cost worth being clever about.
+        /// </summary>
+        void ApplySettings()
+        {
+            bool muted = MasterAudio.Muted;
+            // Rounded off the POSITION, which is what the bar draws. See the section comment for why
+            // this is not MasterAudio.Master and must never quietly become it.
+            int percent = Mathf.RoundToInt(Mathf.Clamp01(_volumePos) * 100f);
+            float volumeSel = 0f;
+
+            if (settingRows != null)
+            {
+                for (int i = 0; i < settingRows.Length; i++)
+                {
+                    var row = settingRows[i];
+                    if (row == null) continue;
+                    float sel = _setSel != null && i < _setSel.Length ? _setSel[i] : 0f;
+
+                    if (row.label != null) row.label.color = Color.Lerp(settingIdle, settingSelected, sel);
+                    if (row.value != null)
+                    {
+                        bool dulled = false;
+                        if (row.setting == Setting.Mute)
+                        {
+                            row.value.text = muted ? "ON" : "OFF";
+                        }
+                        else
+                        {
+                            row.value.text = percent + "%";
+                            // The percentage still reads its real number while muted rather than
+                            // dropping to nothing, because the setting has not moved — mute is a
+                            // separate flag and unmuting must give back the level it was taken at.
+                            // What changes is the ink, so a glance at the board says "this is set to
+                            // seventy and you are hearing none of it".
+                            dulled = muted;
+                        }
+                        row.value.color = dulled
+                            ? settingMuted
+                            : Color.Lerp(settingValueIdle, settingValueSelected, sel);
+                    }
+
+                    if (row.setting == Setting.MasterVolume) volumeSel = sel;
+                }
+            }
+
+            if (volumeFill != null)
+            {
+                volumeFill.fillAmount = Mathf.Clamp01(_volumePos);
+                volumeFill.color = muted ? barMuted : barFill;
+            }
+            // The arrow-heads belong to the row, so they carry its selection and nothing else.
+            if (volumeLeftMark != null) volumeLeftMark.alpha = Mathf.Clamp01(volumeSel);
+            if (volumeRightMark != null) volumeRightMark.alpha = Mathf.Clamp01(volumeSel);
+
+            if (settingsPointer != null && settingRows != null && settingRows.Length > 0)
+            {
+                float y = 0f, w = 0f;
+                for (int i = 0; i < settingRows.Length; i++)
+                {
+                    if (settingRows[i]?.rect == null) continue;
+                    float weight = Mathf.Max(_setSel != null && i < _setSel.Length ? _setSel[i] : 0f, 0f);
+                    y += settingRows[i].rect.localPosition.y * weight;
+                    w += weight;
+                }
+                if (w > 1e-3f) y /= w;
+                PlaceMarker(settingsPointer, settingsPointerGap, y);
             }
         }
 
@@ -1203,10 +1904,7 @@ namespace DuckMow
                     w += weight;
                 }
                 if (w > 1e-3f) y /= w;
-                pointer.anchoredPosition = new Vector2(-pointerGap, y);
-                // Breathes, so it is never a static arrow sitting on a moving page.
-                float pulse = 1f + Mathf.Sin(_clock * 4.4f) * 0.06f;
-                pointer.localScale = new Vector3(pulse, pulse, 1f);
+                PlaceMarker(pointer, pointerGap, y);
             }
         }
 
@@ -1215,6 +1913,7 @@ namespace DuckMow
             SetCard(controlsCard, _shown == Card.Controls ? _cardAmount : 0f);
             SetCard(creditsCard, _shown == Card.Credits ? _cardAmount : 0f);
             SetCard(stagesCard, _shown == Card.Stages ? _cardAmount : 0f);
+            SetCard(settingsCard, _shown == Card.Settings ? _cardAmount : 0f);
         }
 
         static void SetCard(CanvasGroup group, float amount)
