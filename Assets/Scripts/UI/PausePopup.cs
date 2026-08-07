@@ -1076,17 +1076,17 @@ namespace DuckMow.UI
         /// </summary>
         const float DuckedVolume = 0.30f;
 
-        /// <summary>Negative means "we never touched it", which is not the same as "it was zero".</summary>
-        float _volumeBefore = -1f;
-
         protected override void OnComposed()
         {
-            // Captured rather than assumed to be 1. Nothing else in the project writes
-            // AudioListener.volume today, but a popup that RESTORES a value it invented would be a
-            // popup that quietly undoes whatever starts writing it tomorrow. Capturing also makes
-            // this nest correctly if a second popup ever ducks as well.
-            _volumeBefore = AudioListener.volume;
-            AudioListener.volume = _volumeBefore * DuckedVolume;
+            // Routed through MasterAudio rather than written here, and the reason is the exact bug
+            // the old comment was worried about arriving. This used to capture AudioListener.volume
+            // and restore it on close — correct while nothing else touched that field, and wrong the
+            // moment a master volume setting did. A player who opened this board and turned the
+            // sound down would have had their new setting overwritten by the captured old one the
+            // instant they pressed RESUME, silently, with the slider still showing the value they
+            // chose. MasterAudio owns the field now and multiplies Master by Duck; this only has an
+            // opinion about the duck, which is the only part that is ours.
+            MasterAudio.Duck = DuckedVolume;
         }
 
         /// <summary>
@@ -1100,8 +1100,7 @@ namespace DuckMow.UI
         /// </summary>
         protected override void OnClosed()
         {
-            if (_volumeBefore >= 0f) AudioListener.volume = _volumeBefore;
-            _volumeBefore = -1f;
+            MasterAudio.Duck = 1f;
         }
 
         // ------------------------------------------------------------------ what the choices do
