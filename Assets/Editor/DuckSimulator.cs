@@ -589,6 +589,17 @@ namespace DuckMow.EditorTools
                 Advance(r, 4.0f);
                 Shot(r.cam, $"{tag}_02_board");
 
+                // ASKED FOR, not waited for. The prize giving is no longer on the route a round
+                // takes — the board now hands straight to the ending page — so waiting on
+                // GameState.Ceremony here would simply burn its twenty seconds and photograph the
+                // scoreboard four more times under ceremony filenames, which is the worst kind of
+                // broken capture because it still produces a sheet.
+                //
+                // The state itself is intact and still does everything it did; only the live route
+                // stopped visiting it. GameDirector kept DebugJumpToCeremony for exactly this, and
+                // its own comment says so. So this shot list, whose whole subject is the prize
+                // giving, now drives it deliberately instead of hoping the round wanders past.
+                r.director.DebugJumpToCeremony(playerAhead);
                 AdvanceUntil(r, () => r.director.State == GameState.Ceremony, 20f);
                 Advance(r, 1.4f);
                 Shot(r.cam, $"{tag}_03_judges");

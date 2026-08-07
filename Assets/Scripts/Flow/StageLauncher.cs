@@ -157,8 +157,8 @@ namespace DuckMow.Flow
         /// The small line above the name on the sign.
         ///
         /// Plain ASCII capitals with no punctuation, which is not a style preference: every kicker
-        /// this game has ever shown is that shape — "ROUND 1 OF 3", "BACK TO THE GATE", "FINAL
-        /// JUDGING" — and the curtain's board is rendered in a font atlas that has never been asked
+        /// this game still shows is that shape — "ROUND 1 OF 3", "FINAL ROUND" — and the curtain's
+        /// board is rendered in a font atlas that has never been asked
         /// for a middle dot or an em dash. A glyph the atlas does not carry is a blank rectangle in
         /// the middle of the loudest thing on screen.
         ///
@@ -395,8 +395,15 @@ namespace DuckMow.Flow
             if (host == null) return;
 
             _busy = true;
-            host.StartCoroutine(Run(MenuScene, MatchState.Seam.RoundToMenu,
-                                    "THE GREEN", "BACK TO THE GATE"));
+            // WORDLESS, like the round's own way out. GameDirector's leave-to-menu dropped its
+            // sign when the copy pass went through, on the argument that the curtain already
+            // carries the tournament's identity and a headline over it is the part that reads as
+            // UI pasted onto the world — and that "you are going where you just asked to go" is
+            // not information worth a board. This is the same journey taken from a standalone
+            // arena instead of from the lawn, so it has to make the same argument or the game
+            // shows a sign on one route out and not the other. Empty is a supported first-class
+            // case in Curtain.Close; the wipe plays in full and no plate is ever positioned.
+            host.StartCoroutine(Run(MenuScene, MatchState.Seam.RoundToMenu, null, null));
         }
 
         // ------------------------------------------------------------------ the transition

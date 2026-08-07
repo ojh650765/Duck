@@ -230,7 +230,15 @@ namespace DuckMow.EditorTools
             if (hud.spillStat != null) hud.spillStat.text = "3%";
             if (hud.edgeStat != null) hud.edgeStat.text = "65%";
             if (hud.styleStat != null) hud.styleStat.text = "0%";
-            if (hud.retryHint != null) hud.retryHint.text = "[R] RETRY SAME PICTURE   [N] NEW PICTURE";
+            // Kept in step with HUD.cs by hand, because this rig fakes the results screen rather
+            // than reaching one — it sets the stats and the hint directly so a sheet can be shot
+            // without playing a round. It was still advertising [N] NEW PICTURE long after that
+            // feature and its key were removed, which is the failure mode of a mock: it goes on
+            // confidently describing a game that has changed underneath it, and the frame sheet
+            // looks authoritative while being wrong. This is the three-way branch's widest arm,
+            // from HUD.cs:433 — the one with a retry and no venue tour waiting.
+            if (hud.retryHint != null)
+                hud.retryHint.text = "[R]  RETRY SAME PICTURE     [SPACE]  MAIN MENU     [ESC]  PAUSE";
             if (hud.resultsGroup != null) hud.resultsGroup.alpha = 1f;
 
             Canvas.ForceUpdateCanvases();
