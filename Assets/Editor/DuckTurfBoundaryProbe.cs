@@ -85,6 +85,19 @@ namespace DuckMow.EditorTools
         /// </summary>
         const float WallRadius = TurfArena.BarrierRadius + 0.4f;
 
+        /// <summary>
+        /// The three rings of dressing that carry colliders but are not in TurfArena's radius table.
+        ///
+        /// Measured off the built scene rather than derived, because DuckTurfBuilder places them from
+        /// its own local numbers: twelve planters just inside the plaza kerb, and the lamp posts in
+        /// two rings, one either side of the hedge. They are modelled and rendered, so a driver meets
+        /// them with plenty of warning — they are obstacles, not boundary, and the report has to know
+        /// the difference or it reports twenty phantoms and stops being worth running.
+        /// </summary>
+        const float PlanterRing = 17.7f;
+        const float LampRingInner = 28.2f;
+        const float LampRingOuter = 34.8f;
+
         /// <summary>Beyond the hedge ring and its gate pillars: the first radius where a blocker is news.</summary>
         const float OuterFrom = TurfArena.HedgeOuter + 1.5f;
         /// <summary>A first blocker in the outfield closer in than this is the fault being hunted.</summary>
@@ -354,6 +367,16 @@ namespace DuckMow.EditorTools
             if (r >= TurfArena.HedgeInner - 1.5f && r <= TurfArena.HedgeOuter + 1.5f)
                 return true;                                                          // hedge + gate pillars
             if (r >= WallRadius - 1.5f) return true;                                  // barrier wall and beyond
+
+            // The three prop rings. These are dressing rather than boundary, so they are not in
+            // TurfArena's radius table — but they are modelled, rendered and collided, and a driver
+            // sees every one of them coming. Measured off the built scene: twelve planters standing
+            // just inside the kerb, and the lamp posts in two rings either side of the hedge. Left
+            // out of this list they read as twenty phantom blockers and the report cries wolf, which
+            // is worse than not running it.
+            if (Mathf.Abs(r - PlanterRing) <= 1.2f) return true;                     // plaza planters
+            if (Mathf.Abs(r - LampRingInner) <= 1.0f) return true;                   // lamp posts, inside the hedge
+            if (Mathf.Abs(r - LampRingOuter) <= 1.0f) return true;                   // lamp posts, out on the loop
             return false;
         }
 
