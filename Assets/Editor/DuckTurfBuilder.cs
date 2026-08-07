@@ -34,9 +34,13 @@ namespace DuckMow.EditorTools
         /// The plaza radius the hub's furniture was modelled against.
         ///
         /// Not a layout number — <see cref="TurfArena.PlazaRadius"/> is the layout number, and it
-        /// moved to 19 m. This is the size the fountain and the kerb ring were drawn at, kept so
-        /// the hub's props can be scaled by the ratio instead of by a figure somebody eyeballed.
-        /// Re-export those props at the new size and this becomes 19 and every scale becomes 1.
+        /// moved to 19 m. This is the size the fountain was drawn at, kept so the hub's props can
+        /// be scaled by the ratio instead of by a figure somebody eyeballed. Re-export those props
+        /// at the new size and this becomes 19 and every scale becomes 1.
+        ///
+        /// The CrownRing kerb was the other prop measured against this number, and it is gone — see
+        /// <see cref="BuildPlazaEdgeLine"/> for what replaced it and why. Only the fountain reads
+        /// this now.
         /// </summary>
         const float AuthoredPlazaRadius = 13f;
 
@@ -619,7 +623,15 @@ namespace DuckMow.EditorTools
         // ------------------------------------------------------------------ the hub
 
         /// <summary>
-        /// The middle: a kerbed plaza with a fountain in it.
+        /// The middle: an open plaza with a fountain in it and its edge painted on the floor.
+        ///
+        /// NOTHING HERE IS A KERB ANY MORE, and that is the change this method most needs explaining.
+        /// The hub used to be ringed by the CrownRing prop at 19 m with 24 box colliders under it and
+        /// eight approaches cut through them. All of it is gone, at the player's request, and the
+        /// reasoning it carried is answered rather than deleted: see <see cref="BuildPlazaEdgeLine"/>,
+        /// which keeps the line and drops the stone. The plaza edge is still drawn — it is just drawn
+        /// as paint, so the boundary the crown is scored against is visible and is not something a
+        /// machine can meet.
         ///
         /// The fountain is the arena's one landmark and it is doing real work rather than decorating.
         /// Everything else here is flat ground and hedge at chest height, so from a chase camera on
@@ -635,52 +647,15 @@ namespace DuckMow.EditorTools
             parent.SetParent(root, false);
 
             var mat = PropMat();
-            var kerb = Prop("CrownRing");
-            if (kerb != null)
-            {
-                var go = Spawn(parent, "Kerb", kerb, mat, false);
-                go.transform.position = new Vector3(0f, 0.01f, 0f);
-                // Scaled to land ON the plaza radius, measured off the mesh rather than trusted.
-                // The ring was authored against a 13 m hub and dropped in at scale 1; the hub is
-                // 19 m now, and a kerb six metres inside the line the score, the shader and the
-                // crown are all counted from is worse than no kerb at all — it draws the boundary
-                // in the wrong place and every player believes the drawing. Only the radius is
-                // scaled; the profile keeps its authored height.
-                float authored = Mathf.Max(kerb.bounds.extents.x, kerb.bounds.extents.z);
-                if (authored > 0.01f)
-                {
-                    float k = TurfArena.PlazaRadius / authored;
-                    go.transform.localScale = new Vector3(k, 1f, k);
-                }
-                go.isStatic = true;
 
-                // The kerb bites — but as a ring with the eight approaches cut out of it, never as
-                // a continuous one.
-                //
-                // Fitting a collider to the whole prop is the obvious move and it seals the hub
-                // behind an unbroken nineteen-metre wall with no doors in it: the exact fault that
-                // made this arena unplayable, reintroduced one ring further in. So the openings are
-                // cut on the same eight bearings the wall's gateways are on, and generously — a
-                // driver who has committed down a spoke should arrive in the plaza, not bounce off
-                // its edge a metre short of the ground they came for.
-                BuildKerbColliders(parent);
-            }
-            else
-            {
-                // A ring of low blocks. The plaza edge has to be visible from a low camera or the
-                // crown is a rule with no place attached to it.
-                int n = 44;
-                for (int i = 0; i < n; i++)
-                {
-                    float a = i / (float)n * 360f;
-                    Vector3 dir = TurfArena.Bearing(a);
-                    Box(parent, $"Kerb {i}", KerbMat(),
-                        new Vector3(2f * Mathf.PI * TurfArena.PlazaRadius / n * 1.02f, 0.3f, 0.7f),
-                        dir * TurfArena.PlazaRadius + Vector3.up * 0.15f,
-                        Quaternion.LookRotation(dir, Vector3.up),
-                        keepCollider: false, castShadows: true).gameObject.isStatic = true;
-                }
-            }
+            // The edge, painted. Unconditionally — there is no prop to look for and therefore no
+            // fallback branch, which is the point. The kerb had one: a ring of 44 low boxes built
+            // whenever the FBX failed to load, so an arena the player had explicitly asked to have
+            // no kerb in it would grow one back the first time somebody was mid-re-export. A
+            // fallback that rebuilds the thing a decision removed is not a safety net, it is a
+            // decision that reverts itself, and the honest shape for "the hub has no kerb" is a
+            // builder with no code path that can produce one.
+            BuildPlazaEdgeLine(parent);
 
             BuildCoreWall(parent);
 
@@ -725,11 +700,17 @@ namespace DuckMow.EditorTools
                     Vector3.up * 2.0f, Quaternion.identity, keepCollider: false, castShadows: true);
             }
 
-            // Planters around the kerb, off the racing line, so the plaza has furniture without
+            // Planters around the rim, off the racing line, so the plaza has furniture without
             // having obstacles.
-            // Twelve rather than eight. Eight of these round an 11.7 m kerb sat a chair's width
+            // Twelve rather than eight. Eight of these round an 11.7 m rim sat a chair's width
             // apart and read as a rhythm; round a 17.7 m one they are fourteen metres apart and read
             // as four things somebody forgot to finish placing.
+            //
+            // These now carry more weight than they were placed to carry. With the kerb gone they
+            // are the only three-dimensional thing marking the hub's edge — the painted ring draws
+            // it and these are what a driver sees standing at it from across the arena. That is an
+            // argument for keeping twelve, not for making them bigger: they are still furniture
+            // pushed to the rim, and the moment they become a boundary they become the kerb again.
             var planter = Prop("TrophyPlanter");
             const int planters = 12;
             for (int i = 0; i < planters; i++)
@@ -741,9 +722,11 @@ namespace DuckMow.EditorTools
                     var go = Spawn(parent, $"Planter {i}", planter, mat, true);
                     go.transform.SetPositionAndRotation(at, Quaternion.Euler(0f, a, 0f));
                     // Solid, and deliberately at the rim. These are the plaza's only furniture and
-                    // they sit 1.3 m inside the kerb, so the whole 17 m disc a fight for the crown
-                    // actually happens on stays clear — they are something to be shoved into at the
-                    // edge, not something to thread between in the middle.
+                    // they sit 1.3 m inside the painted edge, so the whole 17 m disc a fight for the
+                    // crown actually happens on stays clear — they are something to be shoved into
+                    // at the edge, not something to thread between in the middle. They are also the
+                    // only colliders left anywhere near the plaza boundary now, which is the number
+                    // this arena wanted: twelve posts you can see coming, rather than a ring.
                     Solid(go, planter);
                     go.isStatic = true;
                 }
@@ -757,79 +740,130 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
-        /// The plaza kerb, as something a mower can hit — with the eight approaches left open.
+        /// The plaza edge, drawn as paint: a flat ring on the floor whose centreline is exactly
+        /// <see cref="TurfArena.PlazaRadius"/>, with nothing on it a machine can meet.
         ///
-        /// Boxes rather than the authored ring mesh, for the same reason the hedge uses boxes: the
-        /// kerb is a concave loop, and a concave mesh collider at arcade speed catches a wheel on
-        /// every bevel in it. A short chord is close enough to an arc at this radius that nobody
-        /// driving will ever tell.
+        /// THIS IS WHAT IS LEFT OF THE KERB, and the reduction is the whole point. What used to be
+        /// here was the CrownRing prop scaled onto the 19 m line with 24 box colliders under it and
+        /// eight approaches cut through them, and it came out at the player's request. Two reasons
+        /// it deserved to go, beyond being asked for. A 34 cm ring around the most contested ground
+        /// in the mode is something four machines meet sideways at arcade speed, in the one place
+        /// the game spends the entire match telling them to go — the hub was fenced against the
+        /// behaviour it exists to reward. And the eight cut approaches made that worse rather than
+        /// better: a boundary that stops you around 300 degrees of its circumference and waves you
+        /// through the other 60 is a boundary nobody can learn, so it stopped reading as an edge and
+        /// started reading as an intermittent bug.
         ///
-        /// The gaps are the load-bearing part. A solid ring here re-seals the hub, which is the
-        /// fault this whole layout pass existed to remove, so every segment whose bearing falls
-        /// inside a gateway's approach is simply not built. The approach is widened well past the
-        /// gateway's own width — a machine coming down a spoke is rarely dead on the centreline by
-        /// the time it reaches the middle, and an opening exactly as wide as the gate would punish
-        /// the drift that got it there.
+        /// But the argument the kerb carried is TRUE, and it does not leave with the stone. The
+        /// crown in this mode is won on PlazaShare — a rule scored against a circle at 19 m — and
+        /// the old comment's complaint was exactly right: a rule with no place attached to it is a
+        /// rule the player is asked to obey blind, and a boundary drawn at the wrong radius is worse
+        /// still, because every player believes the drawing over the rule. So the LINE stays and
+        /// only the OBSTACLE goes. Paint says the same thing to a driver's eye and nothing at all to
+        /// their wheels, and it cannot be drawn in the wrong place here because its radius is read
+        /// from the same constant the score is.
+        ///
+        /// FLAT, in the strongest available sense. This is a two-dimensional annulus: two rings of
+        /// vertices and the triangles between them, no side walls, no collider, no thickness. There
+        /// is no geometry above the floor for a wheel to climb, catch on, bounce off or wedge under,
+        /// because there is no geometry above the floor at all beyond the 2 cm that keeps it clear of
+        /// the ground plane. It is not a low kerb and it is not a shallow step; it is a decal made
+        /// of triangles.
+        ///
+        /// Two centimetres rather than zero, and that number is doing a job. The arena floor is one
+        /// mesh with the ownership carried as a channel INSIDE it, specifically so that the mode has
+        /// no second surface to z-fight with (see <see cref="BuildGround"/>) — this ring is the one
+        /// exception in the arena, so it is lifted clear rather than laid coplanar and made to argue
+        /// with the depth buffer over 38 m. Two centimetres is well under the mower's ride height and
+        /// an order of magnitude under the 26 cm planting, so it never reads as a plate on the lawn.
+        ///
+        /// UNLIT, which is the lesson the lanterns already paid for. This arena is at night under a
+        /// 0.42 moon, and a lit chalk material here comes out a dark grey smear — a boundary marker
+        /// that does not mark, which is the same failure as having no marker with extra draw calls.
+        /// So it takes the unlit material <see cref="GlowMat"/> makes. But at roughly half the art
+        /// bible's chalk value rather than at it: an unlit near-white hoop 38 m across would outshine
+        /// every lantern in the arena and read as a HUD overlay rather than as a line painted on
+        /// grass. That value is the knob on this method — too dark and the edge is undrawn again,
+        /// too bright and the hub wears a halo. Change it, run the builder, look.
+        ///
+        /// CONTINUOUS, with no openings, and that is a deliberate difference from the kerb. The
+        /// kerb's eight gaps existed only because the kerb was solid and the spokes had to arrive
+        /// somewhere; paint has nothing to open. More importantly the circle PlazaShare is counted
+        /// from has no gaps in it, so a marker with gaps would be drawing a rule the mode does not
+        /// have.
+        ///
+        /// The band straddles the radius rather than sitting inside or outside it, so its centreline
+        /// IS the scored line. And it is tessellated to 168 segments, which is the ground mesh's own
+        /// segment count, so both of its circles land on angles the floor already has vertices at and
+        /// the band cannot scallop against the surface underneath it.
+        ///
+        /// One honest caveat, recorded rather than hidden: the planting is 26 cm tall and grows over
+        /// the whole playable arena, this ring included. Grass will break the line up from a low
+        /// camera in a way a 34 cm kerb did not. The band is 60 cm wide partly for that — a wide
+        /// pale band survives being interrupted where a thin one would dissolve — but whether it
+        /// reads from the driver's seat is a screenshot question, not a code one.
         /// </summary>
-        static void BuildKerbColliders(Transform parent)
+        static void BuildPlazaEdgeLine(Transform parent)
         {
-            var solid = new GameObject("Kerb colliders").transform;
-            solid.SetParent(parent, false);
+            // The ground's own tessellation. Sharing it is what keeps the two circles off each
+            // other's facets.
+            const int Segments = 168;
+            const float HalfWidth = 0.30f;      // a 60 cm band, centred on the radius
+            const float Lift = 0.02f;
 
-            const int segments = 56;
-            float r = TurfArena.PlazaRadius;
-            float step = 360f / segments;
-            int built = 0;
+            float rIn = TurfArena.PlazaRadius - HalfWidth;
+            float rOut = TurfArena.PlazaRadius + HalfWidth;
 
-            for (int i = 0; i < segments; i++)
+            var verts = new Vector3[Segments * 2];
+            var norms = new Vector3[Segments * 2];
+            var tris = new int[Segments * 6];
+
+            for (int s = 0; s < Segments; s++)
             {
-                float ang = i * step;
-
-                bool inApproach = false;
-                for (int g = 0; g < TurfArena.GapCount && !inApproach; g++)
-                {
-                    // The gateway's own half-width, converted to an angle AT THE PLAZA RADIUS and
-                    // opened up a little. Converting here matters twice over: the same metres
-                    // subtend a far larger angle at 19 m than out at the 31 m wall, and the
-                    // gateways are only 45 degrees apart.
-                    //
-                    // The first pass widened by 1.9 and produced a kerb with no kerb in it — 0 of
-                    // 56 segments solid. A 5 m spoke half-width at this radius is already 15
-                    // degrees, so 1.9 makes it 28.6, and two neighbouring approaches 45 degrees
-                    // apart simply swallow the arc between them. Hence the guard below: a ring this
-                    // can silently delete entirely is a ring worth counting.
-                    float halfDeg = TurfArena.GapHalfWidth(g) * 1.15f / r * Mathf.Rad2Deg;
-                    inApproach = Mathf.Abs(Mathf.DeltaAngle(ang, TurfArena.GapAngle(g))) < halfDeg;
-                }
-                if (inApproach) continue;
-
-                Vector3 dir = TurfArena.Bearing(ang);
-                var go = new GameObject($"Kerb collider {i}");
-                go.transform.SetParent(solid, false);
-                go.transform.SetPositionAndRotation(dir * r, Quaternion.LookRotation(dir, Vector3.up));
-
-                var col = go.AddComponent<BoxCollider>();
-                // Low, and only as thick as the stone. It is a kerb: it should stop a machine that
-                // drives at it square and let one that clips it slide along, which a 30 cm box does
-                // and a wall does not.
-                col.size = new Vector3(step * Mathf.Deg2Rad * r * 1.04f, 0.34f, 0.8f);
-                col.center = new Vector3(0f, 0.17f, 0f);
-                go.isStatic = true;
-                built++;
+                float a = s / (float)Segments * Mathf.PI * 2f;
+                float sin = Mathf.Sin(a), cos = Mathf.Cos(a);
+                verts[s * 2] = new Vector3(sin * rIn, Lift, cos * rIn);
+                verts[s * 2 + 1] = new Vector3(sin * rOut, Lift, cos * rOut);
+                norms[s * 2] = Vector3.up;
+                norms[s * 2 + 1] = Vector3.up;
             }
 
-            // Counted, not assumed. Both failure modes here are silent and both are bad: too much
-            // cut away and the kerb does not exist, none cut away and the hub is sealed. Neither
-            // shows up in a screenshot until somebody drives at it.
-            if (built == 0)
-                Debug.LogError($"[Bloom] the plaza kerb has NO solid segments — the approaches are " +
-                               $"wide enough to cover the whole ring. The kerb does not exist.");
-            else if (built > segments - TurfArena.GapCount)
-                Debug.LogError($"[Bloom] the plaza kerb is nearly continuous ({built}/{segments}); " +
-                               $"the hub is walled in. The approaches are not being cut.");
-            else
-                Debug.Log($"[Bloom] plaza kerb: {built} of {segments} segments solid, " +
-                          $"{TurfArena.GapCount} approaches left open.");
+            for (int s = 0; s < Segments; s++)
+            {
+                int next = (s + 1) % Segments;
+                int a = s * 2, b = a + 1;           // inner, outer at this angle
+                int c = next * 2, d = c + 1;        // inner, outer at the next one
+                int t = s * 6;
+                // The same winding BuildGround uses, taken from it rather than reasoned out again —
+                // a ring wound the other way is invisible from above and perfectly fine from below,
+                // which is the one viewpoint nobody will check.
+                tris[t] = a; tris[t + 1] = b; tris[t + 2] = d;
+                tris[t + 3] = a; tris[t + 4] = d; tris[t + 5] = c;
+            }
+
+            var mesh = new Mesh { name = "BloomPlazaEdge" };
+            mesh.SetVertices(verts);
+            mesh.SetNormals(norms);
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateBounds();
+            // Persisted, like the floor. A mesh built in the builder and never written to disk
+            // survives exactly until the scene is closed, and then the plaza edge is a MeshFilter
+            // pointing at nothing in a scene whose whole premise is that it is saved output.
+            mesh = DuckMeshLibrary.Persist(mesh, "BloomPlazaEdge");
+
+            var go = new GameObject("Plaza edge line");
+            go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = GlowMat("M_BloomPlazaEdge", "#8A887B");
+            // No collider is added here and none should ever be. The entire reason this exists in
+            // place of the kerb is that it is not something a mower can hit.
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            go.isStatic = true;
+
+            Debug.Log($"[Bloom] plaza edge: painted ring at {TurfArena.PlazaRadius:0.#} m, " +
+                      $"{HalfWidth * 2f:0.##} m wide, flat and uncollidable. No kerb.");
         }
 
         /// <summary>
