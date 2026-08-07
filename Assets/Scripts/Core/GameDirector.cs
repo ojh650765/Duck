@@ -993,8 +993,12 @@ namespace DuckMow
             //     nothing registered and Escape does nothing at all: a dead key, not a crash.
             if (input != null && input.MenuPressed && State != GameState.Intro)
             {
-                if (!UI.PopupStack.Consumed && !UI.PopupStack.Any && UI.PopupStack.PauseFactory != null)
-                    UI.PopupStack.Push(UI.PopupStack.PauseFactory());
+                // Fully qualified: this file has `using UnityEngine;`, which puts UnityEngine.UI in
+                // scope under the same short name, so a bare `UI.PopupStack` resolves against the
+                // wrong namespace and does not compile.
+                if (!DuckMow.UI.PopupStack.Consumed && !DuckMow.UI.PopupStack.Any &&
+                    DuckMow.UI.PopupStack.PauseFactory != null)
+                    DuckMow.UI.PopupStack.Push(DuckMow.UI.PopupStack.PauseFactory());
                 return;
             }
 
