@@ -149,7 +149,20 @@ namespace DuckMow
             BuildBoost();
             BuildStandings();
             BuildExitPrompt();
+
+            // Hard top right, which this HUD leaves empty on purpose: the territory map is anchored
+            // to the top LEFT and the clock is centred. Parented to the CANVAS rather than to the
+            // live group above, deliberately — that group stands down as the reveal takes the screen,
+            // and the way out of a stage must not disappear with the match it was in.
+            _pause = DuckMow.UI.PauseButton.Attach(_canvas);
         }
+
+        /// <summary>
+        /// The plate in the top corner that opens the pause board. One class shared by all three
+        /// stages — see <see cref="DuckMow.UI.PauseButton"/>, which also explains why it is polled
+        /// rather than given an onClick this project has no EventSystem to deliver.
+        /// </summary>
+        DuckMow.UI.PauseButton _pause;
 
         /// <summary>
         /// The way out, in the round's own dark plate at the foot of the frame.
@@ -380,6 +393,11 @@ namespace DuckMow
 
         void LateUpdate()
         {
+            // Before the director guard — see RallyHud, which does the same for the same reason: the
+            // pause plate is the one thing on this HUD that has to work in a scene whose director
+            // never came up, because that is exactly when a player needs a way out.
+            _pause?.Tick();
+
             if (director == null) return;
             var mask = TurfMask.Instance;
 

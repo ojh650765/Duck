@@ -7,8 +7,8 @@ using UnityEngine.UI;
 namespace DuckMow.UI
 {
     /// <summary>
-    /// THE CARD THAT GOES UP BEFORE A STAGE DOES: the world dims, and the player is told what they
-    /// are about to be asked to do and which keys do it.
+    /// THE CARD THAT GOES UP AS A STAGE HANDS THE PLAYER THE WHEEL: the world dims, and the player
+    /// is told what they are about to be asked to do and which keys do it.
     ///
     /// The problem it solves is not "the game has no tutorial". It is that this game has THREE
     /// stages with three different verb sets, played back to back inside one championship, and the
@@ -89,20 +89,6 @@ namespace DuckMow.UI
         const string LawnArtScene = "Main";
 
         /// <summary>
-        /// Unscaled seconds of clear, curtain-free stage the player gets to look at before the card
-        /// lands on top of it.
-        ///
-        /// Not zero, and the reason is the whole timing decision below. Every stage in this game
-        /// opens on an authored establishing shot — the arena from directly overhead, the lawn from
-        /// the start line — and the curtain is lifted ONTO it deliberately, gated on frames actually
-        /// rendered rather than on a load handle. Dimming that on the frame it appears would throw
-        /// away the shot the seam went to some trouble to deliver. Half a second is long enough to
-        /// read as "here is the place, now here is how you play it" and short enough that nobody
-        /// waiting to start feels held.
-        /// </summary>
-        const float Settle = 0.55f;
-
-        /// <summary>
         /// How long the watcher will wait for a stage to reach the state described below before it
         /// gives up on that scene and says so.
         ///
@@ -119,30 +105,57 @@ namespace DuckMow.UI
         /// <summary>The stage scene the watcher is holding a card for. Invalid means nothing is due.</summary>
         static Scene _pending;
 
-        /// <summary>Unscaled seconds of uncovered stage seen so far. Reset by anything covering it.</summary>
-        static float _dwell;
-
         /// <summary>Unscaled seconds spent actively waiting. See <see cref="GiveUpAfter"/>.</summary>
         static float _age;
 
         /// <summary>
         /// True once the watcher has SEEN the incoming stage take the wheel off the player.
         ///
-        /// This is the gate that makes "before the stage starts" mean something, and it is stated as
-        /// an observation rather than as a timer because every stage already announces it the same
-        /// way. <see cref="StageSeam.Begin"/> takes driving away the instant a transition starts and
-        /// pointedly does not give it back; <see cref="TurfDirector"/> holds it through the count-in
-        /// and releases it on the horn; <see cref="RallyDirector"/> re-asserts it every frame from
-        /// its own phase; <see cref="GameDirector"/> sets it per state and it is false through
-        /// briefing, preview and countdown. So "the stage is holding the wheel" is a fact the game
-        /// already publishes, and waiting for it is how the primer knows the arena is assembled and
-        /// under a director's control rather than half-built.
+        /// This is what tells the primer the stage is assembled and under a director's control
+        /// rather than half-built, and it is stated as an observation rather than as a timer because
+        /// every stage already announces it the same way. <see cref="StageSeam.Begin"/> takes driving
+        /// away the instant a transition starts and pointedly does not give it back;
+        /// <see cref="TurfDirector"/> holds it through the count-in and releases it on the horn;
+        /// <see cref="RallyDirector"/> re-asserts it every frame from its own phase;
+        /// <see cref="GameDirector"/> sets it per state and it is false through briefing, preview and
+        /// countdown.
         ///
         /// It also gives the watcher a clean way to be LATE: once this is true, driving going true
         /// means the stage has handed over and the moment for a primer has passed. A card that
         /// dropped in after the horn would freeze a live match, which is worse than never showing.
         /// </summary>
         static bool _sawHeld;
+
+        /// <summary>
+        /// True once the rig has been seen framing this stage's ESTABLISHING SHOT.
+        ///
+        /// The other half of the timing decision, and the half that moved. See <see cref="Beat"/>.
+        /// Latched rather than tested at the moment of the push, because a stage's opening move can
+        /// happen behind a curtain that has not lifted yet and an edge missed while the frame was
+        /// covered would be an edge missed for good.
+        /// </summary>
+        static bool _sawEstablishing;
+
+        /// <summary>
+        /// True once the rig has LEFT the establishing shot for the shot the stage is played in.
+        ///
+        /// Also latched, for the reason above: this is the moment the card is due, and it is allowed
+        /// to arrive while the frame is still covered.
+        /// </summary>
+        static bool _handover;
+
+        /// <summary>
+        /// The camera rig of the stage currently being watched, found on demand and dropped whenever
+        /// a new stage arms.
+        ///
+        /// Re-found per stage rather than cached for the session, and that is load bearing in a
+        /// championship: an arena is loaded ADDITIVELY on top of a sleeping Main, so there are two
+        /// CameraDirectors in memory and the one that matters is whichever scene is awake.
+        /// FindFirstObjectByType skips inactive GameObjects by default and Main's roots are
+        /// deactivated by RallyStage.Sleep, so the search answers correctly — but only if it is asked
+        /// again once the arena is up, which is what <see cref="Arm"/> guarantees.
+        /// </summary>
+        static CameraDirector _rig;
 
         /// <summary>The frame the beat last ran on, so it cannot be double-stepped. See Beat.</summary>
         static int _lastBeatFrame = -1;
@@ -160,6 +173,80 @@ namespace DuckMow.UI
         /// for the next championship without this file having to know the front page's name.
         /// </summary>
         static readonly HashSet<string> _primed = new HashSet<string>();
+
+        // ==================================================================================
+        // HAS THIS PLAYER PLAYED BEFORE
+        // ==================================================================================
+
+        /// <summary>
+        /// PlayerPrefs key, namespaced with the project prefix for the reason MasterAudio spells out
+        /// and Haptics repeats: on WebGL, PlayerPrefs is one IndexedDB store keyed off the build
+        /// path, which on a shared domain is genuinely a bucket other builds may have written into.
+        /// </summary>
+        const string KeyTaught = "DuckMow.Primer.Taught";
+
+        /// <summary>
+        /// Whether this SESSION teaches. Read from storage once, at <see cref="Install"/>, and then
+        /// never re-read.
+        ///
+        /// ---- why a session latch rather than reading the flag each time ----
+        ///
+        /// The requirement is "show it once, ever", and the naive version of that — write the flag as
+        /// the first card closes, and test the flag before every card — is a different feature. There
+        /// are THREE cards, one per stage, because there are three verb sets: the horn is the whole
+        /// of stage two and stage three switches both it and the air check off. A player who dismissed
+        /// the LAWN ART card and then, twenty minutes later in the same first run, was handed the
+        /// goose rally in silence would never be told about the horn at all.
+        ///
+        /// So the decision is taken once for the whole run: a player who has never played is taught
+        /// every stage of the run they are in, and a player who has is taught none of them. That is
+        /// what "has this player played before" actually means, and it is the reading that makes the
+        /// three cards a course rather than three copies of one notice.
+        ///
+        /// ---- and why the flag is written on the way OUT ----
+        ///
+        /// It is set when a card is DISMISSED, never when one is pushed — see <see cref="OnClosed"/>.
+        /// A player who shuts the tab, or stops play mode, while the card is on screen has not read
+        /// it, and a flag written at the push would deny them it for ever with no way back short of
+        /// clearing browser storage. Nothing writes it during the frames the card is up.
+        ///
+        /// The way back, for a player who HAS been taught and wants the list again, is the pause
+        /// board — see <see cref="ForPause"/>. That door is what makes it safe for this to be a
+        /// one-way flag at all.
+        /// </summary>
+        static bool _teachThisSession;
+
+        /// <summary>
+        /// Remember that this player has been through the primer. Idempotent, and flushed at once.
+        ///
+        /// Set/Save split as MasterAudio and Haptics both use it: SetInt touches an in-memory
+        /// dictionary and is free, and PlayerPrefs.Save() is the one that goes to storage — in WebGL
+        /// an asynchronous FS.syncfs against IndexedDB. Here it is flushed IMMEDIATELY rather than
+        /// debounced, because unlike a volume slider this is written once in a player's life and the
+        /// very next thing that happens is a stage starting, which is exactly the sort of moment a
+        /// browser tab gets closed during.
+        /// </summary>
+        static void MarkTaught()
+        {
+            if (PlayerPrefs.GetInt(KeyTaught, 0) != 0) return;
+            PlayerPrefs.SetInt(KeyTaught, 1);
+            PlayerPrefs.Save();
+        }
+
+        /// <summary>
+        /// Forget that this player has played, so the next run teaches again.
+        ///
+        /// Nothing in the game calls this. It exists for the settings board to hang a row off if one
+        /// is ever wanted, and — more usefully today — so that reviewing the primer does not mean
+        /// hand-editing the registry or clearing a browser's site data. A one-way flag with no stated
+        /// way back is a feature that can be looked at exactly once per machine.
+        /// </summary>
+        public static void ForgetPlayer()
+        {
+            PlayerPrefs.SetInt(KeyTaught, 0);
+            PlayerPrefs.Save();
+            _teachThisSession = true;
+        }
 
         /// <summary>
         /// Install the watcher, once per session, and pick up the scene that is already open.
@@ -191,6 +278,12 @@ namespace DuckMow.UI
             Disarm();
             _lastBeatFrame = -1;
             _primed.Clear();
+
+            // Whether this whole run teaches, decided here and not asked again — see the note on
+            // the field. Read even when the answer is "no", because the watcher below still has to
+            // be installed: the pause board can ask for a card at any moment and IsStage is the only
+            // thing that knows whether there is one to give.
+            _teachThisSession = PlayerPrefs.GetInt(KeyTaught, 0) == 0;
 
             SceneManager.sceneLoaded -= OnSceneLoaded;
             SceneManager.sceneLoaded += OnSceneLoaded;
@@ -232,25 +325,37 @@ namespace DuckMow.UI
             Arm(scene);
         }
 
-        /// <summary>Start watching a scene, if it is a stage and has not already had its card.</summary>
+        /// <summary>
+        /// Start watching a scene, if it is a stage, this player is being taught, and it has not
+        /// already had its card.
+        ///
+        /// The rig is dropped rather than kept: this is the one moment the watcher knows a different
+        /// stage has arrived, and in a championship the arena that just loaded has a camera director
+        /// of its own standing in front of the lawn's. See <see cref="_rig"/>.
+        /// </summary>
         static void Arm(Scene scene)
         {
             if (!scene.IsValid() || !scene.isLoaded) return;
+            if (!_teachThisSession) return;
             if (!IsStage(scene.name)) return;
             if (_primed.Contains(scene.name)) return;
 
             _pending = scene;
-            _dwell = 0f;
             _age = 0f;
             _sawHeld = false;
+            _sawEstablishing = false;
+            _handover = false;
+            _rig = null;
         }
 
         static void Disarm()
         {
             _pending = default;
-            _dwell = 0f;
             _age = 0f;
             _sawHeld = false;
+            _sawEstablishing = false;
+            _handover = false;
+            _rig = null;
         }
 
         /// <summary>
@@ -265,32 +370,56 @@ namespace DuckMow.UI
         /// <summary>
         /// One frame of the watcher, and the whole of the WHEN decision.
         ///
-        /// The brief for this file asked when the card should appear and wanted the answer argued
-        /// rather than picked, because there are three plausible ones and two of them are wrong in
-        /// ways that only show up in a build.
+        /// ---- what this used to do, and the hang it caused ----
         ///
-        ///   ON SCENE LOAD is wrong, and badly. All three stage scenes are loaded UNDER A CLOSED
-        ///   CURTAIN: the seam shuts the frame before LoadSceneAsync is called and lifts it only
-        ///   after the arena has genuinely rendered. The curtain sits at sorting order 30000 and
-        ///   this card at 24900, so a primer pushed on load is a card nobody can see, stopping the
-        ///   clock, behind an opaque frame — and the player's only way out of it is to press a key
-        ///   they were never shown, on a screen that looks like the game has hung mid-transition.
+        /// It waited for the wheel to be taken off the player, dwelled half a second on the first
+        /// uncovered frame, and pushed. Both halves of that were inferences and the first one was
+        /// simply false: DRIVING IS DISABLED FOR THE WHOLE OF THE OPENING STORY. So on a PLAY from
+        /// the front page the card would push itself over the cutscene about half a second in — and
+        /// because the popup stack holds Time.timeScale at zero while a popup wants time stopped, and
+        /// because ComicSequence was stepping itself on the SCALED clock, the story stopped dead on
+        /// its fade-in frame. Its own failsafe went with it: GameDirector's Intro budget was also
+        /// counting scaled seconds, so the deadline that exists to rescue exactly this could never
+        /// arrive. The game hung, permanently, on the first thing a new player is ever shown.
         ///
-        ///   ON THE HANDOVER — the first frame the stage would give the player the wheel — is
-        ///   defensible and still wrong. Bloom Rush and the Goose Rally both open on an overhead
-        ///   establishing shot, count down over it, and release on a horn. Freezing on the horn
-        ///   means the game shouts GROW and then immediately stops, and the player reads their
-        ///   controls having already been told to go. Controls belong BEFORE the count-in, not
-        ///   after it.
+        /// It was a RACE, which is why it did not always reproduce — anything that pushed the dwell
+        /// past the end of the story hid it — and the card was NOT invisible while it happened: it
+        /// sorts at 24900 against the comic canvas's 200. What the player described as a frozen
+        /// cutscene was the frozen art behind a card that had every right to be there.
         ///
-        ///   ON THE FIRST CLEAR, SETTLED FRAME OF THE STAGE is what this does. The stage is fully
-        ///   assembled, the establishing shot is up and has been up long enough to register, the
-        ///   director is still holding the wheel through its own intro, and every one of those
-        ///   intros is stepped on Time.deltaTime — TurfDirector, RallyDirector and GameDirector all
-        ///   take the scaled clock — so stopping it freezes the count-in cleanly and lets it resume
-        ///   from where it was. The primer does not fight the director's intro; it stands inside it.
+        /// Two other files were changed so that this class can never do that to anything again — the
+        /// story and the ending run unscaled now, and their budgets do too — but the fix that matters
+        /// is here: THE TRIGGER IS NO LONGER AN INFERENCE. "Driving is off, therefore a stage is
+        /// about to start" was never true, and no dwell makes a false premise safe.
         ///
-        /// Each gate below therefore says NOT YET rather than NEVER, and the difference matters:
+        /// ---- the beat it hangs off now ----
+        ///
+        /// All three stages open the same way, and they say so out loud through the camera rig:
+        ///
+        ///   ESTABLISH   a shot of the place. GameDirector goes Briefing then VenuePreview over the
+        ///               whole venue; RallyDirector and TurfDirector both snap to CameraMode.Reveal,
+        ///               looking straight down at the arena.
+        ///   HAND OVER   the rig moves to CameraMode.Chase, behind the machine the player is about to
+        ///               drive. GameDirector does it entering Countdown, TurfDirector at the end of
+        ///               its establish, RallyDirector as the intro's last beat.
+        ///   COUNT       three, two, one — and only then is the wheel handed over.
+        ///
+        /// So the card goes up on the frame the rig LEAVES the establishing shot for the play shot.
+        /// That is exactly what was asked for: the player has been shown where they are, and they are
+        /// told which buttons to press immediately before they are given any. It is one observation,
+        /// identical in all three stages, and it is a real published fact rather than a delay — the
+        /// front page never enters Chase from an establishing shot, and neither does a cutscene,
+        /// because neither has a CameraDirector doing this at all.
+        ///
+        /// It also lands BEFORE each stage's count-in rather than on the horn, which is the one thing
+        /// the previous version of this comment got right and is worth keeping: freezing on "GO" reads
+        /// the controls to a player who has already been told to drive.
+        ///
+        /// Both halves are LATCHED rather than tested at the moment of the push, because a stage's
+        /// opening move is allowed to happen while the curtain is still down and an edge missed
+        /// behind a covered frame would be an edge missed for good.
+        ///
+        /// Each gate below says NOT YET rather than NEVER, and the difference matters:
         ///
         ///   SimClock.Scripted    never, and this one really is never. The capture harness steps the
         ///                        game by hand and owns the clock; the popup stack refuses to touch
@@ -300,29 +429,29 @@ namespace DuckMow.UI
         ///   scene gone           never. A stage aborted before it started has no controls to teach.
         ///   a popup is up        not yet. Something already has the player's attention and a
         ///                        controls card is not entitled to land on top of it.
-        ///   curtain or seam      not yet, and this is the gate that makes the whole thing work.
-        ///   the opening story    not yet. GameDirector ignores Escape during it and the sequence
-        ///                        reads its own keys; dimming a story page to explain the handbrake
-        ///                        is the wrong beat in every possible sense.
+        ///   the opening story    NOT YET, and this is now belt and braces rather than the only
+        ///                        thing standing between the player and a hang. The story is not a
+        ///                        stage handing over a wheel, so the trigger above cannot fire during
+        ///                        it — the rig is in no mode at all while the page is up. The gate
+        ///                        stays because a second reason to be right about the single worst
+        ///                        failure this file has ever produced is worth four lines.
+        ///   curtain or seam      not yet. The frame is covered and a card pushed behind an opaque
+        ///                        screen is a card nobody can see, stopping the clock, with the only
+        ///                        way out a key they were never shown.
         ///   no InputReader       not yet. The stage's input pipeline is not up, so there is nothing
         ///                        to say anything true about.
-        ///   driving already live too late, once the wheel has been seen held. See _sawHeld.
+        ///   driving already live too late. The stage has handed over and the moment has passed; a
+        ///                        card dropped in after the horn would freeze a live match.
         /// </summary>
         static void Beat()
         {
-            // Once a frame, whatever drives this. Cheap, and it means the dwell below measures
-            // frames of stage rather than invocations of a delegate.
+            // Once a frame, whatever drives this.
             if (Time.frameCount == _lastBeatFrame) return;
             _lastBeatFrame = Time.frameCount;
 
             if (!_pending.IsValid()) return;
             if (SimClock.Scripted) { Disarm(); return; }
             if (!_pending.isLoaded) { Disarm(); return; }
-
-            // Clamped for the reason the curtain and the popup stack both clamp: a browser tab
-            // regaining focus hands over a quarter-second delta, and a settle measured through one
-            // of those is a settle that never happened.
-            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
 
             // The two HOLDS, which stand aside for something else and spend no budget doing it. A
             // player can leave a pause menu up for an hour and the opening story is minutes long;
@@ -331,7 +460,11 @@ namespace DuckMow.UI
             if (PopupStack.Any) return;
 
             var director = GameDirector.Instance;
-            if (director != null && director.State == GameState.Intro) { _dwell = 0f; return; }
+            if (director != null && director.State == GameState.Intro) return;
+
+            // Clamped for the reason the curtain and the popup stack both clamp: a browser tab
+            // regaining focus hands over a quarter-second delta.
+            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
 
             // From here down the watcher IS waiting on the stage, so this is where the budget is
             // spent — including while the curtain is still down, which is deliberate. A seam that
@@ -345,24 +478,62 @@ namespace DuckMow.UI
                 Debug.LogWarning($"[Primer] gave up on '{_pending.name}' after {GiveUpAfter:0}s: no " +
                                  "controls card was shown for it. Either the seam never lifted " +
                                  $"(curtain busy: {Curtain.Live != null && Curtain.Live.Busy}, seam: " +
-                                 $"{StageSeam.InProgress}) or the stage never took the wheel off the " +
-                                 "player the way its director is supposed to.");
+                                 $"{StageSeam.InProgress}) or the stage's camera never left its " +
+                                 "establishing shot for the chase the way its director is supposed to.");
                 Disarm();
                 return;
             }
 
-            var curtain = Curtain.Live;
-            if (StageSeam.InProgress || (curtain != null && curtain.Busy)) { _dwell = 0f; return; }
+            // ---- the observation, latched, whether or not the frame is covered -----------------
 
             var input = InputReader.Instance;
-            if (input == null) { _dwell = 0f; return; }
+            if (input == null) return;
 
             if (!input.DrivingEnabled) _sawHeld = true;
             else if (_sawHeld) { Disarm(); return; }
-            if (!_sawHeld) { _dwell = 0f; return; }
+            if (!_sawHeld) return;
 
-            _dwell += dt;
-            if (_dwell < Settle) return;
+            // ---- whose camera are we watching -------------------------------------------------
+            //
+            // Re-resolved whenever the cached rig is gone or ASLEEP, and the second half of that is
+            // the part that had to be got right. In a championship an arena is loaded ADDITIVELY on
+            // top of Main and Main is only put to sleep AFTER the load completes — so the frame this
+            // watcher arms on, there are two CameraDirectors and the awake one is still the LAWN'S.
+            // Caching that one would leave the watcher staring at a rig whose scene is about to stop
+            // being ticked at all: its mode would never change again, the hand-over would never be
+            // seen, and the arena's card would be dropped twelve seconds later with a warning
+            // blaming the arena. isActiveAndEnabled is what notices, because RallyStage.Sleep
+            // deactivates Main's roots rather than destroying them.
+            var rig = _rig != null && _rig.isActiveAndEnabled
+                ? _rig : Object.FindFirstObjectByType<CameraDirector>();
+
+            // A DIFFERENT rig means a different stage's opening, so the observation starts over.
+            //
+            // Without this the swap would produce a false positive rather than a miss, which is
+            // worse: CameraDirector's Mode field INITIALISES to Chase and is only moved to an
+            // establishing shot when its director begins. So a watcher that had already seen the
+            // lawn's rig in some non-Chase mode would meet the arena's brand-new rig reading Chase,
+            // conclude the hand-over had happened, and put the card up over the arena's establishing
+            // shot — the exact beat this trigger exists to protect.
+            if (!ReferenceEquals(rig, _rig))
+            {
+                _rig = rig;
+                _sawEstablishing = false;
+                _handover = false;
+            }
+
+            // Null is NOT NEVER: the arena's rig may simply not be awake yet on the frame its scene
+            // finished loading. The budget above is what stops that being forever.
+            if (_rig == null) return;
+
+            if (_rig.Mode != CameraMode.Chase) _sawEstablishing = true;
+            else if (_sawEstablishing) _handover = true;
+            if (!_handover) return;
+
+            // ---- and the push, which does wait for a frame the player can see -------------------
+
+            var curtain = Curtain.Live;
+            if (StageSeam.InProgress || (curtain != null && curtain.Busy)) return;
 
             // Recorded and disarmed BEFORE the push, not after. OnPush builds a canvas and the stack
             // calls it from inside Push, so anything that ran during it would find the watcher still
@@ -371,7 +542,84 @@ namespace DuckMow.UI
             _primed.Add(scene);
             Disarm();
 
-            PopupStack.Push(new ControlsPrimer(scene));
+            PopupStack.Push(new ControlsPrimer(scene, Shown.Opening));
+        }
+
+        // ==================================================================================
+        // THE CARD, ASKED FOR
+        // ==================================================================================
+
+        /// <summary>
+        /// Why a card is up, which changes two words on it and one side effect.
+        ///
+        /// The distinction is not cosmetic. An OPENING card is the game teaching an untaught player,
+        /// so its plate starts the stage and dismissing it is what records that they have now been
+        /// taught. A REFERENCE card was asked for from the pause board by somebody who already knows
+        /// — it goes BACK to the board it came from and says nothing about whether anyone was ever
+        /// taught anything. A single card that did both would have to guess which, and it would guess
+        /// by looking at the popup stack, which is exactly the sort of inference that produced the
+        /// hang described in <see cref="Beat"/>.
+        /// </summary>
+        public enum Shown { Opening, Reference }
+
+        /// <summary>
+        /// Which stage the player is standing in, or null when they are not standing in one.
+        ///
+        /// The ACTIVE scene first, because that is the fact the flow already maintains: RallyStage
+        /// and TurfStage both call SetActiveScene on the arena as they load it, so during rounds two
+        /// and three the active scene is the arena and Main is asleep behind it. Falling back to any
+        /// loaded stage covers a standalone arena opened straight from the editor, where the active
+        /// scene is the arena anyway, and the lawn, where it is Main.
+        /// </summary>
+        static string CurrentStageScene()
+        {
+            var active = SceneManager.GetActiveScene();
+            if (active.IsValid() && active.isLoaded && IsStage(active.name)) return active.name;
+
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                if (s.IsValid() && s.isLoaded && IsStage(s.name)) return s.name;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// True when there is a controls card that could honestly be shown right now.
+        ///
+        /// Read by the pause board to decide whether to offer the row at all. It is deliberately a
+        /// question about the WORLD rather than about whether the player has been taught: a card the
+        /// player has already seen is exactly the card they are asking for when they open the board,
+        /// and one they have never seen is if anything more welcome. What it refuses is a row on the
+        /// FRONT PAGE's pause board — there is no stage there, so there are no controls to list, and
+        /// a plate that opened a card headed LAWN ART over the menu would be the board describing a
+        /// place the player is not in.
+        /// </summary>
+        public static bool HasCardHere => CurrentStageScene() != null;
+
+        /// <summary>
+        /// The card for wherever the player is, to be pushed on top of the pause board.
+        ///
+        /// The whole of requirement four, and it costs one method because the card was already a
+        /// popup: the stack was built for a screen opening on top of another screen — that is the
+        /// case PausePopup's QUIT confirmation exists to prove — so this is a push, not a second
+        /// overlay with its own canvas, its own input and its own idea of what Escape means.
+        ///
+        /// The CONTENT is not duplicated anywhere. There is one list of what each stage honours, in
+        /// the constructor below, and both the opening card and this one are built from it — so the
+        /// controls a returning player looks up cannot drift from the controls a new player was
+        /// taught. That was the alternative worth refusing: a second control list on the pause board
+        /// would be a second place to update the day a key changes, and the two would disagree
+        /// silently, in the one screen a confused player goes to.
+        ///
+        /// Null when there is no stage. Callers must check <see cref="HasCardHere"/> first rather
+        /// than pushing this blind — PopupStack.Push(null) is a silent no-op, which would present as
+        /// a plate that does nothing.
+        /// </summary>
+        public static ControlsPrimer ForPause()
+        {
+            string scene = CurrentStageScene();
+            return scene == null ? null : new ControlsPrimer(scene, Shown.Reference);
         }
 
         // ==================================================================================
@@ -391,12 +639,15 @@ namespace DuckMow.UI
         readonly string _objective;
         readonly string _footnote;
         readonly Line[] _lines;
+        readonly Shown _reason;
 
         float _itemsCentreY;
         RectTransform _card;
 
-        ControlsPrimer(string sceneName)
+        ControlsPrimer(string sceneName, Shown reason)
         {
+            _reason = reason;
+
             // ---- what each stage actually honours -------------------------------------------
             //
             // Every line below was READ OFF THE CONSUMER, not off a design document, because the
@@ -600,12 +851,23 @@ namespace DuckMow.UI
             // contract in a browser rather than a compromise. The first click into a WebGL canvas is
             // a FOCUS click — a player alt-tabbing back to the tab, or clicking in for the first
             // time, would spend it dismissing a card they had not read. A plate has to be aimed at.
-            AddItem("START", RequestClose);
+            //
+            // The WORD on it names what pressing it does, which is not the same thing on both routes
+            // in. On the opening card the stage is on the other side of it and is waiting to be
+            // started. Opened from the pause board there is a pause board on the other side of it and
+            // nothing has been started yet — a plate reading START there would promise to resume a
+            // round that the board behind it is still holding.
+            AddItem(_reason == Shown.Opening ? "START" : "BACK", RequestClose);
 
             // What dismisses this, spelled out, because the card has no other way to end and a
             // player waiting for it to time out would wait for ever. It deliberately does NOT
             // auto-dismiss: the whole reason to stop the world is that the player starts when they
             // are ready, and a card that leaves on a timer is a card that leaves mid-sentence.
+            //
+            // ESC is named on both, and it means different things by design — the stack pops ONE
+            // popup, so on the opening card it starts the stage and on the reference card it puts
+            // the pause board back. Both are "go back to what you were doing", which is the only
+            // thing Escape means anywhere in this game.
             BuildText("Hint",
                       "ENTER   " + Dot + "   SPACE   " + Dot + "   ESC   " + Dot + "   OR CLICK THE PLATE",
                       20f, half - hintY, new Vector2(820f, 30f),
@@ -669,17 +931,37 @@ namespace DuckMow.UI
         }
 
         /// <summary>
-        /// Nothing to put back.
+        /// Nothing to put back, and one thing to write down.
         ///
-        /// Worth an explicit note rather than an absent override, because the sibling popup DOES do
-        /// something here — <see cref="PausePopup"/> ducks AudioListener.volume, since an engine
-        /// drone whose pitch is driven by a frozen road speed holds one flat tone under the menu.
-        /// This card is up before any of that has started: the machine is idling on a start line
-        /// under a director that has not released it, the crowd and the arena's ambience are the
-        /// establishing shot's own soundtrack, and quietening them would make the stage feel like it
-        /// had been interrupted rather than introduced. So the sound is left exactly alone, and the
-        /// only thing this popup ever borrowed — the clock and the wheel — is the stack's to return.
+        /// NOTHING TO PUT BACK is worth an explicit note rather than an absent override, because the
+        /// sibling popup DOES do something here — <see cref="PausePopup"/> ducks the master volume,
+        /// since an engine drone whose pitch is driven by a frozen road speed holds one flat tone
+        /// under the menu. This card is up before any of that has started: the machine is idling on a
+        /// start line under a director that has not released it, the crowd and the arena's ambience
+        /// are the establishing shot's own soundtrack, and quietening them would make the stage feel
+        /// like it had been interrupted rather than introduced. So the sound is left exactly alone,
+        /// and the only thing this popup ever borrowed — the clock and the wheel — is the stack's to
+        /// return.
+        ///
+        /// THE ONE THING TO WRITE DOWN is that this player has now been taught, and the timing of
+        /// that write is the whole of the requirement. It happens HERE, as the card leaves, and never
+        /// when one is pushed: a player who closes the tab or stops play mode while the card is on
+        /// screen has not read it, and OnPop simply never runs for them, so the next session teaches
+        /// again. A flag set on the way IN would have spent a player's one and only primer on a card
+        /// they never finished looking at, permanently, with no way back short of clearing browser
+        /// storage.
+        ///
+        /// Only the OPENING card writes it. A card the player went and fetched from the pause board
+        /// says nothing about whether anybody ever taught them anything — and on the first run they
+        /// may well fetch one BEFORE the stage that was going to teach them has got there.
+        ///
+        /// It does not change what the rest of THIS run does: the decision to teach is latched once
+        /// per session in <see cref="Install"/>, so the two arenas still get their cards after the
+        /// lawn's has been dismissed. See <see cref="_teachThisSession"/>.
         /// </summary>
-        protected override void OnClosed() { }
+        protected override void OnClosed()
+        {
+            if (_reason == Shown.Opening) MarkTaught();
+        }
     }
 }

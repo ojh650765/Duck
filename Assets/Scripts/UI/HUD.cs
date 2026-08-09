@@ -122,6 +122,12 @@ namespace DuckMow
         float _bannerTimer;
         float _shownTotal;
 
+        /// <summary>
+        /// The plate in the top corner that opens the pause board. Built at runtime rather than
+        /// baked, and stepped from <see cref="Update"/>. See <see cref="DuckMow.UI.PauseButton"/>.
+        /// </summary>
+        DuckMow.UI.PauseButton _pause;
+
         void Awake()
         {
             // The shape card needs no material instancing and no per-frame work: it reads the
@@ -129,6 +135,19 @@ namespace DuckMow
             // round. That is the entire point of it — it is a printed reference, not a display.
             SetGroup(resultsGroup, 0f);
             SetGroup(bannerGroup, 0f);
+
+            // NOT in the top-right CORNER on this HUD, and the offset is not a taste decision.
+            // BuildRoundHud parks the SHAPE CARD at 0.815..0.985 of the frame — the picture the
+            // player is being marked on, and the one thing on this screen they must always be able
+            // to see — so a plate in the corner would sit on top of it. The anchor is a FRACTION for
+            // the same reason the card's is: a pixel inset from the right edge stays put while a
+            // fraction-anchored card walks left as the window narrows, and a browser window is
+            // dragged to every aspect there is.
+            //
+            // This component IS on the canvas object — DuckUIBuilder does canvasGO.AddComponent<HUD>
+            // — so there is no walk up a hierarchy to get wrong here.
+            _pause = DuckMow.UI.PauseButton.Attach(GetComponent<Canvas>(),
+                                                   new Vector2(0.795f, 1f), new Vector2(0f, -34f));
         }
 
         void Start()
@@ -150,6 +169,13 @@ namespace DuckMow
 
         void Update()
         {
+            // Stepped OUTSIDE the scripted-clock gate below and outside Tick, deliberately. Tick is
+            // the HUD's own beat and the capture harness drives it by hand with its own delta; the
+            // pause plate is chrome that answers a live pointer on the unscaled clock, and it hides
+            // itself under SimClock.Scripted rather than being stepped by it. Feeding it the
+            // harness's delta would put a pause button in every frame sheet the review produces.
+            _pause?.Tick();
+
             if (SimClock.Scripted) return;
             Tick(Time.deltaTime);
         }

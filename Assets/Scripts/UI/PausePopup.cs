@@ -857,8 +857,15 @@ namespace DuckMow.UI
         ///
         /// HideAndDontSave on both texture and sprite, so a domain reload in the editor cannot leave
         /// them behind in the scene.
+        ///
+        /// PROTECTED INTERNAL rather than protected, which is a widening worth one sentence: the
+        /// pause BUTTON on the three stage HUDs is cut from this same plank and is not a popup, so
+        /// it is not a subclass. The alternative was a third copy of these twenty lines — there are
+        /// already two, this one and Curtain's — and three copies of a shape is how two of them stop
+        /// matching. Internal keeps it inside the game assembly, which is as far as it has any
+        /// business travelling.
         /// </summary>
-        protected static Sprite RoundedSprite()
+        protected internal static Sprite RoundedSprite()
         {
             if (_rounded != null) return _rounded;
 
@@ -1021,6 +1028,7 @@ namespace DuckMow.UI
         static int CountItems()
         {
             int n = 2;                                  // RESUME and BACK TO MENU, always
+            if (ControlsPrimer.HasCardHere) n++;
             if (CanOfferQuit) n++;
             return n;
         }
@@ -1031,6 +1039,28 @@ namespace DuckMow.UI
             // and letting the mower be driven again — this popup declared PausesTime and
             // BlocksDriving and has no business unwinding either of them by hand.
             AddItem("RESUME", RequestClose);
+
+            // CONTROLS, second, and it is here because the primer stopped being unmissable.
+            //
+            // The controls card used to go up in front of every stage of every run, so the pause
+            // board never had to answer "which key was the horn again" — the game had just said so,
+            // twice. It is now shown ONCE IN A PLAYER'S LIFE (ControlsPrimer's own note argues why
+            // a card the player has already read three times is chrome), and a game that teaches you
+            // something once and then has nowhere to look it up has not taught you, it has told you.
+            // So this row is not a convenience bolted on beside that change; it is the other half of
+            // it, and the two would be wrong shipped apart.
+            //
+            // It PUSHES the primer rather than drawing a list of its own, which is the entire reason
+            // the popups are a stack: the pause board stays exactly where it is, dimmed, with the
+            // card in front of it, and Escape peels one layer back to the board rather than dropping
+            // the player into the round. There is one control list in the project and both routes to
+            // it are built from the same lines — see ControlsPrimer.ForPause, which is a factory
+            // precisely so this file never learns what a control is.
+            //
+            // Offered only where there is a stage to describe. On the front page's pause board there
+            // are no controls to list, and a plate opening a card headed LAWN ART over the menu would
+            // be the board describing a place the player is not standing in.
+            if (ControlsPrimer.HasCardHere) AddItem("CONTROLS", ShowControls);
 
             // BACK TO MENU IS ALWAYS HERE. It used to be omitted where GameDirector.Instance was
             // null, and that omission is worth recording because the reasoning behind it was sound
@@ -1214,6 +1244,26 @@ namespace DuckMow.UI
         {
             PopupStack.PopAll();
             StageLauncher.ReturnToMenu();
+        }
+
+        /// <summary>
+        /// Put the controls card in front of this board.
+        ///
+        /// The same shape as <see cref="AskToQuit"/> and for the same reason: a push, so this board
+        /// survives underneath and the player comes back to it rather than to the round. The base
+        /// works out for itself that the stack got LONGER and stays put — see RunAction, which reads
+        /// the depth either side of a menu action precisely so an item that opens a child does not
+        /// also close its parent.
+        ///
+        /// Checked again rather than trusted, even though the row only exists when the answer is yes.
+        /// The board is built once at push and a player can leave it open across a stage unloading
+        /// underneath them; PopupStack.Push(null) is a silent no-op, which would present as a plate
+        /// that does nothing at all.
+        /// </summary>
+        void ShowControls()
+        {
+            var card = ControlsPrimer.ForPause();
+            if (card != null) PopupStack.Push(card);
         }
 
         /// <summary>
