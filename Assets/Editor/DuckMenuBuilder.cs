@@ -634,28 +634,29 @@ namespace DuckMow.EditorTools
             rosetteImg.preserveAspect = true;
             rosette.localRotation = Quaternion.Euler(0f, 0f, 9f);
 
-            // The class, on a ribbon pinned across the board's bottom right and running off its edge.
-            // The show is on the masthead and the class is underneath it in small type, which is how a
-            // horticultural show bill reads and is the whole point of the event being GARDENER OF THE
-            // YEAR with lawn art as one class inside it.
-            // Dropped from a top edge of 0.14 to 0.00 so it hangs BELOW the board instead of riding
-            // up into it. At 0.14 the ribbon's upper third overlapped the masthead art: it is built
-            // last so it drew on top, which made the render's own drop shadow and keyline read as a
-            // torn edge across the bottom-right of the title. A ribbon pinned across a board's
-            // corner is the intent, but the sign has to stay legible, and "GARDENER OF THE YEAR"
-            // runs the full width of that render.
-            var ribbon = DuckUIBuilder.Frac("Ribbon", group, 0.55f, -0.44f, 1.06f, 0.00f);
-            DuckUIBuilder.AddImage(ribbon, DuckUIBuilder.Spr("banner_ribbon_512"), Color.white, Image.Type.Sliced);
-            // The ribbon's writable cream field is only the middle third of the sprite; the rest is
-            // stripe, tails and transparent margin. These fractions are the ones the HUD measured off
-            // the artwork — text laid out against the whole rect sits outside the plate.
-            var sub = DuckUIBuilder.Frac("Class", ribbon, 0.25f, 0.40f, 0.75f, 0.68f);
-            var subText = DuckUIBuilder.AddText(sub, "LAWN ART CLASS", 26f,
-                                                TextAlignmentOptions.Center, Brick, 0.14f, false);
-            subText.fontStyle = FontStyles.Bold;
+            // ---- there is no LAWN ART CLASS ribbon here any more ----
+            //
+            // It hung across the board's bottom-right and read "LAWN ART CLASS" in small type, on the
+            // reasoning that a horticultural show bill names the show and then the class inside it.
+            // That reasoning was sound about the BILL and wrong about this screen, for two reasons
+            // that only became visible once the rest of the front of the game existed.
+            //
+            // It named ONE STAGE. Lawn Art is round one of three, and the front page is the door to
+            // all of them — the stage select on this same screen offers the goose rally and Bloom
+            // Rush beside it. A subtitle that names a third of the game as though it were the whole
+            // thing is a caption that gets less true the further the player gets.
+            //
+            // And it was the fourth name in about three seconds. The splash card now says POND &
+            // GREEN, the masthead says DUCK MOW, the masthead's own render already carries COUNTY
+            // GARDENER OF THE YEAR under it, and then this. Each of those is doing a different job —
+            // who made it, what it is called, what the event is — and the class was the only one
+            // whose job was already done by the line above it.
+            //
+            // The ribbon sprite and its layout are not lost: DuckUIBuilder still builds ribbons the
+            // same way, and this block is one Frac and one AddText if a subtitle is ever wanted back.
 
-            // Landing order: the board with the name, then the rosette pinned on, then the ribbon.
-            return new[] { card, rosette, ribbon };
+            // Landing order: the board with the name, then the rosette pinned on.
+            return new[] { card, rosette };
         }
 
         /// <summary>
