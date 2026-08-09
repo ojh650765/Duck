@@ -87,9 +87,18 @@ namespace DuckMow.EditorTools
                 PlayerSettings.SplashScreenLogo.Create(LogoSeconds, logo)
             };
 
-            // Ask for the engine logo to go. On a licence that does not allow it this is ignored,
-            // which is why nothing below trusts it.
-            PlayerSettings.SplashScreen.show = false;
+            // The splash is ON, and the engine logo is off.
+            //
+            // The first pass turned the whole splash OFF, because the licence allows it and that is
+            // the cleanest boot a game can have. It was also the wrong answer to what was asked: the
+            // owner wanted their own mark on the front of the build, and a splash that does not run
+            // shows no mark at all. A logo configured under a disabled splash is a logo nobody sees.
+            //
+            // So: run the splash, and ask for the engine's logo to be dropped from it. That request
+            // is the licence question — on a licence that refuses it the card still shows, beside
+            // the engine logo rather than instead of it, which is a fair outcome and not a failure.
+            // Nothing below trusts the assignment; it reads back what survived.
+            PlayerSettings.SplashScreen.show = true;
             PlayerSettings.SplashScreen.showUnityLogo = false;
 
             AssetDatabase.SaveAssets();
@@ -101,20 +110,29 @@ namespace DuckMow.EditorTools
 
             if (!splashOn)
             {
-                Debug.Log("[Duck] splash screen OFF. This licence allows it, so the build opens " +
-                          "straight on the game. The roundel and the cream field are still " +
-                          "configured underneath, so if a future licence forces the splash back on " +
-                          "it comes back dressed correctly rather than as Unity's default.");
+                // Should not happen — the splash was asked to RUN. If Unity has refused to turn it
+                // on, the card will not be seen and the build opens on the game with no mark at all,
+                // which is precisely the outcome this builder exists to avoid. Loud, because it is
+                // silent on screen.
+                Debug.LogError("[Duck] the splash was asked to run and came back OFF. The card is " +
+                               "configured but nothing will show it. Check Player Settings > Splash " +
+                               "Image; something outside this builder is switching it off.");
+                return;
+            }
+
+            if (!engineLogo)
+            {
+                Debug.Log($"[Duck] splash: POND & GREEN for {LogoSeconds}s on the game's own cream " +
+                          "field, and the engine logo is off. This licence allows dropping it, so " +
+                          "the card is the only thing on the front of the build.");
                 return;
             }
 
             Debug.LogWarning(
-                "[Duck] the Unity splash CANNOT be disabled on this licence — the request was made " +
-                "and did not take. Falling back, which is the plan and not a fault: the splash now " +
-                "shows the roundel for " + LogoSeconds + "s on the game's own cream field" +
-                (engineLogo ? ", alongside the engine logo." : ", and the engine logo is off.") +
-                " To remove it entirely, a Plus or Pro licence is the only lever; nothing in this " +
-                "project can do it.");
+                "[Duck] the engine logo CANNOT be dropped on this licence — the request was made and " +
+                $"did not take. Not a failure: the splash shows POND & GREEN for {LogoSeconds}s on " +
+                "the game's own cream field, alongside Unity's logo rather than instead of it. " +
+                "Removing it needs a Plus or Pro licence; nothing in this project can do it.");
         }
     }
 }
