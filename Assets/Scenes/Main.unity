@@ -34567,11 +34567,8 @@ MonoBehaviour:
   autopilotEnabled: 0
   defencePhaseEnabled: 0
   defence: {fileID: 0}
-  rallyEnabled: 1
   rallyOnRound: 2
-  bloomEnabled: 1
   bloomOnRound: 3
-  stageChainOnConfirm: 1
   roundDuration: 75
   difficultyTimeBonus: 22
   randomiseFirstShape: 1
@@ -34591,6 +34588,8 @@ MonoBehaviour:
   aerialHold: 1.2
   aerialRise: 0.7
   aerialFall: 0.6
+  klaxonHitStop: 0.42
+  klaxonHitStopScale: 0.24
   portraitPosition: {x: 7.5, y: 0.4, z: -14}
   portraitYaw: 196
   verdictHold: 4.2
