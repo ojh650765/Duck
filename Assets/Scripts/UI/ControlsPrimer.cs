@@ -851,12 +851,22 @@ namespace DuckMow.UI
         /// </summary>
         protected override void Compose()
         {
-            // Lighter than the pause board's 0.78, on purpose. The pause menu is asking the player
-            // to make a decision about a round and the round behind it is noise; this card is
-            // introducing the very place it is dimming, and the establishing shot underneath is half
-            // of what it is saying. Dark enough that cream type on it is never in question, light
-            // enough that the arena still reads as an arena.
-            BuildScrim(0.62f);
+            // TWO SCRIMS, because this card arrives by two routes and they are dimming different
+            // things.
+            //
+            // OPENING is lighter than the pause board's 0.78 on purpose. The pause menu is asking
+            // the player to make a decision about a round and the round behind it is noise; this
+            // card is introducing the very place it is dimming, and the establishing shot underneath
+            // is half of what it is saying. Dark enough that cream type on it is never in question,
+            // light enough that the arena still reads as an arena.
+            //
+            // REFERENCE matches the pause board exactly, and that is the point: on that route this
+            // card REPLACES the board — the board's canvas goes off under it now, see
+            // IPopup.ShowsWhatIsUnder — so it is a page of the pause menu rather than a card over
+            // gameplay. A lighter scrim there would make the world brighten as the player pressed
+            // CONTROLS and darken again as they pressed Escape, which reads as the card being
+            // half-transparent rather than as a page turning.
+            BuildScrim(_reason == Shown.Opening ? 0.62f : 0.78f);
 
             int n = _lines.Length;
             float cursor = RowsTop + (n - 1) * RowStep + CapHeight * 0.5f;

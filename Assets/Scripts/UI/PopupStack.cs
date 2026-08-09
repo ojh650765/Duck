@@ -126,7 +126,10 @@ namespace DuckMow.UI
             _stack.Add(popup);
             _pushedFrame = Time.frameCount;
 
-            if (below != null) Dispatch(below, PopupCall.Covered);
+            // The newcomer's own answer, handed to the one it is covering. A popup cannot work out
+            // for itself whether it is being dimmed behind something or replaced by it, and the two
+            // want opposite looks — see IPopup.ShowsWhatIsUnder.
+            if (below != null) Dispatch(below, PopupCall.Covered, popup.ShowsWhatIsUnder);
             Dispatch(popup, PopupCall.Push);
 
             ApplyGates();
@@ -415,7 +418,7 @@ namespace DuckMow.UI
         /// a throw that escaped here would skip <see cref="ApplyGates"/> and leave the clock at zero
         /// with nothing left in the stack to explain why.
         /// </summary>
-        static void Dispatch(IPopup p, PopupCall call)
+        static void Dispatch(IPopup p, PopupCall call, bool stillVisible = false)
         {
             if (p == null) return;
             try
@@ -424,7 +427,7 @@ namespace DuckMow.UI
                 {
                     case PopupCall.Push:     p.OnPush();     break;
                     case PopupCall.Pop:      p.OnPop();      break;
-                    case PopupCall.Covered:  p.OnCovered();  break;
+                    case PopupCall.Covered:  p.OnCovered(stillVisible); break;
                     case PopupCall.Revealed: p.OnRevealed(); break;
                 }
             }

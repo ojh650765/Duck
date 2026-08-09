@@ -68,6 +68,28 @@ namespace DuckMow.UI
         /// </summary>
         bool ClosesOnEscape { get; }
 
+        /// <summary>
+        /// True if whatever this popup covers should stay visible behind it.
+        ///
+        /// Asked of the NEWCOMER and answered to the one it covers — see <see cref="OnCovered"/>.
+        /// It is the difference between a popup that is a DIALOG ABOUT what is underneath and one
+        /// that is a SCREEN INSTEAD OF it, and the two want opposite things. A quit confirmation has
+        /// to show the board it is confirming against or the question reads as decoration on a menu;
+        /// a full-screen controls card that replaces the board wants the board gone, because two
+        /// translucent screens stacked on each other is not emphasis, it is a mess.
+        ///
+        /// That mess shipped: pressing CONTROLS left the pause board sunk to 45% with the card's own
+        /// 62% scrim laid over it, and both were legible at once. The owner's word for it was
+        /// "overlaps oddly", which is exactly right.
+        ///
+        /// FALSE IS THE DEFAULT, deliberately, and the polarity is the whole value of this property.
+        /// A popup is a screen unless it says otherwise, so the next full-screen thing anybody adds
+        /// gets the correct behaviour without knowing this exists; the one case that needs the sunk
+        /// -back look is the one that has to declare it, and it is the case whose author is already
+        /// thinking about what is behind them.
+        /// </summary>
+        bool ShowsWhatIsUnder { get; }
+
         /// <summary>Called once as this becomes the top of the stack. Build, show, take focus.</summary>
         void OnPush();
 
@@ -78,8 +100,15 @@ namespace DuckMow.UI
         /// </summary>
         void OnPop();
 
-        /// <summary>Called when something is pushed on top of this. Dim, stop listening, stay alive.</summary>
-        void OnCovered();
+        /// <summary>
+        /// Called when something is pushed on top of this. Dim, stop listening, stay alive.
+        ///
+        /// <paramref name="stillVisible"/> is the newcomer's <see cref="ShowsWhatIsUnder"/>, and it
+        /// is the answer to the one question a covered popup cannot work out for itself: am I being
+        /// dimmed behind something, or replaced by it. Sinking back is right for the first and wrong
+        /// for the second.
+        /// </summary>
+        void OnCovered(bool stillVisible);
 
         /// <summary>Called when the thing on top of this pops and it is the top again.</summary>
         void OnRevealed();

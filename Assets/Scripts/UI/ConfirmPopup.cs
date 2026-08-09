@@ -33,6 +33,17 @@ namespace DuckMow.UI
     /// </summary>
     public sealed class ConfirmPopup : PopupView
     {
+        /// <summary>
+        /// TRUE, and this is the one popup in the game that says so.
+        ///
+        /// A confirmation is a question ABOUT the board underneath it, not a screen instead of it.
+        /// The player has to be able to see what they are being asked about — that is why the scrim
+        /// below is 0.34 rather than the pause board's 0.78 — and the board sinking to 45% behind
+        /// this is the emphasis that says which of the two is being answered. See
+        /// IPopup.ShowsWhatIsUnder for why the default is the other way round.
+        /// </summary>
+        public override bool ShowsWhatIsUnder => true;
+
         readonly string _prompt;
         readonly string _confirmLabel;
         readonly string _cancelLabel;

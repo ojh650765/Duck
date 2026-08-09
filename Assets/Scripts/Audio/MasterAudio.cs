@@ -264,6 +264,48 @@ namespace DuckMow
             Master = Mathf.Round(Mathf.Clamp01(_master + delta) * 1000f) / 1000f;
         }
 
+        // ------------------------------------------------------------------ the control's-eye view
+
+        /// <summary>
+        /// The power between where a volume control SITS and the amplitude underneath it.
+        ///
+        /// Loudness is not linear in amplitude. A control that maps its travel straight onto
+        /// AudioListener.volume spends its top half doing almost nothing audible and its bottom
+        /// eighth doing everything, which is a control that only works at the bottom. A power of 2.5
+        /// puts the perceived change roughly where the hand is.
+        ///
+        /// ---- and why it lives HERE rather than on a menu ----
+        ///
+        /// Because there are two menus now. This was private to MainMenu while the front page was
+        /// the only place a player could touch the volume; the pause board has a settings page too,
+        /// and two screens with two curves would print two different percentages for the same
+        /// amplitude — the player would set 70% on one board, open the other, and be told they were
+        /// at 50%. Neither reading would be wrong and the game would still be lying.
+        ///
+        /// The screens keep their own POSITION and their own drift guard, which are genuinely
+        /// theirs: a bar has to remember where it was put so a press near the bottom of a 2.5-power
+        /// curve does not make the readout jump. What they share is the mapping, which is the only
+        /// part that has to agree.
+        /// </summary>
+        public const float ControlCurve = 2.5f;
+
+        /// <summary>
+        /// How far one press of a direction moves a volume control, in POSITION.
+        ///
+        /// A twentieth, so a full sweep is twenty presses and every stop is a round number on
+        /// screen. Shared for the same reason the curve is: two boards stepping by different amounts
+        /// would disagree about what "one press" means the moment anybody counted.
+        /// </summary>
+        public const float ControlStep = 0.05f;
+
+        /// <summary>The amplitude a control sitting at <paramref name="position"/> asks for.</summary>
+        public static float AmplitudeAt(float position)
+            => Mathf.Pow(Mathf.Clamp01(position), ControlCurve);
+
+        /// <summary>Where a control has to sit to be asking for <paramref name="amplitude"/>.</summary>
+        public static float PositionAt(float amplitude)
+            => Mathf.Pow(Mathf.Clamp01(amplitude), 1f / ControlCurve);
+
         // ------------------------------------------------------------------ persistence
 
         /// <summary>
