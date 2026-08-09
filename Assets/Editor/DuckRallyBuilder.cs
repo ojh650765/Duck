@@ -1662,10 +1662,9 @@ namespace DuckMow.EditorTools
                 card.root = rt;
 
                 // The player's card is the LIGHT one. Four identical plates make the player hunt for
-                // their own row every time they check the score.
-                card.plate = DuckUIBuilder.AddImage(rt,
-                    DuckUIBuilder.Spr(slot.isPlayer ? "panel_card_256" : "panel_card_dark_256"),
-                    Color.white, Image.Type.Sliced);
+                // their own row every time they check the score. Both colourways are the same
+                // painting and measure identically, so the field below is the same either way.
+                string plateSprite = slot.isPlayer ? DuckUIBuilder.CardLight : DuckUIBuilder.CardDark;
 
                 // The alarm wash sits over the plate and under everything else, driven to full only
                 // while a goose is actually inbound at this quadrant.
@@ -1674,17 +1673,24 @@ namespace DuckMow.EditorTools
                                                         new Color(Alarm.r, Alarm.g, Alarm.b, 0f),
                                                         Image.Type.Sliced);
 
-                // Laid out in FRACTIONS of the card, the way the round's HUD lays out everything.
+                // Laid out in FRACTIONS of the card's WRITABLE FIELD, the way the round's HUD lays
+                // out everything.
                 //
                 // The pixel-offset version put the percentage's centre 26 px in from the card's right
                 // edge with a 104 px box around it, so half the box — and the "100" in it — hung
                 // outside the plate. Fractions cannot make that mistake: 0.97 is inside the card by
                 // definition, at any card size and any aspect ratio.
-                // Everything is held inside 0.06..0.93 across and 0.17..0.84 up, and that is not
-                // arbitrary: panel_card_dark_256 is a PAINTED card with a decorative rule inset from
-                // its edge, so contents laid out to the rect's true bounds sit on top of that line.
-                // The plate is a picture, not a box, and the layout has to respect its margins.
-                var swatch = Frac("Livery", rt, 0.055f, 0.22f, 0.150f, 0.78f);
+                //
+                // Everything used to be held inside 0.06..0.93 across and 0.17..0.84 up, chosen by
+                // somebody who had correctly diagnosed that panel_card_dark_256 is a PAINTED card
+                // with a decorative rule inset from its edge — and it still did not clear it. A card
+                // 336x82 turns 0.06 into 20 px against a 30 px rule and 0.17 into 14 px against 22.
+                // That is the whole argument for CardArt: the diagnosis was right, the measurement
+                // was a guess, and a fraction cannot hold a fixed number of pixels anyway.
+                var field = DuckUIBuilder.Plate(rt, plateSprite, out var plateImg);
+                card.plate = plateImg;
+
+                var swatch = Frac("Livery", field, 0f, 0.06f, 0.115f, 0.94f);
                 DuckUIBuilder.AddImage(swatch, DuckUIBuilder.Spr("progress_bar_fill_256"),
                                        slot.livery, Image.Type.Sliced);
 
@@ -1692,13 +1698,13 @@ namespace DuckMow.EditorTools
                 // glance, and AddText auto-sizes DOWN to fit its box — so a name in a tight rect was
                 // being quietly shrunk to about half the size asked for, which is why these were
                 // unreadable rather than merely small.
-                var name = Frac($"Name {i}", rt, 0.19f, 0.52f, 0.64f, 0.88f);
+                var name = Frac($"Name {i}", field, 0.10f, 0.50f, 0.68f, 1f);
                 card.name = DuckUIBuilder.AddText(name, slot.isPlayer ? "YOU" : slot.contestant, 30f,
                                                   TextAlignmentOptions.Left,
                                                   slot.isPlayer ? Gold : Cream, 0.30f, false);
                 card.name.fontStyle = FontStyles.Bold;
 
-                var barBg = Frac("BarBg", rt, 0.19f, 0.26f, 0.64f, 0.50f);
+                var barBg = Frac("BarBg", field, 0.10f, 0.06f, 0.68f, 0.44f);
                 DuckUIBuilder.AddImage(barBg, DuckUIBuilder.Spr("progress_bar_bg_256"), Color.white,
                                        Image.Type.Sliced);
                 var barFill = Frac("BarFill", barBg, 0f, 0f, 1f, 1f);
@@ -1713,6 +1719,12 @@ namespace DuckMow.EditorTools
                 // upward as the horn recharges. On the LEFT because that is the edge the eye
                 // already goes to for this card — the livery swatch is there — and a meter beside
                 // an owner's colour needs no label to say whose it is.
+                //
+                // Deliberately still measured against the CARD and not its field, and this is the
+                // one place in the sweep where that is the right answer: the meter is edge
+                // furniture, drawn along the frame on purpose, not content that has to be read off
+                // the writable part. CardArt is a rule about what may be printed on the card, not a
+                // rule that everything must live inside it.
                 var hornBg = Frac("HornBg", rt, 0.020f, 0.20f, 0.048f, 0.80f);
                 DuckUIBuilder.AddImage(hornBg, DuckUIBuilder.Spr("progress_bar_bg_256"),
                                        new Color(1f, 1f, 1f, 0.5f), Image.Type.Sliced);
@@ -1724,7 +1736,7 @@ namespace DuckMow.EditorTools
                 horn.fillAmount = 1f;
                 card.hornMeter = horn;
 
-                var pct = Frac($"Pct {i}", rt, 0.62f, 0.20f, 0.925f, 0.80f);
+                var pct = Frac($"Pct {i}", field, 0.68f, 0.02f, 1f, 0.98f);
                 card.percent = DuckUIBuilder.AddText(pct, "100", 44f, TextAlignmentOptions.Right,
                                                      Cream, 0.30f, false);
                 card.percent.fontStyle = FontStyles.Bold;
@@ -1741,10 +1753,13 @@ namespace DuckMow.EditorTools
             var rt = Frac("Ticker", root, 0.30f, 0.665f, 0.70f, 0.725f);
             var group = rt.gameObject.AddComponent<CanvasGroup>();
             hud.tickerGroup = group;
-            DuckUIBuilder.AddImage(rt, DuckUIBuilder.Spr("panel_card_dark_256"), Color.white,
-                                   Image.Type.Sliced);
+            var field = DuckUIBuilder.Plate(rt, DuckUIBuilder.CardDark);
 
-            var t = UINode("Text", rt, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(740f, 52f));
+            // Fills the field rather than sitting in a hand-sized 740x52 box in the middle of it.
+            // That box was 14 px in from the sides of a 768 px plate whose rule is at 30, and 6 px
+            // from the top and bottom of a 65 px one whose rule — shrunk with the slice at that
+            // height — is at 14. Every edge of it was on the paint.
+            var t = DuckUIBuilder.Frac("Text", field, 0f, 0f, 1f, 1f);
             hud.tickerText = DuckUIBuilder.AddText(t, "", 34f, TextAlignmentOptions.Center,
                                                    Cream, 0.26f, false);
         }
@@ -1758,10 +1773,9 @@ namespace DuckMow.EditorTools
             // no panel at all.
             var rt = Frac("Result", root, 0.18f, 0.045f, 0.82f, 0.235f);
             hud.resultGroup = rt.gameObject.AddComponent<CanvasGroup>();
-            DuckUIBuilder.AddImage(rt, DuckUIBuilder.Spr("panel_card_dark_256"), Color.white,
-                                   Image.Type.Sliced);
+            var field = DuckUIBuilder.Plate(rt, DuckUIBuilder.CardDark);
 
-            var ros = Frac("Rosette", rt, 0.015f, 0.10f, 0.135f, 0.90f);
+            var ros = Frac("Rosette", field, 0f, 0f, 0.111f, 1f);
             hud.resultRosette = DuckUIBuilder.AddImage(ros, DuckUIBuilder.Spr("rosette_S_256"),
                                                        Color.white);
             hud.rosetteByPlace = new[]
@@ -1771,24 +1785,25 @@ namespace DuckMow.EditorTools
             };
 
             // Ends before the award begins, or a long placing line and a two-digit award overlap.
-            var placing = Frac("Placing", rt, 0.155f, 0.46f, 0.72f, 0.94f);
+            var placing = Frac("Placing", field, 0.132f, 0.417f, 0.734f, 1f);
             hud.resultPlacing = DuckUIBuilder.AddText(placing, "", 46f, TextAlignmentOptions.Left,
                                                       Gold, 0.30f, false);
 
             // The points, on the right where the eye finishes reading. Big, because it is the line
             // the whole card exists to deliver.
-            // Pulled in off the right edge.
             //
-            // It ran to 0.985 of the card, and this card is a PICTURE with a decorative rule inset
-            // from its border — the same trap the contestant cards' "100" fell into. Right-aligned
-            // text at 0.985 sits on that rule, so the number reads as though it is falling off the
-            // plate. 0.94 puts it inside the frame the artwork actually draws.
-            var award = Frac("Award", rt, 0.74f, 0.40f, 0.94f, 0.96f);
+            // It ran to 0.985 of the card once, which put right-aligned text on the decorative rule
+            // so the number read as though it were falling off the plate. That was corrected to
+            // 0.94 by eye — and 0.94 of this card is 74 px in from the edge against a rule at 30, so
+            // the guess overshot by more than it had undershot and left the number stranded in the
+            // middle. It goes to the field's own edge now, which is the number the artwork actually
+            // draws, at 38.
+            var award = Frac("Award", field, 0.756f, 0.34f, 1f, 1f);
             hud.resultAward = DuckUIBuilder.AddText(award, "", 58f, TextAlignmentOptions.Right,
                                                     Gold, 0.32f, false);
             hud.resultAward.fontStyle = FontStyles.Bold;
 
-            var detail = Frac("Detail", rt, 0.155f, 0.08f, 0.79f, 0.44f);
+            var detail = Frac("Detail", field, 0.132f, 0f, 0.809f, 0.387f);
             hud.resultDetail = DuckUIBuilder.AddText(detail, "", 24f, TextAlignmentOptions.Left,
                                                      Cream, 0.24f, false);
         }

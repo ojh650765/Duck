@@ -72,7 +72,12 @@ namespace DuckMow.EditorTools
         // the *card* to 16:9 instead put a 1.93:1 window inside it, and a RawImage stretches its UV
         // rect to fill its rect — so every panel was quietly squashed by nine percent, which on
         // renders of a duck is the difference between the duck and a slightly wrong duck.
-        const float ArtInset = 46f;          // matches panel_card_256's 9-slice border
+        // A MAT, not a margin, and not the nine-slice border either — that is 57/61, and the paint
+        // on this card stops at 23/28. 46 sits between the two on purpose: it clears the rule with
+        // room to spare, the way a mounted photograph does, and the window it leaves is what makes
+        // the arithmetic below come out at 16:9. Nothing here needs CardArt: this is a picture
+        // frame with a picture in it, and the number is a composition rather than a clearance.
+        const float ArtInset = 46f;
         static readonly Vector2 ArtWindow = new Vector2(880f, 495f);
         static readonly Vector2 CardSize = new Vector2(ArtWindow.x + ArtInset * 2f,
                                                        ArtWindow.y + ArtInset * 2f);

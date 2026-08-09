@@ -51,11 +51,15 @@ namespace DuckMow.EditorTools
         const string SfxDir = "Assets/Audio/Cutscene";
         const int PanelCount = 3;
 
-        // The card, re-derived from the same two facts as the opening page: the painted frame's
-        // 9-slice border is 46 units, and the window inside it has to be 16:9 or a RawImage stretches
-        // the render to fill it. These are duplicated rather than exposed from DuckCutsceneBuilder
+        // The card, re-derived from the same two facts as the opening page: the painted frame is
+        // matted by 46 units, and the window inside it has to be 16:9 or a RawImage stretches the
+        // render to fill it. These are duplicated rather than exposed from DuckCutsceneBuilder
         // because they are properties of the ART, not of that file — the day panel_card_256 is re-cut
         // both numbers change here too, and a constant borrowed across files hides that.
+        //
+        // 46 is NOT the nine-slice border, which the old note here claimed: that is 57/61, and the
+        // paint stops at 23/28. It is a mat chosen between the two, wide enough to clear the rule
+        // and sized so the window comes out 16:9. See CardArt for why the two numbers are different.
         const float ArtInset = 46f;
         static readonly Vector2 ArtWindow = new Vector2(880f, 495f);
         static readonly Vector2 CardSize = new Vector2(ArtWindow.x + ArtInset * 2f,

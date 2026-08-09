@@ -226,6 +226,24 @@ namespace DuckMow.EditorTools
             }
             if (hud.resultsRank != null) hud.resultsRank.text = "C";
             if (hud.resultsTotal != null) hud.resultsTotal.text = "16 / 30";
+
+            // THE ROSETTE, which this rig has never enabled and should have from the first capture.
+            //
+            // It is the left quarter of the summary card, and in real play HUD.HandleVerdict switches
+            // it on with the sprite for the grade. This rig sets the text fields directly and so
+            // never took that path, which left every frame sheet of this card showing an empty
+            // quarter with the rank stranded beside it — and that gap has been read as a layout bug
+            // and investigated twice. A mock that omits an element does not look like a mock, it
+            // looks like a game with a hole in it.
+            //
+            // Set from the same table and the same grade the rank above is showing, so the capture
+            // cannot disagree with itself the way a hardcoded sprite would.
+            if (hud.resultsRosette != null && hud.rosetteByRank != null &&
+                hud.rosetteByRank.Length > 3 && hud.rosetteByRank[3] != null)
+            {
+                hud.resultsRosette.sprite = hud.rosetteByRank[3];   // "C", matching the rank above
+                hud.resultsRosette.enabled = true;
+            }
             if (hud.coverageStat != null) hud.coverageStat.text = "65%";
             if (hud.spillStat != null) hud.spillStat.text = "3%";
             if (hud.edgeStat != null) hud.edgeStat.text = "65%";

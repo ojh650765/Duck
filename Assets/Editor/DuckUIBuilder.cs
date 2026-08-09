@@ -20,20 +20,13 @@ namespace DuckMow.EditorTools
         const string TexDir = "Assets/Art/Textures/UI";
         const string PartDir = "Assets/Art/Textures/Particles";
 
-        // 9-slice borders (left, bottom, right, top) measured by the texture pass.
-        static readonly Dictionary<string, Vector4> Borders = new()
-        {
-            { "panel_card_256", new Vector4(57, 57, 57, 61) },
-            { "panel_card_dark_256", new Vector4(57, 57, 57, 61) },
-            { "button_256", new Vector4(52, 44, 52, 52) },
-            { "button_pressed_256", new Vector4(53, 45, 53, 53) },
-            { "progress_bar_bg_256", new Vector4(24, 19, 24, 23) },
-            { "progress_bar_fill_256", new Vector4(21, 17, 21, 17) },
-            { "boost_gauge_256", new Vector4(45, 19, 21, 23) },
-            { "minimap_frame_256", new Vector4(35, 35, 35, 39) },
-            { "scorecard_blank_256", new Vector4(28, 30, 28, 42) },
-            { "banner_ribbon_512", new Vector4(140, 0, 140, 0) },
-        };
+        // The 9-slice borders this importer writes now live in DuckMow.UI.CardArt, alongside the
+        // measurement of where each sprite's DECORATION ends. They were two facts about the same
+        // artwork kept in two places, and the layout needs both together: Unity shrinks a slice
+        // border when the rect is too small to hold it, and the painting inside that border shrinks
+        // with it, so a padding rule that could not see the border could not be right on a small
+        // card. See CardArt, which is also where the difference between the two numbers — 57 for
+        // the corner, 32 for the paint — is written down.
 
         [MenuItem("Duck/5 · Import UI sprites", priority = 4)]
         public static void ImportSprites()
@@ -53,7 +46,7 @@ namespace DuckMow.EditorTools
                 imp.sRGBTexture = true;
                 imp.textureCompression = TextureImporterCompression.CompressedHQ;
                 imp.maxTextureSize = 512;
-                if (Borders.TryGetValue(key, out var b)) imp.spriteBorder = b;
+                if (DuckMow.UI.CardArt.HasBorder(key)) imp.spriteBorder = DuckMow.UI.CardArt.Border(key);
                 imp.SaveAndReimport();
             }
             Debug.Log("[Duck] UI sprites imported.");
@@ -94,6 +87,37 @@ namespace DuckMow.EditorTools
             rt.sizeDelta = size;
             return rt;
         }
+
+        // The three painted plates everything in this game is built out of. Named rather than typed
+        // as literals at each call site, because a card's sprite and its padding have to be the same
+        // sprite and a typo in one of two strings is exactly the drift Plate exists to prevent.
+        internal const string CardDark = "panel_card_dark_256";
+        internal const string CardLight = "panel_card_256";
+        internal const string ScoreCard = "scorecard_blank_256";
+
+        /// <summary>
+        /// Paint a nine-sliced card onto <paramref name="rt"/> and hand back the part of it that may
+        /// be printed on.
+        ///
+        /// ONE CALL, because the two things are one decision. Laying the plate down and working out
+        /// how far in from its edge the paint stops were separate before, and every layout in the
+        /// game got the second one wrong — see <see cref="DuckMow.UI.CardArt"/>, which has the
+        /// measurements and the argument. A helper that returns the field makes the correct thing
+        /// the easy thing: fractions inside the returned rect are bands of the writable card, which
+        /// is what an author means by them, and there is no number for anybody to know.
+        ///
+        /// The plate is returned through <paramref name="plate"/> for the callers that animate it.
+        /// </summary>
+        internal static RectTransform Plate(RectTransform rt, string sprite, out Image plate,
+                                            Color? tint = null)
+        {
+            plate = AddImage(rt, Spr(sprite), tint ?? Color.white, Image.Type.Sliced);
+            return DuckMow.UI.CardArt.Inside("Field", rt, sprite);
+        }
+
+        /// <summary>The common case: a plate nobody needs a handle on.</summary>
+        internal static RectTransform Plate(RectTransform rt, string sprite, Color? tint = null)
+            => Plate(rt, sprite, out _, tint);
 
         internal static Image AddImage(RectTransform rt, Sprite sprite, Color color, Image.Type type = Image.Type.Simple)
         {
@@ -230,22 +254,22 @@ namespace DuckMow.EditorTools
             var card = Frac("CeremonyCard", root, 0.13f, 0.075f, 0.87f, 0.325f);
             hud.ceremonyGroup = card.gameObject.AddComponent<CanvasGroup>();
             hud.ceremonyGroup.alpha = 0f;
-            AddImage(card, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+            var field = Plate(card, CardDark);
 
-            var rosette = Frac("Rosette", card, 0.018f, 0.08f, 0.145f, 0.92f);
+            var rosette = Frac("Rosette", field, 0f, 0.02f, 0.135f, 0.98f);
             hud.ceremonyRosette = AddImage(rosette, null, Color.white);
             hud.ceremonyRosette.preserveAspect = true;
             hud.ceremonyRosette.enabled = false;
 
-            var title = Frac("Title", card, 0.17f, 0.50f, 0.98f, 0.95f);
+            var title = Frac("Title", field, 0.165f, 0.50f, 1f, 1f);
             hud.ceremonyTitle = AddText(title, "", 62f, TextAlignmentOptions.Left, Gold, 0.30f, false);
             hud.ceremonyTitle.fontStyle = FontStyles.Bold;
 
-            var sub = Frac("Subtitle", card, 0.17f, 0.26f, 0.98f, 0.48f);
+            var sub = Frac("Subtitle", field, 0.165f, 0.23f, 1f, 0.48f);
             hud.ceremonySubtitle = AddText(sub, "", 24f, TextAlignmentOptions.Left, Cream, 0.22f, false);
             hud.ceremonySubtitle.fontStyle = FontStyles.Bold;
 
-            var prompt = Frac("Prompt", card, 0.17f, 0.05f, 0.98f, 0.24f);
+            var prompt = Frac("Prompt", field, 0.165f, 0f, 1f, 0.21f);
             hud.ceremonyPrompt = AddText(prompt, "", 20f, TextAlignmentOptions.Left,
                                          new Color(0.86f, 0.82f, 0.72f), 0.20f, false);
             hud.ceremonyPrompt.fontStyle = FontStyles.Bold;
@@ -385,32 +409,38 @@ namespace DuckMow.EditorTools
             var card = Frac("TourCard", root, 0.24f, 0.045f, 0.76f, 0.175f);
             hud.tourGroup = card.gameObject.AddComponent<CanvasGroup>();
             hud.tourGroup.alpha = 0f;
-            AddImage(card, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+            var field = Plate(card, CardDark);
 
             // The portrait. It exists because the contestants are modelled properly and the game
             // otherwise never shows them larger than a thumbnail — the tour is the one moment it
             // can say who this lawn belongs to.
-            var portraitFrame = Frac("PortraitFrame", card, 0.012f, 0.06f, 0.135f, 0.94f);
-            AddImage(portraitFrame, Spr("scorecard_blank_256"), Color.white, Image.Type.Sliced);
+            //
+            // It is noticeably smaller than it was, and that is the fix rather than a cost: on a
+            // 140 px card the painted rule sits 32 px up from the bottom and 26 down from the top,
+            // and the frame used to be laid out to 0.06..0.94 of the whole card — 124 px of a 140 px
+            // plate — so it was drawn straight through both rules. What is left is the part of the
+            // card that was ever available.
+            var portraitFrame = Frac("PortraitFrame", field, 0f, 0f, 0.127f, 1f);
+            AddImage(portraitFrame, Spr(ScoreCard), Color.white, Image.Type.Sliced);
             var portrait = Frac("Portrait", portraitFrame, 0.10f, 0.09f, 0.90f, 0.91f);
             hud.tourPortrait = portrait.gameObject.AddComponent<RawImage>();
             hud.tourPortrait.raycastTarget = false;
             hud.tourPortrait.enabled = false;
 
-            var nm = Frac("Name", card, 0.155f, 0.46f, 0.62f, 0.94f);
+            var nm = Frac("Name", field, 0.148f, 0.46f, 0.63f, 1f);
             hud.tourName = AddText(nm, "", 30f, TextAlignmentOptions.Left, Cream, 0.22f, false);
             hud.tourName.fontStyle = FontStyles.Bold;
 
-            var sub = Frac("Subtitle", card, 0.155f, 0.08f, 0.62f, 0.44f);
+            var sub = Frac("Subtitle", field, 0.148f, 0f, 0.63f, 0.44f);
             hud.tourSubtitle = AddText(sub, "", 18f, TextAlignmentOptions.Left,
                                        new Color(0.86f, 0.82f, 0.72f), 0.16f, false);
 
-            var score = Frac("Score", card, 0.62f, 0.10f, 0.86f, 0.90f);
+            var score = Frac("Score", field, 0.63f, 0.02f, 0.86f, 0.98f);
             hud.tourScore = AddText(score, "", 32f, TextAlignmentOptions.Right, Gold, 0.24f, false);
             hud.tourScore.fontStyle = FontStyles.Bold;
 
-            var gradePlate = Frac("GradePlate", card, 0.875f, 0.14f, 0.975f, 0.86f);
-            AddImage(gradePlate, Spr("scorecard_blank_256"), Color.white, Image.Type.Sliced);
+            var gradePlate = Frac("GradePlate", field, 0.878f, 0f, 1f, 1f);
+            AddImage(gradePlate, Spr(ScoreCard), Color.white, Image.Type.Sliced);
             var grade = Frac("Grade", gradePlate, 0.1f, 0.08f, 0.9f, 0.92f);
             hud.tourGrade = AddText(grade, "", 34f, TextAlignmentOptions.Center, Ink, 0.12f, false);
             hud.tourGrade.fontStyle = FontStyles.Bold;
@@ -429,13 +459,13 @@ namespace DuckMow.EditorTools
             var card = Frac("OutroCard", root, 0.20f, 0.045f, 0.80f, 0.205f);
             hud.outroGroup = card.gameObject.AddComponent<CanvasGroup>();
             hud.outroGroup.alpha = 0f;
-            AddImage(card, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+            var field = Plate(card, CardDark);
 
-            var placing = Frac("Placing", card, 0.04f, 0.46f, 0.96f, 0.94f);
+            var placing = Frac("Placing", field, 0f, 0.5f, 1f, 1f);
             hud.outroPlacing = AddText(placing, "", 34f, TextAlignmentOptions.Center, Gold, 0.26f, false);
             hud.outroPlacing.fontStyle = FontStyles.Bold;
 
-            var prompt = Frac("Prompt", card, 0.04f, 0.08f, 0.96f, 0.42f);
+            var prompt = Frac("Prompt", field, 0f, 0f, 1f, 0.46f);
             hud.outroPrompt = AddText(prompt, "", 20f, TextAlignmentOptions.Center, Cream, 0.22f, false);
             hud.outroPrompt.fontStyle = FontStyles.Bold;
         }
@@ -462,8 +492,8 @@ namespace DuckMow.EditorTools
             // The small label gets a plate of its own above the ribbon rather than being squeezed
             // onto the cream beside the headline; two lines never fitted that band.
             var titlePill = Frac("TitlePlate", banner, 0.29f, 0.78f, 0.71f, 1f);
-            AddImage(titlePill, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
-            var title = Frac("Title", titlePill, 0.05f, 0.14f, 0.95f, 0.86f);
+            var titleField = Plate(titlePill, CardDark);
+            var title = Frac("Title", titleField, 0f, 0f, 1f, 1f);
             hud.bannerTitle = AddText(title, "TODAY'S SUBJECT", 22f, TextAlignmentOptions.Center, Cream, 0.14f, false);
             hud.bannerTitle.fontStyle = FontStyles.Bold;
 
@@ -485,8 +515,8 @@ namespace DuckMow.EditorTools
             // both fades with the banner and vanishes when there is nothing to say.
             hud.bannerGoalGroup = goalPlate.gameObject.AddComponent<CanvasGroup>();
             hud.bannerGoalGroup.alpha = 0f;
-            AddImage(goalPlate, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
-            var goal = Frac("Goal", goalPlate, 0.04f, 0.08f, 0.96f, 0.92f);
+            var goalField = Plate(goalPlate, CardDark);
+            var goal = Frac("Goal", goalField, 0f, 0f, 1f, 1f);
             // Wrapping on: the round-one line carries the scoring rule under it, and the tightest
             // final-round requirement — "WIN, AND HORACE MUST FINISH 3RD OR WORSE" — needs to be
             // allowed to break rather than shrink away to nothing.
@@ -532,30 +562,44 @@ namespace DuckMow.EditorTools
             {
                 float top = judgeTop - i * bandH;
                 var row = Frac($"Judge{i}", column, 0f, top - bandH + 0.012f, 1f, top - 0.012f);
-                AddImage(row, Spr("panel_card_256"), Color.white, Image.Type.Sliced);
+                var rowField = Plate(row, CardLight);
 
+                // The score plate stays measured against the ROW, not its field, and that is the one
+                // distinction this whole sweep turns on: OPAQUE FURNITURE MAY SIT ON THE FRAME,
+                // TEXT MAY NOT. A card pinned over the row's painted rule hides it and reads as
+                // layering; a letter crossed by it reads as a defect. The livery stripes and the
+                // rally's horn meters are the same case.
+                //
+                // It is also the one plate in the game whose sprite does not fit its box, which is a
+                // separate fault and is left standing deliberately. scorecard_blank is a PORTRAIT
+                // card with a solid red band across the top and the bottom; at the width this row
+                // can spare it comes out landscape and about 77 px tall, and the two bands alone
+                // want 108. The number is therefore printed over red rather than on the cream, and
+                // no padding rule can fix that — the plate needs to be taller or the sprite needs to
+                // be a different one, and both are composition calls that want a frame in front of
+                // them rather than a builder edit made blind.
                 var card = Frac("Card", row, 0.02f, 0.12f, 0.155f, 0.88f);
-                AddImage(card, Spr("scorecard_blank_256"), Color.white, Image.Type.Sliced);
+                AddImage(card, Spr(ScoreCard), Color.white, Image.Type.Sliced);
 
                 var score = Frac("Score", card, 0.1f, 0.08f, 0.9f, 0.92f);
                 hud.judgeScores[i] = AddText(score, "", 40f, TextAlignmentOptions.Center, Ink, 0.10f, false);
                 hud.judgeScores[i].fontStyle = FontStyles.Bold;
 
-                var nm = Frac("Name", row, 0.185f, 0.56f, 0.97f, 0.94f);
+                var nm = Frac("Name", rowField, 0.175f, 0.55f, 1f, 1f);
                 hud.judgeNames[i] = AddText(nm, names[i], 22f, TextAlignmentOptions.Left,
                                             new Color(0.62f, 0.26f, 0.18f), 0.10f, false);
                 hud.judgeNames[i].fontStyle = FontStyles.Bold;
 
-                var quip = Frac("Quip", row, 0.185f, 0.08f, 0.97f, 0.54f);
+                var quip = Frac("Quip", rowField, 0.175f, 0f, 1f, 0.52f);
                 hud.judgeQuips[i] = AddText(quip, "", 18f, TextAlignmentOptions.TopLeft, Ink, 0.06f);
             }
 
             // Summary: rosette, rank, running total. This is the line the player actually came for,
             // so it gets the tallest band and the biggest type on the screen.
             var summary = Frac("Summary", column, 0f, 0.375f, 1f, 0.605f);
-            AddImage(summary, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+            var summaryField = Plate(summary, CardDark);
 
-            var rosette = Frac("Rosette", summary, 0.025f, 0.07f, 0.255f, 0.93f);
+            var rosette = Frac("Rosette", summaryField, 0f, 0f, 0.245f, 1f);
             hud.resultsRosette = AddImage(rosette, null, Color.white);
             hud.resultsRosette.preserveAspect = true;
             hud.resultsRosette.enabled = false;
@@ -565,11 +609,11 @@ namespace DuckMow.EditorTools
                 Spr("rosette_C_256"), Spr("rosette_D_256")
             };
 
-            var rank = Frac("Rank", summary, 0.28f, 0.44f, 0.98f, 0.95f);
+            var rank = Frac("Rank", summaryField, 0.275f, 0.44f, 1f, 1f);
             hud.resultsRank = AddText(rank, "", 96f, TextAlignmentOptions.Left, Gold, 0.28f, false);
             hud.resultsRank.fontStyle = FontStyles.Bold;
 
-            var total = Frac("Total", summary, 0.28f, 0.06f, 0.98f, 0.42f);
+            var total = Frac("Total", summaryField, 0.275f, 0f, 1f, 0.42f);
             hud.resultsTotal = AddText(total, "", 40f, TextAlignmentOptions.Left, Cream, 0.24f, false);
             hud.resultsTotal.fontStyle = FontStyles.Bold;
 
@@ -588,13 +632,17 @@ namespace DuckMow.EditorTools
                 float x0 = col * 0.5f, x1 = x0 + 0.5f;
                 float y1 = statTop - rowIdx * statRowH;
                 var cell = Frac($"Stat{i}", column, x0 + 0.006f, y1 - statRowH + 0.008f, x1 - 0.006f, y1 - 0.008f);
-                AddImage(cell, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
+                // The worst of them, and the reason a fraction was never going to work here: at
+                // 351x81 the old 0.06 of the chip was twenty pixels against a thirty pixel rule, and
+                // 0.12 of its height was ten against twenty-two. The chip is the smallest card on
+                // the screen and so had the least padding, which is exactly backwards.
+                var cellField = Plate(cell, CardDark);
 
-                var lab = Frac("Label", cell, 0.06f, 0.12f, 0.58f, 0.88f);
+                var lab = Frac("Label", cellField, 0f, 0f, 0.56f, 1f);
                 AddText(lab, statLabels[i], 22f, TextAlignmentOptions.Left,
                         new Color(0.97f, 0.94f, 0.86f), 0.16f, false).fontStyle = FontStyles.Bold;
 
-                var val = Frac("Value", cell, 0.58f, 0.12f, 0.94f, 0.88f);
+                var val = Frac("Value", cellField, 0.56f, 0f, 1f, 1f);
                 stats[i] = AddText(val, "0%", 34f, TextAlignmentOptions.Right, Gold, 0.24f, false);
                 stats[i].fontStyle = FontStyles.Bold;
             }
@@ -604,8 +652,8 @@ namespace DuckMow.EditorTools
             hud.styleStat = stats[3];
 
             var hintPlate = Frac("RetryPlate", column, 0f, 0.045f, 1f, 0.145f);
-            AddImage(hintPlate, Spr("panel_card_dark_256"), Color.white, Image.Type.Sliced);
-            var hint = Frac("RetryHint", hintPlate, 0.03f, 0.12f, 0.97f, 0.88f);
+            var hintField = Plate(hintPlate, CardDark);
+            var hint = Frac("RetryHint", hintField, 0f, 0f, 1f, 1f);
             hud.retryHint = AddText(hint, "", 20f, TextAlignmentOptions.Center, Cream, 0.22f, false);
             hud.retryHint.fontStyle = FontStyles.Bold;
         }
