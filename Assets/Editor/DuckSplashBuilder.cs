@@ -43,7 +43,7 @@ namespace DuckMow.EditorTools
         /// window happens to be, and a wordmark 1536 px wide either shrinks to unreadable on a narrow
         /// window or dominates a wide one. A disc is the same disc at every aspect.
         /// </summary>
-        const string LogoPath = "Assets/Art/Textures/Title/title_roundel.png";
+        const string LogoPath = "Assets/Art/Textures/Title/title_splash.png";
 
         /// <summary>
         /// The cream the rest of the game's signage is painted on — DuckUIBuilder's Cream, to the

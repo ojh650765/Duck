@@ -137,6 +137,248 @@ namespace DuckMow.EditorTools
                       "Run 'Duck/9 · Build splash screen' to put it on the front of the build.");
         }
 
+        // ------------------------------------------------------------------ the splash card
+
+        const string CardPath = Dir + "/title_splash.png";
+
+        /// <summary>
+        /// The label under the mark. Drawn, not typeset — see BuildCard.
+        /// </summary>
+        const string Label = "POND & GREEN";
+
+        /// <summary>
+        /// The mark with the label under it, as one image: the distributor's card.
+        ///
+        /// A bare disc on an empty field reads as a placeholder — a mark with nothing to be the mark
+        /// OF. The name under it is what makes it a card.
+        ///
+        /// One image and not two splash logos in sequence, because Unity's floor is two seconds each
+        /// and four seconds of logo in front of a lawn-mowing game is a joke at the game's expense.
+        ///
+        /// ---- the letters are DRAWN ----
+        ///
+        /// Not set in the game's own face, on the owner's explicit call that typeface consistency
+        /// could go. What is bought for it is that this file has no font dependency at all: it needs
+        /// no TMP asset, no temporary canvas, no render texture, and it cannot break when somebody
+        /// changes the UI font. A geometric monoline capital is also the right register for a stamp —
+        /// it is the lettering pressed into a maker's mark rather than the lettering on a poster.
+        ///
+        /// The cost is honest and worth stating: these glyphs will never quite match the masthead's,
+        /// so the card and the front page are speaking in two hands. On a splash that is gone in two
+        /// seconds and never seen beside the menu, that is a price worth paying; anywhere the two
+        /// appeared together it would not be.
+        /// </summary>
+        [MenuItem("Duck/9 · Build the splash card", priority = 92)]
+        public static void BuildCard()
+        {
+            var mark = LoadPng(Path);
+            if (mark == null) return;
+
+            const int W = 1100, H = 1120;
+            const int MarkSize = 760;
+            const int TopPad = 40;
+            const int Gap = 58;
+
+            var card = new Texture2D(W, H, TextureFormat.RGBA32, false, false);
+            var px = new Color32[W * H];      // transparent by default
+
+            Blit(px, W, H, mark, (W - MarkSize) / 2, TopPad, MarkSize, MarkSize);
+            DrawLabel(px, W, H, Label, TopPad + MarkSize + Gap, 900, Brick);
+
+            card.SetPixels32(px);
+            card.Apply(false);
+            File.WriteAllBytes(CardPath, card.EncodeToPNG());
+            Object.DestroyImmediate(card);
+            Object.DestroyImmediate(mark);
+
+            AssetDatabase.ImportAsset(CardPath, ImportAssetOptions.ForceUpdate);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(CardPath);
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = false;
+            importer.SaveAndReimport();
+
+            Debug.Log($"[Duck] splash card written to {CardPath} at {W}x{H}. " +
+                      "Run 'Duck/9 · Build splash screen' to put it on the front of the build.");
+        }
+
+        // ------------------------------------------------------------------ the drawn lettering
+
+        const float Stroke = 0.180f;   // of cap height
+        const float Adv = 0.66f;       // glyph width
+        const float Track = 0.21f;     // space between glyphs
+
+        /// <summary>
+        /// Set a word across a given width, centred, and stamp it into the buffer.
+        ///
+        /// The cap height falls out of the width rather than being chosen: a label that is always
+        /// the same number of pixels tall would grow and shrink with the word, and the card's
+        /// proportions are what has to stay put.
+        /// </summary>
+        static void DrawLabel(Color32[] dst, int dw, int dh, string text, int topY, int width, Color ink)
+        {
+            float units = 0f;
+            foreach (char ch in text) units += (ch == ' ' ? Track * 2f : Adv) + Track;
+            units -= Track;
+            if (units <= 0f) return;
+
+            float em = width / units;
+            float x = (dw - width) * 0.5f;
+            float baseline = dh - topY - em;      // buffer is bottom-up; topY is from the top
+
+            foreach (char ch in text)
+            {
+                if (ch != ' ') Stamp(dst, dw, dh, ch, x, baseline, em, ink);
+                x += (ch == ' ' ? Track * 2f : Adv) * em + Track * em;
+            }
+        }
+
+        static void Stamp(Color32[] dst, int dw, int dh, char ch, float x0, float y0, float em, Color ink)
+        {
+            float half = Stroke * 0.5f * em;
+            int px0 = Mathf.Max(0, Mathf.FloorToInt(x0 - half - 2f));
+            int px1 = Mathf.Min(dw - 1, Mathf.CeilToInt(x0 + Adv * em + half + 2f));
+            int py0 = Mathf.Max(0, Mathf.FloorToInt(y0 - half - 2f));
+            int py1 = Mathf.Min(dh - 1, Mathf.CeilToInt(y0 + em + half + 2f));
+
+            for (int py = py0; py <= py1; py++)
+            for (int pxi = px0; pxi <= px1; pxi++)
+            {
+                // Into the glyph's own box: x across, y up, cap height 1.
+                var p = new Vector2((pxi + 0.5f - x0) / em, (py + 0.5f - y0) / em);
+                float d = Skeleton(ch, p);
+                if (d > 1f) continue;
+
+                float a = Cover(Stroke * 0.5f - d, 1.6f / em);
+                if (a <= 0.002f) continue;
+
+                Color dcol = dst[py * dw + pxi];
+                float outA = a + dcol.a * (1f - a);
+                dst[py * dw + pxi] = outA <= 0.0001f ? (Color)Color.clear
+                    : new Color((ink.r * a + dcol.r * dcol.a * (1f - a)) / outA,
+                                (ink.g * a + dcol.g * dcol.a * (1f - a)) / outA,
+                                (ink.b * a + dcol.b * dcol.a * (1f - a)) / outA, outA);
+            }
+        }
+
+        /// <summary>
+        /// Distance to a letter's SKELETON — its centre lines, before any thickness. One monoline
+        /// geometric alphabet, only the eight capitals this label needs.
+        /// </summary>
+        static float Skeleton(char ch, Vector2 p)
+        {
+            const float L = 0.09f, R = 0.57f;      // the stems
+            switch (ch)
+            {
+                case 'P':
+                    return Mathf.Min(Seg(p, new Vector2(L, 0f), new Vector2(L, 1f)),
+                                     Clip(Ell(p, new Vector2(0.26f, 0.735f), 0.29f, 0.265f), p.x - 0.26f));
+                case 'O':
+                    return Ell(p, new Vector2(0.33f, 0.5f), 0.30f, 0.50f);
+                case 'N':
+                    return Mathf.Min(Mathf.Min(Seg(p, new Vector2(L, 0f), new Vector2(L, 1f)),
+                                               Seg(p, new Vector2(R, 0f), new Vector2(R, 1f))),
+                                     Seg(p, new Vector2(L, 1f), new Vector2(R, 0f)));
+                case 'D':
+                    return Mathf.Min(Seg(p, new Vector2(L, 0f), new Vector2(L, 1f)),
+                                     Clip(Ell(p, new Vector2(0.11f, 0.5f), 0.48f, 0.50f), p.x - 0.11f));
+                case 'E':
+                    return Mathf.Min(Mathf.Min(Seg(p, new Vector2(L, 0f), new Vector2(L, 1f)),
+                                               Seg(p, new Vector2(L, 1f), new Vector2(0.56f, 1f))),
+                           Mathf.Min(Seg(p, new Vector2(L, 0.5f), new Vector2(0.48f, 0.5f)),
+                                     Seg(p, new Vector2(L, 0f), new Vector2(0.56f, 0f))));
+                case 'R':
+                    return Mathf.Min(Mathf.Min(Seg(p, new Vector2(L, 0f), new Vector2(L, 1f)),
+                                     Clip(Ell(p, new Vector2(0.26f, 0.735f), 0.29f, 0.265f), p.x - 0.26f)),
+                                     Seg(p, new Vector2(0.28f, 0.47f), new Vector2(0.58f, 0f)));
+                case 'G':
+                {
+                    // The ring with its mouth cut out on the right, plus the bar that makes it a G
+                    // rather than a C — the bar is what stops it reading as an O with a nick in it.
+                    float ring = Ell(p, new Vector2(0.33f, 0.5f), 0.30f, 0.50f);
+                    var d = p - new Vector2(0.33f, 0.5f);
+                    bool mouth = d.x > 0f && d.y > -0.16f && d.y < 0.13f;
+                    if (mouth) ring = 9f;
+                    return Mathf.Min(ring, Mathf.Min(
+                        Seg(p, new Vector2(0.36f, 0.36f), new Vector2(0.61f, 0.36f)),
+                        Seg(p, new Vector2(0.61f, 0.36f), new Vector2(0.61f, 0.12f))));
+                }
+                case '&':
+                {
+                    // Built rather than quoted: a loop over a loop with a leg thrown off to the
+                    // right, which is the ampersand's actual construction and survives being drawn
+                    // in one weight.
+                    float top = Ell(p, new Vector2(0.27f, 0.775f), 0.185f, 0.185f);
+                    float bot = Clip(Ell(p, new Vector2(0.29f, 0.275f), 0.26f, 0.265f),
+                                     -(p.x - 0.29f) + 0.02f);
+                    float join = Seg(p, new Vector2(0.145f, 0.62f), new Vector2(0.47f, 0.10f));
+                    float leg = Seg(p, new Vector2(0.42f, 0.20f), new Vector2(0.63f, 0.02f));
+                    return Mathf.Min(Mathf.Min(top, bot), Mathf.Min(join, leg));
+                }
+                default: return 9f;
+            }
+        }
+
+        /// <summary>Distance to a segment: the one primitive every stroke here is made of.</summary>
+        static float Seg(Vector2 p, Vector2 a, Vector2 b)
+        {
+            Vector2 pa = p - a, ba = b - a;
+            float h = Mathf.Clamp01(Vector2.Dot(pa, ba) / Vector2.Dot(ba, ba));
+            return (pa - ba * h).magnitude;
+        }
+
+        /// <summary>Distance to an elliptical ring's centre line.</summary>
+        static float Ell(Vector2 p, Vector2 c, float rx, float ry)
+            => Mathf.Abs(Ellipse(p.x - c.x, p.y - c.y, rx, ry));
+
+        /// <summary>Keep a shape only where <paramref name="keep"/> is positive.</summary>
+        static float Clip(float d, float keep) => keep >= 0f ? d : Mathf.Max(d, -keep);
+
+        static Texture2D LoadPng(string path)
+        {
+            if (!File.Exists(path))
+            {
+                Debug.LogError($"[Duck] {path} is missing. Run 'Duck/9 · Build the roundel logo' first " +
+                               "if it is the roundel; the masthead is authored art and should be in git.");
+                return null;
+            }
+            var t = new Texture2D(2, 2, TextureFormat.RGBA32, false, false);
+            t.LoadImage(File.ReadAllBytes(path));   // always readable, whatever the importer says
+            return t;
+        }
+
+        /// <summary>
+        /// Draw <paramref name="src"/> into the buffer at a size, over whatever is already there.
+        ///
+        /// Bilinear, and compositing rather than replacing: the wordmark's letters have soft edges
+        /// and a nearest-neighbour scale down from 1536 would chew them. Source-over rather than a
+        /// straight copy because both images are transparent outside their shapes and a copy would
+        /// punch their bounding boxes into the card.
+        /// </summary>
+        static void Blit(Color32[] dst, int dw, int dh, Texture2D src, int x0, int y0, int w, int h)
+        {
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int dx = x0 + x;
+                // The card is built top-down for readability; the buffer is bottom-up.
+                int dy = dh - 1 - (y0 + y);
+                if (dx < 0 || dx >= dw || dy < 0 || dy >= dh) continue;
+
+                Color s = src.GetPixelBilinear((x + 0.5f) / w, 1f - (y + 0.5f) / h);
+                if (s.a <= 0.001f) continue;
+
+                Color d = dst[dy * dw + dx];
+                float a = s.a + d.a * (1f - s.a);
+                Color o = a <= 0.0001f ? Color.clear
+                        : new Color((s.r * s.a + d.r * d.a * (1f - s.a)) / a,
+                                    (s.g * s.a + d.g * d.a * (1f - s.a)) / a,
+                                    (s.b * s.a + d.b * d.a * (1f - s.a)) / a, a);
+                dst[dy * dw + dx] = o;
+            }
+        }
+
         /// <summary>
         /// Signed distance to an axis-aligned ellipse: negative inside, positive out. Approximate —
         /// it is the circle's distance in a squashed space — which is exact enough for a mark whose
