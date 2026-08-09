@@ -60,14 +60,31 @@ namespace DuckMow.UI
         const float Size = 62f;
 
         /// <summary>
-        /// The default corner: hard top right, one plate's own margin in from both edges.
+        /// The corner: hard top right, one margin in from both edges, on every stage.
         ///
-        /// An ANCHOR plus an offset rather than a bare pixel inset, because the stages disagree about
-        /// what is in that corner and a fixed inset would be right on two of them. See
-        /// <see cref="Attach"/>.
+        /// It used to be an argument, because the lawn's HUD parked the shape card in this corner
+        /// and the plate was pushed inboard to a 0.795 anchor to pass beside it. That cleared the
+        /// collision and read badly — the only pressable thing on the screen floating in the middle
+        /// of the top edge with an empty corner beside it, which is not where anybody looks for a
+        /// pause button. So the CARD moved instead, which is the right way round: the card is a
+        /// reference glanced at once, the plate is the one control. See DuckUIBuilder.BuildRoundHud.
         /// </summary>
         static readonly Vector2 CornerAnchor = new(1f, 1f);
         static readonly Vector2 CornerOffset = new(-34f, -34f);
+
+        /// <summary>
+        /// How far the plate's lower edge sits below the top of the frame, in the 1920x1080
+        /// reference every HUD canvas in this game scales from.
+        ///
+        /// Public because it is a CLEARANCE and not a private detail: a HUD that wants to put
+        /// something in this corner has to know where the plate ends, and the alternative is the
+        /// number being copied into DuckUIBuilder where it would be free to drift the next time the
+        /// plate is resized. A fraction of the HEIGHT is what makes that clearance safe at every
+        /// aspect ratio — these canvases match on height, so a fraction of the height is a fixed
+        /// number of reference pixels whatever shape the window is, while a fraction of the WIDTH
+        /// walks as the window is dragged.
+        /// </summary>
+        public const float ReservedTop = 34f + Size;
 
         readonly Canvas _canvas;
         readonly Camera _hitCamera;
@@ -100,34 +117,32 @@ namespace DuckMow.UI
         // ------------------------------------------------------------------ construction
 
         /// <summary>
-        /// Put a pause plate on a HUD canvas.
+        /// Put a pause plate in the top right corner of a HUD canvas.
         ///
-        /// <paramref name="anchor"/> and <paramref name="offset"/> exist because the three stages
-        /// genuinely do not have the same corner free, and pretending otherwise would put this plate
-        /// on top of something on one of them. Bloom Rush keeps its map in the top LEFT and the goose
-        /// rally's clock is top centre, so both leave the corner empty — but the lawn's HUD parks the
-        /// SHAPE CARD there, at 0.815..0.985 of the frame, which is the one thing on that screen the
-        /// player has to be able to see. So the lawn passes an anchor a little further in, and it
-        /// passes an ANCHOR rather than a bigger pixel inset on purpose: the shape card is placed in
-        /// fractions of the frame, so only a fraction stays clear of it at every aspect ratio a
-        /// browser window can be dragged into.
+        /// ONE POSITION, and no caller with an opinion about it. There used to be an anchor and an
+        /// offset here so the lawn could push its plate inboard past the shape card; the card was
+        /// moved down instead and the argument went with it. Three stages, one corner, and a player
+        /// who learns where the button is in stage one finds it in the same place in stages two and
+        /// three — which is most of what a persistent control is for.
+        ///
+        /// Anything a HUD wants to keep out of the plate's way is separated VERTICALLY, against
+        /// <see cref="ReservedTop"/>. Horizontal separation would have to be re-argued for every
+        /// window shape; see that field.
         ///
         /// Returns null rather than throwing when there is no canvas to hang it on. A HUD without a
         /// pause button is a HUD; a HUD that threw during Awake is a stage that does not start.
         /// </summary>
-        public static PauseButton Attach(Canvas canvas) => Attach(canvas, CornerAnchor, CornerOffset);
-
-        public static PauseButton Attach(Canvas canvas, Vector2 anchor, Vector2 offset)
+        public static PauseButton Attach(Canvas canvas)
         {
             if (canvas == null) return null;
 
             var go = new GameObject("Pause button", typeof(RectTransform), typeof(CanvasGroup));
             var rect = (RectTransform)go.transform;
             rect.SetParent(canvas.transform, false);
-            rect.anchorMin = rect.anchorMax = anchor;
+            rect.anchorMin = rect.anchorMax = CornerAnchor;
             rect.pivot = new Vector2(1f, 1f);
             rect.sizeDelta = new Vector2(Size, Size);
-            rect.anchoredPosition = offset;
+            rect.anchoredPosition = CornerOffset;
             // Last child, so it is composited over anything the HUD builder laid down before it. It
             // is the only element on these canvases that has to be FOUND rather than merely read.
             rect.SetAsLastSibling();

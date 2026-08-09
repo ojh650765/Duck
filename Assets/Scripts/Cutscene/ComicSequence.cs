@@ -181,6 +181,68 @@ namespace DuckMow
             // full-screen opaque page left switched on would otherwise cover the game on any scene
             // where it is not wanted.
             if (page != null) page.SetActive(false);
+            GroundThePage();
+        }
+
+        /// <summary>
+        /// How far in front of the lens a story page has to hang so that the world cannot draw on
+        /// top of it, given the camera it is hung on.
+        ///
+        /// ---- why a page with an opaque backdrop still shows the lawn ----
+        ///
+        /// The page already HAS a ground: DuckCutsceneBuilder lays a full-screen parchment rect
+        /// under every other element, and the ending pages do the same. An opaque backdrop is no
+        /// defence here, because the canvas is Screen Space - CAMERA. That mode does not composite
+        /// over the finished frame the way an Overlay does — it hangs the canvas in the WORLD at
+        /// <c>planeDistance</c> metres in front of the lens and lets the depth buffer sort it
+        /// against everything else. Unity sets the UI shader's ZTest to LEqual for a camera-space
+        /// canvas, so any opaque fragment NEARER than that plane is drawn over the page.
+        ///
+        /// The numbers this was found with: both cutscene builders baked planeDistance 0.9, and
+        /// Main's camera has a near clip of 0.18. Everything between 18 cm and 90 cm of the lens
+        /// therefore drew in front of the story — which is what the venue's grass, read as leftover
+        /// transition art behind the comic, actually was.
+        ///
+        /// So the plane goes to just outside the near clip. Nothing can fit in the gap that is left
+        /// except geometry closer to the lens than the near plane plus two centimetres, and the lens
+        /// is inside the ground by then. Derived from the CAMERA rather than typed as a constant,
+        /// because the three pages this class draws are hung on three different rigs and the arenas
+        /// are free to clip differently from the lawn.
+        ///
+        /// Screen Space - Overlay would end the class of problem outright, and is refused for the
+        /// reason both builders already record: an Overlay canvas is invisible to a Camera.Render
+        /// into a RenderTexture, so the story would silently vanish from every frame sheet the
+        /// review process produces.
+        /// </summary>
+        public static float PlaneDistanceFor(Camera camera)
+            => (camera == null ? 0.18f : camera.nearClipPlane) + 0.02f;
+
+        /// <summary>
+        /// Put this page's canvas in front of the world, whatever was baked into the scene.
+        ///
+        /// Both builders write the same number, and this is still the one that matters: a baked
+        /// canvas only reaches a player after somebody re-runs a builder and saves the scene, and
+        /// this is one field on a page that already exists in three places — the opening story and
+        /// both endings. RallyHud.EnsureExitPrompt sets the precedent for repairing a baked canvas
+        /// from the runtime side rather than waiting for a rebuild.
+        ///
+        /// A FLOOR and not an assignment: only ever pulled closer, never pushed out. A page hung
+        /// nearer than this by a builder, a prefab or a future shot has decided something this
+        /// method does not know about, and undoing that would be this method causing the fault it
+        /// exists to prevent.
+        /// </summary>
+        void GroundThePage()
+        {
+            var canvas = GetComponent<Canvas>();
+            if (canvas == null || canvas.renderMode != RenderMode.ScreenSpaceCamera) return;
+
+            // Null worldCamera is not a case to repair: Unity draws a camera-space canvas with no
+            // camera as an overlay, where planeDistance means nothing at all.
+            var cam = canvas.worldCamera;
+            if (cam == null) return;
+
+            float want = PlaneDistanceFor(cam);
+            if (canvas.planeDistance > want) canvas.planeDistance = want;
         }
 
         void OnDestroy()

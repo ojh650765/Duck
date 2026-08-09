@@ -407,7 +407,12 @@ namespace DuckMow.EditorTools
             // screenshot and therefore from every review.
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
             canvas.worldCamera = camera;
-            canvas.planeDistance = 0.9f;
+            // Just outside the lens's near clip — see ComicSequence.PlaneDistanceFor, which owns the
+            // number. At the 0.9 m this used to be, a camera-space canvas is depth-sorted against
+            // the world and anything within 90 cm of the lens draws over the page. The ending is
+            // framed at the judges' bench with the trophy in shot, which is exactly the sort of
+            // close geometry that fits inside a 90 cm shell.
+            canvas.planeDistance = ComicSequence.PlaneDistanceFor(camera);
             // Above the opening page's 200. The two never coexist on screen — the intro's page is
             // switched off long before the ending is asked for, and each ending page switches its own
             // root off at the end of this method — but the ordering is stated rather than left equal,
