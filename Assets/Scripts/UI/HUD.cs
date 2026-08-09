@@ -423,42 +423,58 @@ namespace DuckMow
                     SetGroup(resultsGroup, 1f);
                     if (retryHint != null)
                     {
-                        // Three endings, and the branch order has to be the DIRECTOR'S order or the
-                        // card lies. See the Verdict case in GameDirector.Tick: solo is tested
-                        // first, then whether there is a venue to tour, and only then the fallback.
-                        // Testing the tour first here — which is what this did — printed "see the
-                        // gardens" over a solo round that was about to walk out to the front page,
-                        // because the rivals array is authored on the component and is populated
-                        // whether or not the round is using it.
+                        // TWO endings now, and the branch has to be the DIRECTOR'S or the card lies.
+                        // See the Verdict case in GameDirector.Tick: solo is tested first, then
+                        // whether there is a venue to tour, and the fallback is a venue with no
+                        // rivals in it. Testing the tour first here — which is what this did —
+                        // printed "see the gardens" over a solo round that was about to walk out to
+                        // the front page, because the rivals array is authored on the component and
+                        // is populated whether or not the round is using it. tourAhead keeps its
+                        // !solo term for exactly that reason, so the order is still the director's
+                        // even though only one test is left visible.
                         //
-                        // One rule underneath all three, and it is the rule the whole game now
-                        // follows: SPACE CONTINUES. What it continues TO is the only thing that
-                        // changes, and each line says which.
+                        // It used to be three lines because the third offered [R] RETRY SAME
+                        // PICTURE. The retry is gone — a round is a stage of a championship and
+                        // re-mowing one in place was a fourth meaning for the end of a round — and
+                        // with it went the only thing that made the solo case and the no-rivals case
+                        // different. Both walk out to the front page and both now say so in the same
+                        // words, which is the point: SPACE CONTINUES, and what it continues TO is
+                        // the only thing that ever changes.
                         bool solo = director != null && director.SoloRound;
                         bool tourAhead = !solo && director != null && director.tournament != null &&
                                          director.tournament.rivals.Length > 0;
 
-                        if (solo)
-                            // One picture, played on its own from the front page, and the front page
-                            // is where it goes back to. Named plainly: this is the one prompt in the
-                            // game whose destination is a menu rather than a place in the world.
-                            retryHint.text = "[SPACE]  MAIN MENU     [ESC]  PAUSE";
-                        else if (tourAhead)
-                            // With neighbours to visit the round is not over, so the only thing on
-                            // offer is pressing on. Advertising a retry here used to be an
-                            // invitation to throw the round away before it had been added to the
-                            // championship. "THE VENUE" told the player nothing about what they were
-                            // about to be shown, which is three rivals' finished lawns.
-                            retryHint.text = "[SPACE]  SEE THE OTHER GARDENS     [ESC]  PAUSE";
-                        else
-                            // A venue with no rivals in it. NEW PICTURE lived here and is gone; with
-                            // nothing to carry on to, carrying on means the front page.
-                            retryHint.text =
-                                "[R]  RETRY SAME PICTURE     [SPACE]  MAIN MENU     [ESC]  PAUSE";
+                        retryHint.text = ResultsHint(tourAhead);
                     }
                     break;
             }
         }
+
+        /// <summary>
+        /// What the results card offers at the end of a picture, in words.
+        ///
+        /// PUBLIC AND STATIC because it has a second reader, and that reader is the reason this is
+        /// a method at all rather than two literals where they are used. DuckShoot fakes this screen
+        /// to photograph it — it never plays a round, so it sets the hint by hand — and it hand-
+        /// copied the string, and it went stale twice: once still advertising [N] NEW PICTURE after
+        /// that key was removed, and again with [R] RETRY SAME PICTURE after that one was. A mock
+        /// that drifts does not fail loudly, it produces an authoritative-looking frame sheet of a
+        /// game that does not exist. One function, two callers, no copy to forget.
+        ///
+        /// SPACE CONTINUES is the whole of it; only the destination changes. There is no third arm:
+        /// the retry that used to make one is gone, so a round with no tour ahead of it says exactly
+        /// what a round played on its own says, because they do exactly the same thing.
+        /// </summary>
+        public static string ResultsHint(bool tourAhead)
+            => tourAhead
+                // With neighbours to visit the round is not over, so the only thing on offer is
+                // pressing on. "THE VENUE" told the player nothing about what they were about to be
+                // shown, which is three rivals' finished lawns.
+                ? "[SPACE]  SEE THE OTHER GARDENS     [ESC]  PAUSE"
+                // A round played on its own, or a venue with nothing left to show. Named plainly:
+                // this is the one prompt in the game whose destination is a menu rather than a
+                // place in the world.
+                : "[SPACE]  MAIN MENU     [ESC]  PAUSE";
 
         /// <summary>The points table, or null in a scene assembled without a tournament.</summary>
         Championship Champ => director != null && director.tournament != null

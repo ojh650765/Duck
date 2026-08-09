@@ -543,8 +543,15 @@ namespace DuckMow.EditorTools
         /// materials, same framing — so the face on a judge's card at the end of a rally is the same
         /// face the venue tour puts on its contestant card. Two different portraits of the same
         /// animal would read as two different animals.
+        ///
+        /// PUBLIC because Bloom Rush's bench holds up faces too now, and DuckTurfBuilder wires its
+        /// own ContestantPortraits from this list rather than assembling a third one. The sentence
+        /// above is the whole reason: a second list here is how the same goose ends up with two
+        /// faces in one evening. It lives in this file rather than being hoisted somewhere neutral
+        /// because this is where it was written and moving it would be churn in three files to
+        /// change nothing — the arenas are already close relatives.
         /// </summary>
-        static ContestantPortraits.Subject[] BuildPortraitSubjects()
+        public static ContestantPortraits.Subject[] BuildPortraitSubjects()
         {
             var subjects = new List<ContestantPortraits.Subject>(4);
 
@@ -561,7 +568,10 @@ namespace DuckMow.EditorTools
                     framing = 0.26f,
                     yaw = 24f
                 });
-            else Debug.LogWarning("[Rally] no duck mesh for the player's portrait.");
+            // "[Duck]" and not "[Rally]" on both of these: two arenas build their benches from this
+            // list now, so a tag naming one of them would send whoever reads the warning to the
+            // wrong scene.
+            else Debug.LogWarning("[Duck] no duck mesh for the player's portrait.");
 
             foreach (var spec in Venue.Plots)
             {
@@ -571,7 +581,7 @@ namespace DuckMow.EditorTools
                                                         $"Rival_{blenderName}");
                 if (mesh == null)
                 {
-                    Debug.LogWarning($"[Rally] no portrait mesh for {spec.contestant}.");
+                    Debug.LogWarning($"[Duck] no portrait mesh for {spec.contestant}.");
                     continue;
                 }
                 subjects.Add(new ContestantPortraits.Subject

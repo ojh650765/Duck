@@ -725,10 +725,12 @@ namespace DuckMow.UI
             //
             // Deliberately absent from EVERY stage, and each for a checked reason:
             //
-            //   R, retry        RetryPressed is not gated by anything, but its only consumers are
-            //                   GameDirector's Verdict, Scoreboard, Ceremony and Ending cases. There
-            //                   is no mid-round retry to advertise; the result cards own that key
-            //                   and prompt for it themselves.
+            //   R, start over   RetryPressed is not gated by anything, but its only consumers are
+            //                   GameDirector's Scoreboard, Ceremony and Ending cases — the Verdict
+            //                   read has gone with the same-picture retry, so R no longer means
+            //                   anything at the end of a round, only at the standings, where it
+            //                   throws the whole championship away. There is nothing mid-round to
+            //                   advertise; the boards own that key and prompt for it themselves.
             //   N, skip         same shape. Only ever read on a result card.
             //   the horn in stage one
             //                   GooseDefence is the only thing in the lawn scene that reads the

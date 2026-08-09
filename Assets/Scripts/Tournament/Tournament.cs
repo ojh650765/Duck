@@ -190,6 +190,66 @@ namespace DuckMow
         }
 
         /// <summary>
+        /// The championship table as board rows: every round so far, added up, best first.
+        ///
+        /// ---- what this is for, and why it is not <see cref="Standings"/> ----
+        ///
+        /// <see cref="Standings"/> is THIS ROUND — one stage's marks out of thirty, rebuilt from
+        /// scratch by CloseRound or CloseMatchRound every time. It is the right table for the beat
+        /// that just happened and the wrong one for the board, because by the time the board is up
+        /// the player has already been told this round's result: the judges marked it, or the bench
+        /// held up the winner's face. A board that repeats the previous shot is a board with nothing
+        /// to say, and the arenas were showing that same table twice over — once inside the arena
+        /// and once again on the lawn.
+        ///
+        /// What the board says instead is the only number in the game the player cannot work out
+        /// from what is on screen: where the evening stands. It is also the number the ending turns
+        /// on, since the three-round total is what picks the winning or losing page.
+        ///
+        /// ---- read AFTER banking, never projected ----
+        ///
+        /// Callers must have called <see cref="BankRound"/> first, and GameDirector's Scoreboard case
+        /// does, one line earlier. That ordering is the whole value of this method: the figure on the
+        /// board is not a forecast of the total, it IS the total, read out of the same table the
+        /// ending will read. Bloom Rush used to project it by hand — this stage's marks plus the
+        /// table — and that copy of the arithmetic had already been wrong once, predicting seven
+        /// marks for a round that banked fifteen.
+        ///
+        /// Empty when no round has been banked, which is a real state — a scene assembled without a
+        /// championship, or the board asked for before a round finished. Callers fall back to
+        /// <see cref="Standings"/>; a board with nothing on it is worse than a board about one round.
+        /// </summary>
+        public List<Standing> ChampionshipStandings()
+        {
+            var table = _championship?.Table;
+            var rows = new List<Standing>(table != null ? table.Count : 0);
+            if (table == null) return rows;
+
+            foreach (var e in table)
+                rows.Add(new Standing
+                {
+                    name = e.name,
+                    species = e.species,
+                    isPlayer = e.isPlayer,
+                    livery = e.livery,
+                    total = e.points,
+                    // Nothing to add on: the award is already inside the points the championship
+                    // recorded, and adding it again here would double it on the one screen that is
+                    // supposed to be authoritative.
+                    defenceAward = 0,
+                    // True, so the row prints a bare number instead of "N / 30". Three rounds do not
+                    // fit in one round's denominator, and a board reading "71 / 30" is a board
+                    // nobody trusts again. Scoreboard.Fill's own note records that this is the case
+                    // the counting row was kept alive for.
+                    rallyMarked = true,
+                    // No grade. A letter grade describes one picture; there is no such thing as a
+                    // grade for an evening, and the column reads better empty than wrong.
+                    rank = "",
+                });
+            return rows;
+        }
+
+        /// <summary>
         /// Everyone starts at the klaxon, on the same picture, under the same rule.
         ///
         /// <paramref name="guideLostFraction"/> is how far into the round the chalk finishes

@@ -410,6 +410,36 @@ namespace DuckMow
             }
             _currentShape = randomiseFirstShape ? RandomShape() : startingShape;
 
+            // ON THE MARK BEFORE ANYTHING IS SHOWN, INCLUDING THE STORY.
+            //
+            // The machine used to be placed by BeginRound, which on the first round of a session
+            // runs the instant the opening story reports itself finished. The page is switched off
+            // on the frame it concludes and BeginRound lands on the next one, so the player watched
+            // the lawn appear with the mower parked wherever the scene had left it and then jump
+            // across the field a frame later. The camera is in its default chase pose and pointed at
+            // the machine for the whole of that, which is what made a teleport that has always been
+            // there suddenly the first thing anybody sees.
+            //
+            // It can be done here honestly, and "honestly" is the whole question — a mark that is
+            // merely EARLY and slightly wrong is worse than a visible jump. The start pose is a pure
+            // function of the shape: RoundTarget.GetStartPose walks the rasterised interior for the
+            // deepest cell and picks a heading off it, and the shape is settled one line above, by
+            // randomiseFirstShape or by the serialized startingShape. Nothing between here and
+            // BeginRound can change it — the story does not touch the target — and everything that
+            // picks a DIFFERENT picture later (NextShape between rounds, RetrySameShape from the
+            // review tools) goes through BeginRound with its own shape and places the machine again.
+            //
+            // So it is the same call, made twice, and the second one is a no-op by construction:
+            // RoundTarget.Build is a deterministic rasterise into buffers it already owns, so the
+            // pose BeginRound computes is bit-for-bit the pose computed here and the machine is
+            // already standing on it.
+            //
+            // The Countdown state's re-assert stays exactly where it is. It is not this beat done
+            // twice — it guards the verdict's portrait staging spot, which parks the machine at
+            // (7.5, -14) outside every picture and which nothing else reliably undoes. Read its
+            // comment before touching it.
+            StandOnTheStartMark(_currentShape);
+
             // The story runs in front of the first round of a session and nowhere else.
             //
             // It is deliberately a gate on Start rather than a step inside BeginRound: RetrySameShape
@@ -530,12 +560,45 @@ namespace DuckMow
         }
 
         /// <summary>
+        /// Build the picture and put the machine on the mark it starts that picture from.
+        ///
+        /// The two halves are one operation and are kept in one method because the second reads the
+        /// first: <see cref="RoundTarget.GetStartPose"/> walks the rasterised interior that
+        /// <see cref="RoundTarget.Build"/> has just written, and asking for a pose against a target
+        /// still configured for the previous round's shape returns a plausible, wrong mark on a lawn
+        /// nobody will be mowing. Splitting them is how that happens.
+        ///
+        /// Idempotent, and relied upon to be: <see cref="Start"/> calls it before the opening story
+        /// and <see cref="BeginRound"/> calls it again when the round actually begins. Build is a
+        /// deterministic rasterise into buffers the target already owns and GetStartPose is a pure
+        /// scan of the result, so the same shape always yields the same pose and the second call
+        /// moves nothing. The price is one extra grid pass and one extra SDF bake, once, in Start.
+        ///
+        /// Null-guarded even though BeginRound has always dereferenced both without asking, because
+        /// this is now also called from Start on a path that used to reach neither.
+        /// </summary>
+        void StandOnTheStartMark(ShapeId shape)
+        {
+            if (target == null || mower == null) return;
+
+            target.Build(shape);
+            target.GetStartPose(out Vector3 pos, out Quaternion rot);
+            _roundStartPos = pos;
+            _roundStartRot = rot;
+            mower.ResetTo(pos, rot);
+            // The machine has jumped. If the camera happened to be looking at it — the verdict
+            // portrait, or a chase left over from the intro — snap rather than letting the rig
+            // sail across the field after it.
+            cameraDirector?.NotifyTargetTeleported();
+        }
+
+        /// <summary>
         /// Start the LAWN ART round: a picture, mowed, revealed, judged.
         ///
         /// One of the two ways a round can begin. The other is <see cref="BeginMatchRound"/>, and
         /// <see cref="BeginNextRound"/> is what chooses between them — nothing outside this file
-        /// should be picking. This one is still called directly by the retry path, by the opening
-        /// story's exit and by the capture tools, all of which mean "a picture" specifically.
+        /// should be picking. This one is still called directly by <see cref="NextShape"/>, by the
+        /// opening story's exit and by the capture tools, all of which mean "a picture" specifically.
         /// </summary>
         public void BeginRound(ShapeId shape, bool announce)
         {
@@ -552,7 +615,11 @@ namespace DuckMow
             // BeginRound runs against a scene that is awake again.
             AbandonRally();
 
-            target.Build(shape);
+            // Builds the picture and stands the machine on its mark, in that order because the mark
+            // is read off the picture. Called from Start as well, before the opening story, so this
+            // one is normally a no-op that re-confirms a pose the machine is already holding — see
+            // the note at the call site there.
+            StandOnTheStartMark(shape);
             cutMask.ClearAll();
             // Stand the ornaments back up. They no longer right themselves on a timer — a flattened
             // gnome stays flattened so the reveal shows the damage — so this is the one place a
@@ -569,15 +636,6 @@ namespace DuckMow
             // not still steering from the last one.
             if (!autopilotEnabled) autopilot?.Stop();
 
-            target.GetStartPose(out Vector3 pos, out Quaternion rot);
-            _roundStartPos = pos;
-            _roundStartRot = rot;
-            mower.ResetTo(pos, rot);
-            // The machine has jumped. If the camera happened to be looking at it — the verdict
-            // portrait, or a chase left over from the intro — snap rather than letting the rig
-            // sail across the field after it.
-            cameraDirector?.NotifyTargetTeleported();
-
             // Say out loud where the round started and whether that is inside the picture.
             //
             // This exists because "it starts outside" and "the audit says it starts 8 m inside"
@@ -585,6 +643,7 @@ namespace DuckMow
             // session was wrong. Now the game states it, in the log, every round — so the claim
             // and the measurement come from the same machine.
             {
+                Vector3 pos = _roundStartPos;
                 var sp = new Vector2(pos.x / target.shapeRadius, pos.z / target.shapeRadius);
                 float d = TargetShapes.Sdf(shape, sp);
                 float clearance = -d * target.shapeRadius;
@@ -825,7 +884,25 @@ namespace DuckMow
             kicker = MatchState.FinalRound ? "THE LAST BOARD" : "THE BOARD IS NEXT";
         }
 
-        /// <summary>Same picture, fresh lawn. The fast path the player will use most.</summary>
+        /// <summary>
+        /// Same picture, fresh lawn. NO LONGER ON ANY ROUTE THE PLAYER CAN TAKE.
+        ///
+        /// It used to be the fast path and the R key at the verdict opened it. That is gone on the
+        /// owner's instruction, and the reasoning is the one that removed NEW PICTURE before it: a
+        /// round is a STAGE of a championship — the picture, then the rally, then Bloom Rush — and
+        /// re-mowing one stage in place is a meaning for the end of a round that the evening cannot
+        /// absorb. The championship either carries on or it starts again, and starting again is R at
+        /// the BOARD, where the round is already banked and cannot be counted twice.
+        ///
+        /// Kept, rather than deleted with its caller, for the same reason GameState.Ceremony is kept
+        /// as a working state nothing enters: the review tooling drives it by name.
+        /// <c>Duck/Play · Restart round</c> is how a reviewer re-runs a round without leaving play
+        /// mode, and DuckDefenceTools opens its whole capture routine with it. Deleting a public
+        /// method to remove a feature that is already unreachable would break the harness to change
+        /// nothing the player can see.
+        ///
+        /// It is deliberately NOT wired to anything again without the argument above being answered.
+        /// </summary>
         public void RetrySameShape() => BeginRound(_currentShape, false);
 
         /// <summary>
@@ -1122,8 +1199,31 @@ namespace DuckMow
                     // decides what to call the contestant on top of it.
                     tournament?.BankRound();
                     if (tournament != null)
-                        scoreboard?.Settle(tournament.Standings,
+                    {
+                        // THE RUNNING TOTAL, not this round.
+                        //
+                        // This board is the last thing the player reads before the next stage or the
+                        // ending, and it is now the ONLY board a round produces: both arenas used to
+                        // raise one of their own before handing back, so an arena round ended on two
+                        // boards in a row carrying the same four rows. See RallyVerdict.BeginBoard
+                        // and TurfDirector.ShowBoard, which both stand aside for this one.
+                        //
+                        // With one board left it has to be the one that says something new. The
+                        // round's own marks have just been delivered — by the judges on a lawn, by
+                        // the bench holding up the winner's face in an arena — so printing them
+                        // again here is the repeat that was worth removing in the first place. Where
+                        // the evening STANDS is the number nothing else on screen gives, and it is
+                        // the number the ending turns on.
+                        //
+                        // Read one line after BankRound, deliberately: the table already has this
+                        // round in it, so the figure is the banked total rather than a forecast of
+                        // it. Falls back to the round when there is no table yet — a scene with no
+                        // championship, or a board somehow reached before anything was banked —
+                        // because a board with nothing on it is worse than a board about one round.
+                        var rows = tournament.ChampionshipStandings();
+                        scoreboard?.Settle(rows.Count > 0 ? rows : tournament.Standings,
                                            tournament.Championship.IsComplete ? "CHAMPION" : "WINNER");
+                    }
                     AudioDirector.Instance?.CrowdCheer(0.85f, applaud: true);
                     break;
                 }
@@ -1568,19 +1668,24 @@ namespace DuckMow
                     // No rivals, so no tour and no board — a degenerate venue, and the only one of
                     // these three branches a shipping scene never takes.
                     //
-                    // This used to offer R for the same picture and N for A NEW ONE, and N is the
-                    // key that has been removed. "New picture" was a third meaning for the end of a
-                    // round on top of "retry" and "carry on", it wiped the championship to do it,
-                    // and it was the loudest thing in the only prompt stage one ever printed. What
-                    // is left is the rule the whole game now follows: SPACE CONTINUES. With nothing
+                    // This used to offer R for the same picture and N for A NEW ONE. N went first:
+                    // "new picture" was a third meaning for the end of a round on top of "retry" and
+                    // "carry on", and it wiped the championship to do it. R has now gone the same
+                    // way, on the owner's instruction, and the case against it was the same case:
+                    // a round is a STAGE of a championship, and re-mowing one stage in place is a
+                    // fourth thing for the end of a round to mean. The evening either carries on or
+                    // it does not.
+                    //
+                    // What is left is the rule the whole game follows: SPACE CONTINUES. With nothing
                     // to continue TO, continuing means the front page — the same answer the solo
                     // branch above gives, for the same reason, so a player who learns what the key
-                    // does in one kind of round has learned it for all of them.
-                    if (input != null)
-                    {
-                        if (input.RetryPressed) RetrySameShape();
-                        else if (_confirm && _stateTime > 1.2f) BackToMenu();
-                    }
+                    // does in one kind of round has learned it for all of them. Both branches now
+                    // print the same line, which is why the HUD's card no longer distinguishes them.
+                    //
+                    // R at the BOARD is untouched and is a different key doing a different job: it
+                    // restarts the whole championship, and it can only do that safely there because
+                    // the round is banked by the time that board is up. See the Scoreboard case.
+                    if (_confirm && _stateTime > 1.2f) BackToMenu();
                     break;
                 }
 

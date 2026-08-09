@@ -1266,7 +1266,12 @@ namespace DuckMow.EditorTools
                 ("HANDBRAKE SLIDE", "SPACE"),
                 ("HORN", "E"),
                 ("LOOK AT YOUR WORK", "F   (once a round)"),
-                ("RETRY  ·  NEXT PICTURE", "R  ·  N"),
+                // "RETRY · NEXT PICTURE — R · N" stood here and both halves were dead. N went with
+                // the new-picture feature; R went with the verdict's retry. What R still does is on
+                // the STANDINGS board and it is a different thing entirely — it throws the whole
+                // championship away and starts a new one — so it is named for that or not at all.
+                // A front page that lists a key by the wrong job is worse than one that omits it.
+                ("START THE EVENING AGAIN", "R   (at the standings)"),
                 ("SKIP THE OPENING", "ANY KEY"),
             };
 
