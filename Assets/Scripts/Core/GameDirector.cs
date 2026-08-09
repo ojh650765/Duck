@@ -1220,6 +1220,15 @@ namespace DuckMow
                         // it. Falls back to the round when there is no table yet — a scene with no
                         // championship, or a board somehow reached before anything was banked —
                         // because a board with nothing on it is worse than a board about one round.
+                        // Reset before settling, which both arenas' boards have always done and this
+                        // one never did. Settle refills every row and re-runs the landing, so the
+                        // TEXT could not go stale — but ResetBoard is also what puts each row back
+                        // on the position the builder authored, and the rows are punched as their
+                        // numbers count up. A board re-settled while a punch was still in flight
+                        // would open the next round's standings with one plate sitting off its own
+                        // line, which is exactly what "it is showing the last one" looks like.
+                        scoreboard?.ResetBoard();
+
                         var rows = tournament.ChampionshipStandings();
                         scoreboard?.Settle(rows.Count > 0 ? rows : tournament.Standings,
                                            tournament.Championship.IsComplete ? "CHAMPION" : "WINNER");
@@ -1813,8 +1822,36 @@ namespace DuckMow
                                              $"{_endingBudget:0.0}s; returning to the menu.");
                             _ending.Hide();
                         }
-                        if (input != null && (_confirm || input.RetryPressed || _ending == null))
-                            RestartChampionship();
+
+                        // THE EVENING IS OVER, SO THE GAME GOES BACK TO THE FRONT PAGE.
+                        //
+                        // This used to call RestartChampionship, gated on a keypress, and both
+                        // halves were wrong. The warning three lines above has always said
+                        // "returning to the menu" and the call underneath it did something else
+                        // entirely: RestartChampionship wipes the points and begins round one IN
+                        // PLACE. It is still exactly the right thing for R at the standings, where
+                        // the player is asking for another go — and it is not what the end of a
+                        // championship means.
+                        //
+                        // The GATE was the part the player actually met. ComicSequence.Conclude
+                        // switches its page off the moment it finishes, so when the ending played
+                        // out the page simply vanished — and nothing here had moved the camera,
+                        // which was still framing the plaza board from the Scoreboard beat. The
+                        // player watched their ending, the screen handed them back the standings
+                        // they had seen a minute earlier, and there they stayed, because the only
+                        // thing that would move them on was a key nothing had told them to press.
+                        // "After the final cutscene it should go to the main menu, but I'm looking
+                        // at stage 2's scoreboard" is a precise description of that.
+                        //
+                        // No input is read here at all now. The page reads its own keys and skips
+                        // itself on any of them — see ComicSequence.SkipPressed — so a player who
+                        // has seen it before presses something, the page concludes, and this leaves.
+                        // One route out, whether the ending was watched, skipped, or never wired.
+                        //
+                        // BackToMenu rather than a state: it guards its own re-entry and covers the
+                        // load with the curtain, which is the same door the pause board's BACK TO
+                        // MENU goes through.
+                        BackToMenu();
                     }
                     break;
             }

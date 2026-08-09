@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
 using TMPro;
 
 namespace DuckMow.UI
@@ -100,6 +101,20 @@ namespace DuckMow.UI
         float _held;
         int _heldDir;
 
+        RectTransform _fill, _grab;
+        Image _fillImage;
+
+        /// <summary>
+        /// True from the frame the bar is grabbed until the button comes back up.
+        ///
+        /// HELD ACROSS FRAMES rather than re-tested, which is MainMenu's rule and the one every
+        /// slider anybody has ever used keeps: once the bar has been taken hold of the player may
+        /// drag straight off the end of it — or off the board — without the value stopping dead
+        /// under their hand. Re-testing "is the pointer over the bar" every frame is what makes 0%
+        /// and 100% unreachable, because reaching either means overshooting the target.
+        /// </summary>
+        bool _dragging;
+
         Vector2 _lastPointer;
         bool _pointerSeen;
 
@@ -135,6 +150,35 @@ namespace DuckMow.UI
         /// <summary>Centres of the two columns of type, either side of the board's middle.</summary>
         const float NameCentre = -180f, ValueCentre = 250f;
 
+        /// <summary>
+        /// The volume bar's geometry, and the one number in it that carries an argument.
+        ///
+        /// FillInset is the rim: the fill sits inside the trough by this much on every side, which
+        /// is what makes the trough read as a channel with something in it rather than as two
+        /// stacked rectangles. It is also the number the drag has to be mapped against — see
+        /// <see cref="VolumeDial"/>, which is where that rule lives now that there are two bars in
+        /// the game. Three pixels because the plank this board is cut from is a generated rounded
+        /// rect rather than painted art: there is no rim to measure, so the rim is chosen, and it
+        /// wants to be just wide enough to see at a glance and no wider.
+        /// </summary>
+        const float BarWidth = 620f, BarHeight = 22f, FillInset = 3f;
+
+        /// <summary>
+        /// How far the bar sits below the line it belongs to, how tall a target it is, and how tall
+        /// the label lines' own targets are.
+        ///
+        /// These three are one decision because the two rects MUST NOT OVERLAP. The label line
+        /// selects the row; the bar sets its value; and a click that could be either would make
+        /// pressing the words MASTER VOLUME jump the level to wherever along the row those words
+        /// happen to be. At the numbers below the grab ends six pixels above the label line's rect
+        /// and fourteen above MUTE's, which is slack enough to survive somebody nudging a font size
+        /// and tight enough that neither target is hard to hit.
+        ///
+        /// The grab is deliberately wider than the drawn trough: a player aiming a mouse at a
+        /// twenty-two pixel band on a paused game should be aiming at the thing, not hunting for it.
+        /// </summary>
+        const float BarDrop = 46f, BarGrab = 36f, RowHit = 44f;
+
         protected override float ItemsCentreY => _itemsCentreY;
         float _itemsCentreY;
 
@@ -146,9 +190,16 @@ namespace DuckMow.UI
             // which reads as the page being half-transparent rather than as a page turning.
             BuildScrim(0.78f);
 
-            const int n = 3;
-            float cursor = RowsTop + (n - 1) * RowStep + 30f;
-            float itemY = cursor + 40f + ItemHeight * 0.5f;
+            // Measured DOWN from the top of the board into a cursor, the way the controls card is,
+            // because the volume row is not the same height as the other two: it carries a bar under
+            // its line and the rows below it have to know that. Laying three rows on one step and
+            // then hanging a bar off the first would put the bar through MUTE.
+            float volumeY = RowsTop;
+            float barY = volumeY + BarDrop;
+            float muteY = volumeY + BarDrop + 54f;
+            float rumbleY = muteY + RowStep;
+
+            float itemY = rumbleY + 30f + 40f + ItemHeight * 0.5f;
             float hintY = itemY + ItemHeight * 0.5f + 34f;
             float height = hintY + 40f;
 
@@ -163,14 +214,19 @@ namespace DuckMow.UI
                 .fontStyle = FontStyles.Bold;
             BuildRule(half - 178f, 700f);
 
-            for (int i = 0; i < n; i++)
-                _rows[i] = BuildRow((Dial)i, half - (RowsTop + i * RowStep));
+            _rows[0] = BuildRow(Dial.Volume, half - volumeY);
+            BuildBar(half - barY);
+            _rows[1] = BuildRow(Dial.Mute, half - muteY);
+            _rows[2] = BuildRow(Dial.Rumble, half - rumbleY);
 
             AddItem("BACK", RequestClose);
 
+            // DRAG is named, because a bar that can be dragged and does not say so is a bar the
+            // player operates with the arrows and never discovers. It is the first thing anybody
+            // reaches for on a volume control and it was the missing half of this row.
             BuildText("Hint",
-                      "UP / DOWN  CHOOSE   ·   LEFT / RIGHT  ADJUST   ·   ESC  BACK", 20f,
-                      half - hintY, new Vector2(800f, 30f),
+                      "UP / DOWN  CHOOSE   ·   LEFT / RIGHT  OR DRAG  ADJUST   ·   ESC  BACK", 20f,
+                      half - hintY, new Vector2(820f, 30f),
                       new Color(BoardEdge.r, BoardEdge.g, BoardEdge.b, 0.62f), false, 0.14f, 8f);
 
             _row = 0;
@@ -200,7 +256,7 @@ namespace DuckMow.UI
             var rt = (RectTransform)go.transform;
             rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
             rt.pivot = new Vector2(0.5f, 0.5f);
-            rt.sizeDelta = new Vector2(BoardWidth - 120f, RowStep - 8f);
+            rt.sizeDelta = new Vector2(BoardWidth - 120f, RowHit);
             rt.anchoredPosition = new Vector2(0f, y);
 
             var name = BuildText($"{dial} name", Label(dial), 28f, y,
@@ -216,6 +272,62 @@ namespace DuckMow.UI
             value.rectTransform.anchoredPosition = new Vector2(ValueCentre, y);
 
             return new Row { dial = dial, rect = rt, name = name, value = value };
+        }
+
+        /// <summary>
+        /// The volume bar: a channel with something in it, and an invisible rect over the top of
+        /// both that the mouse can actually hit.
+        ///
+        /// Three rects rather than two because they answer three different questions. The TROUGH is
+        /// how long the control is. The FILL is how far up it is, and is the rect a drag is mapped
+        /// against — see <see cref="VolumeDial"/> for why it is that one and not the trough. The
+        /// GRAB is neither: it is a target, twice the drawn height, because a player aiming at a
+        /// twenty-two pixel band should be aiming at the thing rather than hunting for it.
+        ///
+        /// The fill is an Image.Type.Filled rather than a rect whose width is written every frame.
+        /// That is what keeps the drawn end of the bar and the rect the pointer is measured against
+        /// the same object: a width-driven fill would need its own rect, and then the mapping would
+        /// be against something that is not what the player is looking at, which is the entire
+        /// mistake VolumeDial exists to record.
+        /// </summary>
+        void BuildBar(float y)
+        {
+            var troughGo = new GameObject("Volume trough", typeof(RectTransform), typeof(Image));
+            troughGo.transform.SetParent(Board, false);
+            var trough = (RectTransform)troughGo.transform;
+            trough.anchorMin = trough.anchorMax = new Vector2(0.5f, 0.5f);
+            trough.pivot = new Vector2(0.5f, 0.5f);
+            trough.sizeDelta = new Vector2(BarWidth, BarHeight);
+            trough.anchoredPosition = new Vector2(0f, y);
+            var ti = troughGo.GetComponent<Image>();
+            ti.sprite = RoundedSprite();
+            ti.type = Image.Type.Sliced;
+            ti.raycastTarget = false;
+            // The board's own timber, darkened: a channel cut into the plank rather than a widget
+            // laid on it. Same move the plates make in the other direction.
+            ti.color = new Color(Scrim.r, Scrim.g, Scrim.b, 0.85f);
+
+            var fillGo = new GameObject("Volume fill", typeof(RectTransform), typeof(Image));
+            fillGo.transform.SetParent(trough, false);
+            _fill = (RectTransform)fillGo.transform;
+            Stretch(_fill);
+            _fill.offsetMin = new Vector2(FillInset, FillInset);
+            _fill.offsetMax = new Vector2(-FillInset, -FillInset);
+            _fillImage = fillGo.GetComponent<Image>();
+            _fillImage.sprite = RoundedSprite();
+            _fillImage.type = Image.Type.Filled;
+            _fillImage.fillMethod = Image.FillMethod.Horizontal;
+            _fillImage.fillOrigin = 0;
+            _fillImage.raycastTarget = false;
+            _fillImage.color = Gold;
+
+            var grabGo = new GameObject("Volume grab", typeof(RectTransform));
+            grabGo.transform.SetParent(Board, false);
+            _grab = (RectTransform)grabGo.transform;
+            _grab.anchorMin = _grab.anchorMax = new Vector2(0.5f, 0.5f);
+            _grab.pivot = new Vector2(0.5f, 0.5f);
+            _grab.sizeDelta = new Vector2(BarWidth, BarGrab);
+            _grab.anchoredPosition = new Vector2(0f, y);
         }
 
         static string Label(Dial dial) => dial switch
@@ -251,6 +363,15 @@ namespace DuckMow.UI
         /// </summary>
         void Refresh()
         {
+            // The bar follows the POSITION and not the mute, deliberately. A muted game still has a
+            // level, and showing where it is set while the reading beside it says MUTED tells the
+            // player both facts at once — where they left the volume, and that they cannot hear it.
+            // A bar that emptied on mute would look like mute had thrown the setting away.
+            if (_fillImage != null) _fillImage.fillAmount = _volumePos;
+            if (_fillImage != null)
+                _fillImage.color = MasterAudio.Muted
+                    ? new Color(Gold.r, Gold.g, Gold.b, 0.35f) : Gold;
+
             foreach (var r in _rows)
             {
                 if (r?.value == null) continue;
@@ -330,10 +451,35 @@ namespace DuckMow.UI
             // ---- the mouse ----
 
             int over = -1;
+            bool onBar = false;
+            Vector2 pointer = Vector2.zero;
             bool clicked = mouse != null && mouse.leftButton.wasPressedThisFrame;
+            bool down = mouse != null && mouse.leftButton.isPressed;
+
+            // THE DRAG, before anything else reads the pointer. A held grab outranks hovering: the
+            // pointer is very probably off the bar by now and every hit test below would say so.
+            if (_dragging)
+            {
+                if (!down)
+                {
+                    _dragging = false;
+                    // The one flush a drag makes, on release rather than on every frame of it.
+                    // MasterAudio debounces its own writes, but letting go of a bar is the moment
+                    // the player has decided, and on WebGL the flush wants as long as it can get.
+                    MasterAudio.Save();
+                }
+                else if (mouse != null)
+                {
+                    Drag(mouse.position.ReadValue());
+                    Refresh();
+                    TickLift();
+                    return;
+                }
+            }
+
             if (mouse != null)
             {
-                Vector2 p = mouse.position.ReadValue();
+                Vector2 p = pointer = mouse.position.ReadValue();
                 // Only while MOVING, the rule every other screen in this game keeps: a mouse left
                 // resting on a row used to re-select it every frame, so the arrow keys could not
                 // move off it.
@@ -357,6 +503,24 @@ namespace DuckMow.UI
                     over = BackRow;
                     if (moved) SelectRow(BackRow);
                 }
+
+                // The bar is hit-tested SEPARATELY from the volume row, the way the front page does
+                // it, because they are two different targets that both belong to one setting: the
+                // label line selects, and the bar sets. A single rect covering both would make a
+                // click on the words MASTER VOLUME jump the level to wherever along the row those
+                // words happen to be, which is not what pressing a label means anywhere.
+                onBar = _grab != null && RectTransformUtility.RectangleContainsScreenPoint(_grab, p, null);
+                if (over < 0 && onBar && moved) SelectRow(0);
+            }
+
+            if (clicked && onBar)
+            {
+                _dragging = true;
+                SelectRow(0);
+                Drag(pointer);
+                Refresh();
+                TickLift();
+                return;
             }
 
             // ---- adjust, then confirm ----
@@ -442,17 +606,51 @@ namespace DuckMow.UI
                     break;
 
                 default:
-                    // Unmuting first, because the alternative is a control that appears not to work:
-                    // a player who mutes, then reaches for the volume, would otherwise drag a bar
-                    // that moves a number and changes nothing they can hear.
-                    if (MasterAudio.Muted) MasterAudio.Muted = false;
-                    // Stepped in POSITION and handed to Nudge as a change in AMPLITUDE. That split is
-                    // what makes both true at once: the steps are even to the ear, and the stored
-                    // number stays clean, because Nudge is where the rounding lives.
-                    _volumePos = Mathf.Clamp01(_volumePos + direction * MasterAudio.ControlStep);
-                    MasterAudio.Nudge(MasterAudio.AmplitudeAt(_volumePos) - MasterAudio.Master);
+                    SetVolume(_volumePos + direction * MasterAudio.ControlStep);
                     break;
             }
+        }
+
+        /// <summary>
+        /// Move the bar, and the game's loudness with it, live. THE ONE PATH.
+        ///
+        /// Both the arrows and the drag come through here rather than each doing their own
+        /// arithmetic, which matters more on this page than it would elsewhere: the settings page
+        /// releases the pause board's duck precisely so that what the player hears while they adjust
+        /// is what they will get when they resume, and two routes to the same setting are two
+        /// chances for one of them to stop being that.
+        ///
+        /// Stepped in POSITION and handed to Nudge as a change in AMPLITUDE. That split is what
+        /// makes both true at once: the steps are even to the ear, and the stored number stays
+        /// clean, because Nudge is where the rounding lives.
+        ///
+        /// NOTHING HERE UNMUTES. An earlier version of this method did, unconditionally, and it was
+        /// wrong twice over — it contradicted the model instead of using it, and it unmuted on the
+        /// way DOWN as well. MasterAudio.Master's own setter already clears the mute when the value
+        /// is raised above silence, and states the rule: "dragging a volume slider upward is an
+        /// unambiguous request to hear something". Lowering one is not. Deleting the local copy is
+        /// what makes this page and the front page behave identically, which is the whole reason the
+        /// model lives there.
+        /// </summary>
+        void SetVolume(float position)
+        {
+            _volumePos = Mathf.Clamp01(position);
+            MasterAudio.Nudge(MasterAudio.AmplitudeAt(_volumePos) - MasterAudio.Master);
+        }
+
+        /// <summary>
+        /// Follow the mouse along the bar.
+        ///
+        /// The mapping — through the FILL's rect and not the trough's — is
+        /// <see cref="VolumeDial"/>'s, shared with the front page so the two bars cannot come to
+        /// feel different at their ends. What is this page's own is which rect the fill is, and the
+        /// fact that a drag lands in <see cref="SetVolume"/> like every other route.
+        /// </summary>
+        void Drag(Vector2 screen)
+        {
+            // Null camera: this board is a ScreenSpaceOverlay canvas, where the screen point IS the
+            // canvas point and passing a camera returns a local point that is wrong everywhere.
+            if (VolumeDial.PositionAt(_fill, screen, null, out float position)) SetVolume(position);
         }
 
         void Toggle(Dial dial)
