@@ -147,6 +147,24 @@ namespace DuckMow
 
         public CameraMode Mode { get; private set; } = CameraMode.Chase;
 
+        /// <summary>
+        /// True once the blend started by the last <see cref="SetMode"/> has run out — the lens has
+        /// arrived at the shot it was sent to.
+        ///
+        /// For beats that must not START until the camera is looking at them. There were already two
+        /// answers to that question here, <see cref="TourArrived"/> and <see cref="ScoreboardArrived"/>,
+        /// and both are distance tests against one specific shot's computed pose: they work, and they
+        /// have to be written again for every shot anybody ever wants to wait on. This is the general
+        /// one, because the blend is the thing that actually defines "still travelling" and it is the
+        /// same field for every mode.
+        ///
+        /// The alternative a caller reaches for first is a constant that happens to be longer than
+        /// the blend — Bloom Rush's bench had one, a 1.1 s lean against a 1.7 s blend, so the winner's
+        /// portrait was up on screen six tenths of a second before the camera got there to see it.
+        /// A hard-coded pause is that bug lying in wait for whoever next retunes the blend.
+        /// </summary>
+        public bool Settled => _blend >= 1f;
+
         Camera _cam;
         Vector3 _smoothPos;
         Quaternion _smoothRot;

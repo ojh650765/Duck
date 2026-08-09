@@ -66,6 +66,17 @@ namespace DuckMow
         /// <summary>Whose face the cards are showing. Empty when nobody could be named.</summary>
         public string Winner { get; private set; } = "";
 
+        /// <summary>
+        /// The longest the bench will wait for the camera before delivering anyway, on top of
+        /// <see cref="leanSeconds"/>.
+        ///
+        /// Not a tuning value and deliberately not serialized — it is a stall breaker. The camera
+        /// blend it waits on is six tenths of a second; anything approaching this means the rig is
+        /// missing, stopped or being stepped by something that is not advancing it, and the right
+        /// behaviour then is a late verdict rather than a stage that never ends.
+        /// </summary>
+        const float CameraStallGuard = 4f;
+
         float _time;
         int _raised;
         bool _running;
@@ -158,6 +169,27 @@ namespace DuckMow
                 case Step.LeanIn:
                     Attention(Mathf.Clamp01(_time / Mathf.Max(leanSeconds, 0.01f)));
                     if (_time < leanSeconds) break;
+
+                    // AND THE CAMERA HAS TO HAVE ARRIVED.
+                    //
+                    // The lean is 1.1 s and the blend fired on the way in here is 1.7, so this beat
+                    // used to put the winner's portrait up six tenths of a second before the lens
+                    // reached the bench. The owner watched the camera go up to the sky, come down to
+                    // the judges, and find the first one already holding the card — which reads as
+                    // the game having got ahead of itself, because it had.
+                    //
+                    // Waiting on the RIG rather than lengthening leanSeconds past 1.7 is the whole
+                    // point. A constant tuned to clear today's blend is the same bug rearmed for
+                    // whoever next changes the blend, and it would be silent both ways — too short
+                    // and the card is early again, too long and there is a dead pause on the bench
+                    // that nobody can trace to a camera setting.
+                    //
+                    // leanSeconds keeps its job as the FLOOR: the three of them still take their own
+                    // time to look up, and a camera that happened to be sitting on the bench already
+                    // does not get a snap verdict.
+                    if (cameraDirector != null && !cameraDirector.Settled
+                        && _time < leanSeconds + CameraStallGuard) break;
+
                     Advance(Step.Raise);
                     break;
 

@@ -71,7 +71,7 @@ namespace DuckMow
         readonly TextMeshProUGUI[] _pct = new TextMeshProUGUI[TurfArena.Count];
         readonly Image[] _stripe = new Image[TurfArena.Count];
         readonly RectTransform[] _row = new RectTransform[TurfArena.Count];
-        TextMeshProUGUI _resultsRank, _resultsTotal;
+        TextMeshProUGUI _resultsRank, _resultsTotal, _resultsMarks;
         Image _boostFill;
         CanvasGroup _exitGroup;
         TextMeshProUGUI _exitPrompt;
@@ -383,16 +383,41 @@ namespace DuckMow
 
             // The summary band, the round's dark plate with the round's gold on it: where the
             // player finished, and what that ground is worth to the competition.
+            //
+            // ---- laid out in the same grammar as the four rows above it ----
+            //
+            // Both of its lines used to run the full width and both were LEFT aligned, so the plate
+            // held a three-letter word in 56 pt and one short line of 26, each hugging the left edge
+            // with two thirds of a full-width box empty beside it. The owner read it as exactly what
+            // it looked like: an unnecessary background box, bottom left.
+            //
+            // The fix is not to shrink the plate. Every row above it already says "who, on the left;
+            // the number, hard right" — that is this card's grammar, and the summary is a summary of
+            // those rows, so it should be read the same way. Placing goes left where the names are,
+            // the marks go right in the same column as the four shares, and the small type sits
+            // under each of them as its label. Nothing is narrower and nothing is empty.
             var summary = Frac("Summary", column, 0f, 0.235f, 1f, 0.365f);
             var summaryField = Field(summary, cardPanelDark, Color.white);
 
-            var rank = Frac("Rank", summaryField, 0f, 0.46f, 1f, 1f);
+            var rank = Frac("Rank", summaryField, 0f, 0.46f, 0.50f, 1f);
             _resultsRank = CardText(rank, "", 56f, TextAlignmentOptions.Left, Gold, 0.26f, false);
             _resultsRank.fontStyle = FontStyles.Bold;
 
-            var total = Frac("Total", summaryField, 0f, 0f, 1f, 0.42f);
-            _resultsTotal = CardText(total, "", 26f, TextAlignmentOptions.Left, Cream, 0.22f, false);
+            // The marks, in the shares' own column. This is the number the championship banks and
+            // until now the card did not print it at all — it printed a different number that was
+            // three times too small. See the note at the assignment.
+            var marks = Frac("Marks", summaryField, 0.50f, 0.46f, 1f, 1f);
+            _resultsMarks = CardText(marks, "", 44f, TextAlignmentOptions.Right, Gold, 0.26f, false);
+            _resultsMarks.fontStyle = FontStyles.Bold;
+
+            var total = Frac("Total", summaryField, 0f, 0f, 0.56f, 0.42f);
+            _resultsTotal = CardText(total, "", 24f, TextAlignmentOptions.Left, Cream, 0.22f, false);
             _resultsTotal.fontStyle = FontStyles.Bold;
+
+            // A fixed label rather than another readout: it names what the figure above it is, which
+            // is the one thing a bare "22 / 30" on a stage about square metres does not say.
+            var marksLabel = Frac("MarksLabel", summaryField, 0.56f, 0f, 1f, 0.42f);
+            CardText(marksLabel, "TO THE ROUND", 18f, TextAlignmentOptions.Right, Cream, 0.18f, false);
         }
 
         // ------------------------------------------------------------------ per frame
@@ -643,7 +668,37 @@ namespace DuckMow
                 string[] ordinal = { "1ST", "2ND", "3RD", "4TH" };
                 _resultsRank.text = me >= 0 && me < ordinal.Length ? ordinal[me] : "";
                 float mine = me >= 0 ? mask.Share(standings[me]) : 0f;
-                _resultsTotal.text = $"{mine * 100f:0.0}% OF THE ARENA  ·  {mine * 30f:0.0} TO THE ROUND";
+
+                // THE THIRD COPY OF THIS ARITHMETIC, and the last one standing.
+                //
+                // It read `mine * 30f`: the raw share multiplied by the round's denominator. That is
+                // not what a share is worth and has not been since Bloom Rush was marked on a band —
+                // BloomMarks normalises against an even four-way split, so a quarter of the arena is
+                // par and pays about eighteen, not seven and a half, and first place adds the
+                // winner's premium on top. In a captured frame the player held 23.9% and this card
+                // said "7.2 TO THE ROUND" while the championship banked 22.
+                //
+                // Being wrong is not the worst of it. This is the LAST number the player reads before
+                // the board, so it was the game contradicting itself across a single cut, three
+                // times over, in the direction that makes a good round look like a disaster.
+                //
+                // TurfDirector.ShowBoard had the same line and was fixed when the band was tuned;
+                // the note left there predicted exactly this — "that copy of the arithmetic is the
+                // one that once predicted 7 for a round that banked 15". There were three, not two.
+                // Grepping the tree for the pattern now finds no others: every remaining `Share(..)
+                // * 100` is a percentage for display, which is what it claims to be.
+                //
+                // Routed through the static rather than re-derived, with the PLACE filled in from the
+                // standings this card is already reading — an unplaced result is owed no premium, so
+                // leaving it at its default zero would under-report the winner by four.
+                float marks = Tournament.BloomMarks(new TurfHandoff.Result
+                {
+                    share = mine,
+                    place = me + 1
+                });
+                _resultsTotal.text = $"{mine * 100f:0.0}% OF THE ARENA";
+                if (_resultsMarks != null)
+                    _resultsMarks.text = $"{marks:0} / {Championship.RivalRoundMax}";
             }
 
             // The headline belongs to the overhead only. Once the bench has it, the card speaks.
