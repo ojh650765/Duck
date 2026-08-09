@@ -608,9 +608,13 @@ namespace DuckMow.EditorTools
             group.localRotation = Quaternion.Euler(0f, 0f, -1.6f);
 
             var card = DuckUIBuilder.Frac("Card", group, 0f, 0f, 1f, 1f);
-            DuckUIBuilder.AddImage(card, DuckUIBuilder.Spr("panel_card_256"), Color.white, Image.Type.Sliced);
+            var field = DuckUIBuilder.Plate(card, DuckUIBuilder.CardLight);
 
-            var mastheadRt = DuckUIBuilder.Frac("Masthead", card, 0.05f, 0.10f, 0.95f, 0.94f);
+            // The whole writable board, and preserveAspect below decides how much of it the arch
+            // actually uses. It was laid out to 0.10..0.94 of the card, which on a 265 px board is
+            // 26 px up from the bottom and 16 down from the top against a rule that sits at 32 and
+            // 26 — so the masthead's own keyline was crossing the board's.
+            var mastheadRt = DuckUIBuilder.Frac("Masthead", field, 0f, 0f, 1f, 1f);
             var masthead = TitleSprite();
             if (masthead != null)
             {
@@ -1343,10 +1347,14 @@ namespace DuckMow.EditorTools
             var card = DuckUIBuilder.Frac(name, root, x0, y0, x1, y1);
             group = card.gameObject.AddComponent<CanvasGroup>();
             group.alpha = 0f;
-            DuckUIBuilder.AddImage(card, DuckUIBuilder.Spr("panel_card_dark_256"), Color.white,
-                                   Image.Type.Sliced);
+            // The card's own painted margin, asked for rather than approximated. The fractions below
+            // are the old ones re-expressed against the writable field, so the layout is where it
+            // always was — except at the two edges where it was not: the heading's top sat 22 px
+            // down on a card whose rule is at 32, and the footer's baseline sat 25 up on one whose
+            // rule is at 38. Both were printing on the frame. See DuckMow.UI.CardArt.
+            var field = DuckUIBuilder.Plate(card, DuckUIBuilder.CardDark);
 
-            var title = DuckUIBuilder.Frac("Heading", card, 0.06f, 0.84f, 0.94f, 0.96f);
+            var title = DuckUIBuilder.Frac("Heading", field, 0.027f, 0.88f, 0.973f, 1f);
             var t = DuckUIBuilder.AddText(title, heading, 34f, TextAlignmentOptions.Center, Gold, 0.22f, false);
             t.fontStyle = FontStyles.Bold;
             t.characterSpacing = 8f;
@@ -1356,21 +1364,21 @@ namespace DuckMow.EditorTools
             // explains the heading instead of as a second heading.
             if (!string.IsNullOrEmpty(subheading))
             {
-                var subRt = DuckUIBuilder.Frac("Subheading", card, 0.06f, 0.792f, 0.94f, 0.836f);
+                var subRt = DuckUIBuilder.Frac("Subheading", field, 0.027f, 0.826f, 0.973f, 0.878f);
                 DuckUIBuilder.AddText(subRt, subheading, 21f, TextAlignmentOptions.Center,
                                       new Color(0.86f, 0.82f, 0.72f), 0.16f, false)
                     .fontStyle = FontStyles.Bold;
             }
 
-            var footer = DuckUIBuilder.Frac("Footer", card, 0.06f, 0.045f, 0.94f, 0.135f);
+            var footer = DuckUIBuilder.Frac("Footer", field, 0.027f, 0f, 0.973f, 0.078f);
             DuckUIBuilder.AddText(footer, footerText, 18f, TextAlignmentOptions.Center,
                                   new Color(0.80f, 0.76f, 0.66f), 0.18f, false).fontStyle = FontStyles.Bold;
 
             card.gameObject.SetActive(false);   // MainMenu switches it on when it is asked for
             // The body stops short of the subheading where there is one, so the two cannot sit on
             // top of each other. Every card without one keeps the height it always had.
-            float top = string.IsNullOrEmpty(subheading) ? 0.80f : 0.775f;
-            return DuckUIBuilder.Frac("Content", card, 0.07f, 0.16f, 0.93f, top);
+            float top = string.IsNullOrEmpty(subheading) ? 0.838f : 0.808f;
+            return DuckUIBuilder.Frac("Content", field, 0.037f, 0.105f, 0.963f, top);
         }
 
         // ------------------------------------------------------------------ audio

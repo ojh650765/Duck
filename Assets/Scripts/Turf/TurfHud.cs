@@ -198,9 +198,9 @@ namespace DuckMow
             _exitGroup.alpha = 0f;
             _exitGroup.interactable = _exitGroup.blocksRaycasts = false;
 
-            Plate(rt, cardPanelDark, Color.white);
+            var field = Field(rt, cardPanelDark, Color.white);
 
-            var inner = Frac("Text", rt, 0.05f, 0.16f, 0.95f, 0.84f);
+            var inner = Frac("Text", field, 0f, 0f, 1f, 1f);
             _exitPrompt = CardText(inner, "", 24f, TextAlignmentOptions.Center, Cream, 0.24f, false);
             _exitPrompt.fontStyle = FontStyles.Bold;
         }
@@ -337,8 +337,8 @@ namespace DuckMow
             //   rows    0.385 -> 0.885   (four bands)
             //   summary 0.235 -> 0.365
             var titlePlate = Frac("Title", column, 0f, 0.90f, 1f, 1.00f);
-            Plate(titlePlate, cardPanelDark, Color.white);
-            var title = Frac("Text", titlePlate, 0.04f, 0.10f, 0.96f, 0.90f);
+            var titleField = Field(titlePlate, cardPanelDark, Color.white);
+            var title = Frac("Text", titleField, 0f, 0f, 1f, 1f);
             CardText(title, "GROUND COVERED", 30f, TextAlignmentOptions.Left, Cream, 0.22f, false)
                 .fontStyle = FontStyles.Bold;
 
@@ -349,11 +349,17 @@ namespace DuckMow
             {
                 float top = rowTop - i * rowH;
                 var row = Frac($"Place{i}", column, 0f, top - rowH + 0.010f, 1f, top - 0.010f);
-                Plate(row, cardPanel, Color.white);
+                var rowField = Field(row, cardPanel, Color.white);
                 _row[i] = row;
 
                 // The livery, down the leading edge. Small, but it is the only thing on the card
                 // that says at a glance which of these rows is the machine you were driving.
+                //
+                // Measured against the ROW rather than its field, deliberately: opaque furniture may
+                // sit on the frame, text may not. A stripe pinned along the edge is meant to be on
+                // the edge, and the same goes for the place card below it — a card laid over the
+                // row's rule hides it and reads as layering, whereas a letter with a line through it
+                // reads as a defect. That distinction is the whole of this sweep.
                 var stripe = Frac("Livery", row, 0.012f, 0.10f, 0.038f, 0.90f);
                 _stripe[i] = Plate(stripe, null, Color.white);
 
@@ -363,14 +369,14 @@ namespace DuckMow
                 _place[i] = CardText(num, "", 40f, TextAlignmentOptions.Center, Ink, 0.10f, false);
                 _place[i].fontStyle = FontStyles.Bold;
 
-                var nm = Frac("Name", row, 0.215f, 0.54f, 0.66f, 0.94f);
+                var nm = Frac("Name", rowField, 0.195f, 0.52f, 0.66f, 1f);
                 _who[i] = CardText(nm, "", 22f, TextAlignmentOptions.Left, Nib, 0.10f, false);
                 _who[i].fontStyle = FontStyles.Bold;
 
-                var sp = Frac("Species", row, 0.215f, 0.08f, 0.66f, 0.52f);
+                var sp = Frac("Species", rowField, 0.195f, 0f, 0.66f, 0.50f);
                 _sub[i] = CardText(sp, "", 18f, TextAlignmentOptions.TopLeft, Ink, 0.06f);
 
-                var share = Frac("Share", row, 0.66f, 0.14f, 0.965f, 0.86f);
+                var share = Frac("Share", rowField, 0.66f, 0.05f, 1f, 0.95f);
                 _pct[i] = CardText(share, "", 40f, TextAlignmentOptions.Right, Ink, 0.10f, false);
                 _pct[i].fontStyle = FontStyles.Bold;
             }
@@ -378,13 +384,13 @@ namespace DuckMow
             // The summary band, the round's dark plate with the round's gold on it: where the
             // player finished, and what that ground is worth to the competition.
             var summary = Frac("Summary", column, 0f, 0.235f, 1f, 0.365f);
-            Plate(summary, cardPanelDark, Color.white);
+            var summaryField = Field(summary, cardPanelDark, Color.white);
 
-            var rank = Frac("Rank", summary, 0.04f, 0.44f, 0.96f, 0.94f);
+            var rank = Frac("Rank", summaryField, 0f, 0.46f, 1f, 1f);
             _resultsRank = CardText(rank, "", 56f, TextAlignmentOptions.Left, Gold, 0.26f, false);
             _resultsRank.fontStyle = FontStyles.Bold;
 
-            var total = Frac("Total", summary, 0.04f, 0.08f, 0.96f, 0.42f);
+            var total = Frac("Total", summaryField, 0f, 0f, 1f, 0.42f);
             _resultsTotal = CardText(total, "", 26f, TextAlignmentOptions.Left, Cream, 0.22f, false);
             _resultsTotal.fontStyle = FontStyles.Bold;
         }
@@ -680,6 +686,21 @@ namespace DuckMow
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.offsetMin = rt.offsetMax = Vector2.zero;
             return rt;
+        }
+
+        /// <summary>
+        /// One of the round's nine-sliced plates, and the part of it that may be printed on.
+        ///
+        /// The two are one call for the reason DuckUIBuilder.Plate gives at length: these plates are
+        /// paintings with a decorative rule inset from the edge, the inset is a fixed number of
+        /// pixels, and every layout in this game that tried to approximate it with a fraction got it
+        /// wrong. This stage's title plate used 0.04 of a 96 px card — four pixels against a rule at
+        /// twenty-six. See DuckMow.UI.CardArt.
+        /// </summary>
+        static RectTransform Field(RectTransform rt, Sprite sprite, Color color)
+        {
+            Plate(rt, sprite, color);
+            return DuckMow.UI.CardArt.Inside("Field", rt, sprite);
         }
 
         /// <summary>One of the round's nine-sliced plates. A flat box if the sprite is missing.</summary>
