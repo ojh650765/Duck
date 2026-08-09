@@ -804,12 +804,26 @@ namespace DuckMow
             // subject and what the round is worth, and every seam after this one carries the round
             // count on its kicker, by which time it means something.
             //
-            // Curtain handles an empty headline as a first-class case: _signWanted goes false, the
-            // sign group stays at zero alpha and the plate is never positioned or drawn. See
-            // Curtain.Close and Curtain.Apply.
-            yield return StageSeam.Begin(MatchState.Seam.MenuToRound);
-
-            MatchState.CurtainPending = true;
+            // NO CURTAIN ON THIS SEAM. Press play and the opening starts, immediately.
+            //
+            // This used to run a full grass-rise close, hold the covered frame, load, and raise
+            // again on the other side — roughly a second and a half of wipe in front of a cutscene
+            // that is itself an opening. Two openings back to back, and the first one is the one
+            // nobody asked for. Every other seam in the game earns its curtain by hiding a load
+            // between two things the player was already doing; this one sits between a button press
+            // and the start of the story, where the wait IS the transition.
+            //
+            // Removing it does not reintroduce the flash the curtain exists to prevent, and that is
+            // worth being explicit about rather than lucky about. Two things cover the boundary:
+            // LoadSceneAsync keeps the front page rendering until the swap, so there is no black
+            // frame on this side; and ComicSequence.Begin sets its fade to fully opaque and applies
+            // it in the same frame it starts — Start and Update both run before that frame renders —
+            // so the story's own page is up on the new scene's very first frame. The worst case is a
+            // hard cut from the front page to a covered page, which is what "no transition" means.
+            //
+            // CurtainPending stays unset for the same reason: it tells the arriving scene to RAISE a
+            // curtain, and there is now nothing down for it to raise.
+            yield return null;
             SceneManager.LoadSceneAsync(playScene);
         }
 
