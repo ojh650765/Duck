@@ -777,6 +777,27 @@ namespace DuckMow
 
             if (!atBoard && outroPlacing != null) outroPlacing.text = "";
 
+            // The prompt takes the whole plate when there is nothing above it.
+            //
+            // This card is built as two bands — the placing on top, the prompt under it — and at the
+            // BOARD that is right, because both lines are there. At the REVEAL the placing is
+            // deliberately blanked by the line above, so the prompt was sitting in the lower 47% of a
+            // plate whose upper half was empty: one instruction, pinned low, in a box centred on
+            // nothing. That reads as a mistake even though every number in it is what was asked for.
+            //
+            // Done here rather than by moving the band in the builder, because the builder cannot
+            // know: the split is correct for one of the two states this card appears in, and which
+            // state it is in is a runtime fact. Anchors rather than a position so the band still
+            // stretches with the plate at any aspect.
+            if (outroPrompt != null)
+            {
+                bool alone = outroPlacing == null || string.IsNullOrEmpty(outroPlacing.text);
+                var rt = outroPrompt.rectTransform;
+                float top = alone ? 1f : 0.47f;
+                if (!Mathf.Approximately(rt.anchorMax.y, top))
+                    rt.anchorMax = new Vector2(rt.anchorMax.x, top);
+            }
+
             float want = (settled || pressOn) ? 1f : 0f;
             outroGroup.alpha = Mathf.MoveTowards(outroGroup.alpha, want, dt * 2.2f);
         }
