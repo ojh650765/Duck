@@ -240,15 +240,16 @@ namespace DuckMow
             if (r == null) return;
             if (r.place != null) r.place.text = Place(place);
             if (r.name != null) r.name.text = s.isPlayer ? $"{s.name}  (YOU)" : s.name;
-            // The SUM, shown as a sum. The board's job at the end of stage two is to say what the
-            // rally was worth on top of what the lawn was worth, and printing the picture alone hid
-            // exactly the number the player has just spent seventy-eight seconds earning.
-            // The number is COUNTED, not stated.
+            // The number is COUNTED, not stated, whenever there is anything to count TO.
             //
-            // "24 +6 = 30" is a sentence about a result. A number rolling up from 24 to 30, swelling
-            // on each tick and settling back, is the result happening — and this is the one beat in
-            // stage two whose entire job is to pay out. The row starts on the picture's own mark and
-            // climbs by the rally's; see Tick.
+            // A row that climbs — swelling on each tick and settling back — is a result happening
+            // rather than a sentence about one. It was written for the beat where the rally's marks
+            // were added onto the picture's, back when a rally was a beat inside a mowing round; a
+            // round is a stage now and every row arrives on one number, so countFrom and countTo
+            // agree and the climb is a no-op. The mechanism is left standing because the ROW that
+            // still uses it is Bloom Rush's own board, which lands on a cumulative championship
+            // total, and because a total the player watches assemble is worth more than one that is
+            // simply printed the day anything else here has two numbers again.
             r.rally = s.rallyMarked;
             r.countFrom = s.total;
             r.countTo = s.rallyMarked ? s.RoundScore : s.total;

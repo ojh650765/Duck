@@ -156,20 +156,13 @@ namespace DuckMow
                     break;
             }
 
-            // What the duck did AFTER the picture: the rally's gardens, Bloom Rush's share of the
-            // arena. Folded in here so the later stages are marked by the same three chairs, on the
-            // same curve, as the mowing — which is the difference between a stage that was judged
-            // and a stage that announced its own result.
-            //
-            // Blended rather than added, so a round that plays every stage still tops out at ten
-            // and cannot outscore the scale. Weighted a little under a third: enough that throwing
-            // the arena away is visible on the card, not so much that the picture stops mattering.
-            //
-            // Zero when no stage was played, and lerp by zero is the identity — which is why every
-            // round that is only a picture scores exactly as it did before this existed.
-            const float stageWeight = 0.3f;
-            if (s.stages > 0f) raw = Mathf.Lerp(raw, s.stages, stageWeight);
-
+            // There was a blend here that folded the round's LATER STAGES into every chair's mark —
+            // the rally's gardens and Bloom Rush's share of the arena, at a weight a little under a
+            // third — so that the arenas were marked by the same three animals, on the same curve, as
+            // the mowing. The argument was good and it is no longer available: a round IS a stage
+            // now, so there is no round in which a picture and an arena are both scored. The bench
+            // marks the picture; a match round is closed by Tournament.CloseMatchRound and never
+            // reaches this function at all.
             raw = Mathf.Clamp01(raw);
             float curved = Mathf.Pow(raw, Mathf.Max(severity, 0.05f));
             return Mathf.Clamp(Mathf.Round(Mathf.Lerp(floor, ceiling, curved)), 0f, 10f);

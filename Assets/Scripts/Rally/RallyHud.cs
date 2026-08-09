@@ -382,6 +382,22 @@ namespace DuckMow
         int _beat = -1;
 
         /// <summary>
+        /// Where the result card's colours and the crowd's reaction change, on the round's own scale
+        /// of thirty.
+        ///
+        /// Derived rather than typed. These were 6 and 0 on the bench's old -6..+10 award, and the
+        /// two figures are carried across to the same points on the new scale so the card reacts to
+        /// exactly the rallies it always reacted to — GoodMark is what the old +6 converts to, and
+        /// ParMark is what a break-even nought converts to.
+        /// </summary>
+        static readonly int GoodMark =
+            Mathf.RoundToInt(Mathf.InverseLerp(Tournament.AwardFloor, Tournament.AwardCeiling, 6f)
+                             * Championship.RivalRoundMax);
+        static readonly int ParMark =
+            Mathf.RoundToInt(Mathf.InverseLerp(Tournament.AwardFloor, Tournament.AwardCeiling, 0f)
+                             * Championship.RivalRoundMax);
+
+        /// <summary>
         /// The result, delivered in beats rather than printed.
         ///
         /// It used to appear complete and static — a placing and one line reading "87% INTACT
@@ -433,14 +449,22 @@ namespace DuckMow
             _wantIntact = me != null ? Mathf.RoundToInt(me.Integrity * 100f) : 0;
             _wantParried = me != null ? me.Parries : 0;
             _wantKo = me != null ? me.Knockouts : 0;
+            // THE ROUND'S MARKS, not the bench's award.
+            //
+            // This printed "+7" — RallyAwardForPlace, on its own -6..+10 scale — back when the rally
+            // was a beat hung off a mowing round and that award was added to the picture's thirty. A
+            // rally is a whole ROUND now and is marked out of thirty like every other round, so the
+            // card was about to hand the player a number that the board behind the bench would then
+            // contradict thirty seconds later. Same curve, converted by the same static the
+            // championship banks through — see Tournament.RallyMarks.
             _wantAward = me != null
-                ? Tournament.RallyAwardForPlace(new RallyHandoff.Result
+                ? Mathf.RoundToInt(Tournament.RallyMarks(new RallyHandoff.Result
                 {
                     integrity = me.Integrity,
                     knockouts = me.Knockouts,
                     landed = me.Landed,
                     perfects = me.Perfects
-                }, place, Mathf.Max(order.Count, 1))
+                }, place, Mathf.Max(order.Count, 1)))
                 : 0;
 
             _shownIntact = _shownParried = _shownKo = _shownAward = 0;
@@ -478,7 +502,9 @@ namespace DuckMow
                 {
                     // The payout: the loudest thing on the card, and the last.
                     AudioDirector.Instance?.PlayOne(AudioDirector.Instance.stamp, 0.8f);
-                    AudioDirector.Instance?.CrowdCheer(_wantAward >= 6 ? 0.9f : 0.45f, applaud: _wantAward >= 6);
+                    // GoodMark, not a bare 6 — the number this card carries is out of thirty now.
+                    AudioDirector.Instance?.CrowdCheer(_wantAward >= GoodMark ? 0.9f : 0.45f,
+                                                       applaud: _wantAward >= GoodMark);
                     if (resultAward != null) resultAward.transform.localScale = Vector3.one * 1.6f;
                     var me = director.Player;
                     if (me != null)
@@ -505,8 +531,12 @@ namespace DuckMow
 
             if (resultAward != null && beat >= 3)
             {
-                resultAward.text = _shownAward >= 0 ? $"+{_shownAward}" : _shownAward.ToString();
-                resultAward.color = _shownAward >= 6 ? gold : _shownAward >= 0 ? timerNormal : timerLow;
+                // "21 / 30", the same shape the venue's board and the results card print. It read
+                // "+7" while the number was an award added onto a picture; there is no picture in
+                // this round to add it to, so the plus sign was claiming a sum that does not exist.
+                resultAward.text = $"{_shownAward} / {Championship.RivalRoundMax}";
+                resultAward.color = _shownAward >= GoodMark ? gold
+                                  : _shownAward >= ParMark ? timerNormal : timerLow;
                 resultAward.alpha = Mathf.MoveTowards(resultAward.alpha, 1f, dt * 5f);
                 resultAward.transform.localScale =
                     Vector3.Lerp(resultAward.transform.localScale, Vector3.one, dt * 7f);

@@ -18,32 +18,56 @@ namespace DuckMow
         /// of them state a denominator the number can exceed. A visible "+N" belongs BESIDE those, not
         /// silently inside them.
         /// </summary>
+        /// <summary>
+        /// This round's marks, out of 30.
+        ///
+        /// The name still says "total" and the denominator is still thirty, but WHAT is being marked
+        /// now depends on which round it is. A round is a STAGE — round one is the picture, round two
+        /// is the goose rally, round three is Bloom Rush — and every one of them is scored onto this
+        /// same thirty, by <see cref="CloseRound"/> for a lawn and by <see cref="CloseMatchRound"/>
+        /// for an arena. That is the whole reason the arenas were converted onto this scale rather
+        /// than carried in <see cref="defenceAward"/>: six places print this as "N / 30" and the
+        /// championship adds three of them up to a table out of ninety, and a round worth a third of
+        /// the others would have made the title a referendum on round one.
+        /// </summary>
         public float total;
         /// <summary>
-        /// The bench's verdict on the goose rally, roughly -6..+10.
+        /// The bench's verdict on the GREYBOX goose defence phase, roughly -6..+10.
         ///
-        /// No longer the player's alone. Every contestant defends a garden in the rally, so every
-        /// contestant carries a mark out of it — which is what makes redirecting a goose at HORACE an
-        /// act with a consequence rather than a way of tidying your own lawn. Counted by the
-        /// championship and by the round's placing; see <see cref="RoundScore"/>.
+        /// Only <see cref="GameDirector.defencePhaseEnabled"/> feeds this, and that phase is off by
+        /// default. It is NOT how the goose rally reaches the competition any more: the rally is a
+        /// round in its own right and is marked out of thirty like every other round — see
+        /// <see cref="RallyMarks"/>. Kept because the defence phase still exists and still awards,
+        /// and because a round score that can be added to is the honest shape for a bonus beat.
         /// </summary>
         public int defenceAward;
         /// <summary>
-        /// Whether this contestant has actually been marked on a rally.
+        /// True when this row's number is NOT out of thirty, so the board prints it bare.
         ///
-        /// Carried rather than inferred, because <see cref="defenceAward"/> being zero is a real
-        /// result — fourth place is worth exactly zero — and the scoreboard was reading "0" as
-        /// "no rally happened" and printing the picture alone. The contestant who came last was
-        /// the one contestant whose line did not show the sum, which is precisely backwards.
+        /// A display switch rather than a fact about the rally, which is what it used to be. The one
+        /// caller left is Bloom Rush's own board, which prints the CUMULATIVE championship — three
+        /// rounds do not fit in one round's denominator, and a board reading "71 / 30" is a board
+        /// nobody trusts again. See Scoreboard.Label.
         /// </summary>
         public bool rallyMarked;
-        /// <summary>The round score that actually decides anything: the picture plus the defence.</summary>
+        /// <summary>The round score that actually decides anything: the round's marks plus any
+        /// defence award on top of them.</summary>
         public float RoundScore => total + defenceAward;
-        public string rank;        // S..D, on the picture alone
+        public string rank;        // S..D, on this round's marks
         public bool isPlayer;
         public Vector2 plotCentre;
         public Color livery;
     }
+
+    /// <summary>
+    /// Which arena a MATCH round was played in. See <see cref="Tournament.CloseMatchRound"/>.
+    ///
+    /// Deliberately not <see cref="GameState"/>, which is where a round IS rather than what it was:
+    /// the director hands this over once the arena has already unloaded and its state has moved on,
+    /// so borrowing the enum that describes the live beat would mean passing a value that is by then
+    /// untrue. Two members, because there are two arenas.
+    /// </summary>
+    public enum MatchStage { Rally, Bloom }
 
     /// <summary>
     /// The championship: the player and every rival, running the same round at the same time on
@@ -66,8 +90,10 @@ namespace DuckMow
         public Color playerLivery = new Color(0.78f, 0.24f, 0.20f);
 
         [Header("Championship")]
-        [Tooltip("Rounds in a championship. Three is the shortest arc in which a bad round can " +
-                 "still be answered, and short enough that a browser session reaches the end of one.")]
+        [Tooltip("Rounds in a championship. Three, and it is no longer a free number: a round IS a " +
+                 "stage, so three rounds is Lawn Art, Goose Rally, Bloom Rush. Raising it adds " +
+                 "rounds of Lawn Art on the end and lowering it drops stages off it — see " +
+                 "GameDirector.rallyOnRound and bloomOnRound, which name which round each arena is.")]
         public int roundsPerChampionship = 3;
 
         /// <summary>
@@ -214,9 +240,14 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Klaxon. Everyone downs tools, every plot is marked, and the board is built.
-        /// The player's score arrives already computed by their own bench, so the two paths meet
-        /// here and nowhere else.
+        /// Klaxon for a LAWN round. Everyone downs tools, every plot is marked, and the board is
+        /// built. The player's score arrives already computed by their own bench, so the two paths
+        /// meet here and nowhere else.
+        ///
+        /// Only round one takes this route now. A round is a stage, and the other two stages are
+        /// matches with no lawn in them at all — see <see cref="CloseMatchRound"/>, which is the
+        /// sibling that closes those. Calling this one for a match round would re-read three rivals'
+        /// finished pictures and bank round one's artwork a second time.
         /// </summary>
         /// <param name="defenceAward">
         /// What the bench made of the goose defence, added straight onto the player's round score.
@@ -260,86 +291,208 @@ namespace DuckMow
                 });
             }
 
-            // Highest total wins; ties break toward the tidier outline, then alphabetically, so the
-            // order is stable and never depends on which contestant happened to be listed first.
+            RankStandings();
+        }
+
+        /// <summary>
+        /// Klaxon for a MATCH round: the goose rally, or Bloom Rush, played as a round in its own
+        /// right rather than as a beat inside somebody else's.
+        ///
+        /// ---- why this is a separate verb from <see cref="CloseRound"/> ----
+        ///
+        /// A lawn round is closed by reading four lawns: the player's marks arrive from their own
+        /// bench and each rival's come off <c>RivalContestant.Total</c>. There is no lawn in a match
+        /// round. The rivals did not mow, were never begun and were never ticked, so asking them for
+        /// a total would hand back whatever their last PICTURE scored — and the championship would
+        /// bank round one's artwork three times over.
+        ///
+        /// So a match round is closed off the arena's own handoff instead, which is the only thing
+        /// that saw it. Every contestant, not just the player: all four defend a garden and all four
+        /// paint the plaza, and a round in which only the duck was marked would be a round nobody
+        /// could lose.
+        ///
+        /// Opens and closes in one call, deliberately. <see cref="BeginRound"/> exists because a lawn
+        /// round has seventy-five seconds of rivals to step; a match round has nothing here to step,
+        /// because the arena is a loaded scene running its own clock. The one thing that beginning
+        /// did which still matters is clearing <see cref="_banked"/>, so this does that itself and
+        /// stays safe to call twice — which it is, because both the arena's own board and the
+        /// director ask for it (see RallyVerdict.BeginBoard).
+        /// </summary>
+        public void CloseMatchRound(MatchStage stage, Vector2 playerPlot)
+        {
+            _running = false;
+            _banked = false;
+            _standings.Clear();
+
+            AddMatchStanding(stage, playerName, playerSpecies, playerLivery, true, playerPlot);
+            foreach (var r in rivals)
+            {
+                if (r == null) continue;
+                AddMatchStanding(stage, r.displayName, r.species, r.liveryColour, false, r.plotCentre);
+            }
+
+            RankStandings();
+        }
+
+        void AddMatchStanding(MatchStage stage, string name, string species, Color livery,
+                              bool isPlayer, Vector2 plot)
+        {
+            float marks = MatchMarks(stage, name);
+            _standings.Add(new Standing
+            {
+                name = name,
+                species = species,
+                total = marks,
+                defenceAward = 0,
+                // False, so the board prints "N / 30" — which is the truth about a match round now
+                // that it is marked on the same thirty a picture is. See Standing.rallyMarked.
+                rallyMarked = false,
+                rank = Scoring.Rank(marks),
+                isPlayer = isPlayer,
+                plotCentre = plot,
+                livery = livery
+            });
+        }
+
+        /// <summary>
+        /// Sort the round's standings and work out everybody's place.
+        ///
+        /// Highest round score wins; a tie breaks alphabetically, so the order is stable and never
+        /// depends on which contestant happened to be listed first.
+        ///
+        /// Competition ranking, so a tie reads 1st / 2nd / 2nd / 4th — and so the outro card and the
+        /// board standing next to it can never print two different numbers for the same contestant.
+        /// Taking the place from the row index would have done exactly that.
+        ///
+        /// One method rather than a copy at the end of every close, which is what it was: there were
+        /// three of them, and the day one of them gained a tiebreak the other two did not was the day
+        /// two boards started disagreeing about who came second.
+        /// </summary>
+        void RankStandings()
+        {
             _standings.Sort((a, b) =>
             {
-                // Ordered on the ROUND SCORE, so the defence counts toward where a contestant placed
-                // rather than only toward the championship total. A round saved by the horn should be a
-                // round you won.
+                // Ordered on the ROUND SCORE, so a defence award counts toward where a contestant
+                // placed rather than only toward the championship total.
                 int byTotal = b.RoundScore.CompareTo(a.RoundScore);
                 if (byTotal != 0) return byTotal;
                 return string.CompareOrdinal(a.name, b.name);
             });
 
-            // Competition ranking, so a tie reads 1st / 2nd / 2nd / 4th — and so the outro card and
-            // the board standing next to it can never print two different numbers for the same
-            // contestant. Taking the place from the row index would have done exactly that.
             var places = Scoring.CompetitionPlaces(_standings);
             PlayerPlace = 1;
             for (int i = 0; i < _standings.Count; i++)
                 if (_standings[i].isPlayer) { PlayerPlace = places[i]; break; }
         }
 
+        // ------------------------------------------------------------------ an arena, in marks
+        //
+        // The two functions below are the whole of "what was that match worth", and they exist as
+        // statics so that the ARENA'S OWN board and the championship cannot come up with two
+        // different answers about the same match. Both arenas print a number to the player before
+        // the round is banked; both now print this one.
+
         /// <summary>
-        /// Fold the rally's four gardens into the round that has just closed.
+        /// What a garden was worth, as marks out of thirty.
         ///
-        /// Called after <see cref="CloseRound"/> rather than inside it, because the picture and the
-        /// rally are marked by different things and the order is load-bearing: the pictures are what
-        /// they are the moment the klaxon sounds, and the gardens are not settled until the horn at
-        /// the far end of the arena. Closing the round on the artwork and then applying the gardens
-        /// keeps each number answerable to the beat that produced it.
+        /// Built on top of <see cref="RallyAwardForPlace"/> rather than on integrity alone, because
+        /// that curve is where the mode's actual scoring lives — break-even at 60 percent intact,
+        /// knockouts and geese landed in somebody else's flowers paying on top, and the bench's
+        /// picked winner floored at the best mark so the ceremony and the table cannot announce two
+        /// different champions. Throwing that away for a bare percentage would have deleted the
+        /// offensive half of the mode from the championship.
         ///
-        /// Everybody is marked, not just the player — see <see cref="Standing.defenceAward"/>.
+        /// What changes is the UNIT, not the curve: the award's own -6..+10 clamp is re-based onto
+        /// the thirty every other round is marked on. A flattened garden in last scores nothing, a
+        /// picked winner scores the round, and an average rally lands near the middle — which is
+        /// exactly where an average picture lands too.
+        ///
+        /// ---- one consequence worth stating rather than discovering ----
+        ///
+        /// <see cref="RallyAwardForPlace"/> FLOORS the winner at the ceiling, on the argument that a
+        /// bench which picks a winner must pay them the most. Converted, that means winning the
+        /// rally is always a perfect 30 and the ladder behind it is a fixed 22 / 17 / 11. That was a
+        /// bonus of at most ten points on top of a picture before and is a whole round now, so the
+        /// rally is the easiest round in the championship to score highly in. It is left exactly as
+        /// the mode's own designer tuned it — converting a unit is not a licence to retune a curve —
+        /// but if the championship ever reads as decided by round two, this is where it is decided.
         /// </summary>
-        public void ApplyRallyResults()
+        public static float RallyMarks(RallyHandoff.Result r, int place, int of)
+            => Mathf.Round(Mathf.Clamp01(Mathf.InverseLerp(AwardFloor, AwardCeiling,
+                                                           RallyAwardForPlace(r, place, of)))
+                           * Championship.RivalRoundMax);
+
+        /// <summary>
+        /// What a share of the plaza was worth, as marks out of thirty.
+        ///
+        /// Normalised against an EVEN FOUR-WAY SPLIT rather than against the whole arena: a quarter
+        /// is par and scores half the round, and taking half the ground is a rout that saturates.
+        /// Straight <c>share * 30</c> would have made a perfectly respectable four-way scrap score
+        /// seven marks out of thirty and every Bloom Rush round a disaster on the table.
+        ///
+        /// This arithmetic is not new — it is the line GameDirector.BankStageResult used while the
+        /// arenas were beats inside a lawn round, moved here so the stage's own board and the
+        /// championship read it from one place.
+        /// </summary>
+        public static float BloomMarks(TurfHandoff.Result r)
+            => Mathf.Round(Mathf.Clamp01(Mathf.InverseLerp(0f, 0.5f, r.share))
+                           * Championship.RivalRoundMax);
+
+        /// <summary>
+        /// One contestant's marks for a match round, looked up by name in the arena's handoff.
+        ///
+        /// Zero when the arena never posted anything — a scene that failed to load, a match aborted
+        /// before the horn. That branch is load bearing for the rally and not merely defensive:
+        /// <see cref="RallyHandoff.Of"/> answers an unknown name with an UNTOUCHED garden, which is
+        /// the right default for a lookup and completely the wrong one for a score. Without the
+        /// guard, a rally that never happened would award all four contestants a perfect round.
+        /// </summary>
+        static float MatchMarks(MatchStage stage, string contestant)
         {
-            if (!RallyHandoff.ResultsReady || _standings.Count == 0) return;
+            if (stage == MatchStage.Bloom)
+                return TurfHandoff.Results.Length == 0
+                    ? 0f : BloomMarks(TurfHandoff.Of(contestant));
+
+            if (RallyHandoff.Results.Length == 0) return 0f;
 
             // Placed first, then marked. The bench's pick has to be the best-paid result — see
             // RallyAwardForPlace.
             var ranked = RallyHandoff.Ranked();
-            for (int i = 0; i < _standings.Count; i++)
-            {
-                var s = _standings[i];
-                var r = RallyHandoff.Of(s.name);
-                int place = 1;
-                for (int p = 0; p < ranked.Length; p++)
-                    if (ranked[p].contestant == s.name) { place = p + 1; break; }
-                s.defenceAward = RallyAwardForPlace(r, place, Mathf.Max(ranked.Length, 1));
-                s.rallyMarked = true;
-                _standings[i] = s;
-            }
-
-            _standings.Sort((a, b) =>
-            {
-                int byTotal = b.RoundScore.CompareTo(a.RoundScore);
-                if (byTotal != 0) return byTotal;
-                return string.CompareOrdinal(a.name, b.name);
-            });
-
-            var places = Scoring.CompetitionPlaces(_standings);
-            PlayerPlace = 1;
-            for (int i = 0; i < _standings.Count; i++)
-                if (_standings[i].isPlayer) { PlayerPlace = places[i]; break; }
+            int place = 1;
+            for (int p = 0; p < ranked.Length; p++)
+                if (ranked[p].contestant == contestant) { place = p + 1; break; }
+            return RallyMarks(RallyHandoff.Of(contestant), place, Mathf.Max(ranked.Length, 1));
         }
 
         /// <summary>
-        /// What a garden is worth.
+        /// The ends of the award scale. Named because <see cref="RallyMarks"/> re-bases the award
+        /// onto the round's thirty and has to know where the scale starts and stops — a second copy
+        /// of "-6" and "10" in that expression would silently mis-scale the whole mode the first
+        /// time either bound was retuned here.
+        /// </summary>
+        public const int AwardFloor = -6;
+        public const int AwardCeiling = 10;
+
+        /// <summary>
+        /// What a garden is worth, on the rally's own scale.
         ///
         /// Built around a break-even at 60 percent intact, so an average rally is worth about
         /// nothing and the mark is genuinely earned in both directions. The offensive half is
         /// deliberately the smaller one: knockouts and geese landed in somebody else's flowers are a
         /// bonus on top of defending, not a way to win the round while your own beds are flattened.
         ///
-        /// Bounded well inside the picture's thirty marks. The rally is a third of a round, and a
-        /// third of a round must not be able to overturn one that was mown properly.
+        /// This is a MERIT CURVE and not a round score. It was both, back when the rally was a beat
+        /// spliced into a mowing round and the bounds were chosen to sit "well inside the picture's
+        /// thirty marks" so a third of a round could not overturn one that was mown properly. The
+        /// rally is a whole round now, so that argument no longer applies to it — but the curve's
+        /// SHAPE was always the good part, and it is kept exactly as it was and converted to marks
+        /// by <see cref="RallyMarks"/>.
         /// </summary>
         public static int RallyAward(RallyHandoff.Result r)
         {
             float defence = (r.integrity - 0.6f) * 14f;
             float offence = r.knockouts * 1.2f + r.landed * 0.45f + r.perfects * 0.25f;
-            return Mathf.Clamp(Mathf.RoundToInt(defence + offence), -6, 10);
+            return Mathf.Clamp(Mathf.RoundToInt(defence + offence), AwardFloor, AwardCeiling);
         }
 
         /// <summary>
@@ -367,7 +520,7 @@ namespace DuckMow
             // The better of "what you earned" and "what your placing is worth", so a contestant who
             // was never attacked cannot out-score one who defended a siege — and a winner is never
             // punished for the flock having been quiet.
-            return Mathf.Clamp(Mathf.Max(earned, placed), -6, 10);
+            return Mathf.Clamp(Mathf.Max(earned, placed), AwardFloor, AwardCeiling);
         }
 
         /// <summary>Find the rival working a given plot, for the tour.</summary>

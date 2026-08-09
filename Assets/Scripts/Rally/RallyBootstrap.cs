@@ -45,10 +45,12 @@ namespace DuckMow
         /// <summary>
         /// What the prompt says when a round is waiting on the other side of this stage.
         ///
-        /// It does not name the destination. Goose Rally is spliced in at <c>rallyOnRound</c> and
-        /// what follows it is whatever the chain has left — the lawn, Bloom Rush, the reveal — so a
-        /// prompt that promised any one of them would be wrong on every running order but the one
-        /// it was written against, and wrong silently. "CARRY ON" is true of all of them.
+        /// It does not name the destination. Goose Rally IS round <c>rallyOnRound</c>, and what
+        /// follows a round is that round's board — but the running order is configurable, this
+        /// scene can also be reached from the front page with nothing at all behind it, and the
+        /// board's own headline is the curtain's job a second later. A prompt that named one of
+        /// those would be wrong on every arrangement but the one it was written against, and wrong
+        /// silently. "CARRY ON" is true of all of them.
         ///
         /// Bracketed key, two spaces, capitals: the shape every prompt in this game already has —
         /// see HUD's outro and verdict lines. Word for word the same as
@@ -202,7 +204,8 @@ namespace DuckMow
         ///
         /// The two cases are told apart by <see cref="FromRound"/> and by nothing else. It is set
         /// once in <see cref="Start"/> from <see cref="RallyHandoff.Active"/>, which is true only
-        /// when a round spliced this stage in and is sitting in <c>GameState.Rally</c> waiting on
+        /// when a championship is playing this stage as one of its rounds and is sitting in
+        /// <c>GameState.Rally</c> waiting on
         /// <see cref="Finished"/>. False means the player picked GOOSE RALLY off the front page's
         /// class list, or opened the scene and pressed play, and there is nothing on the other side
         /// of this arena at all.
@@ -212,7 +215,8 @@ namespace DuckMow
         /// The hold still runs, and the confirm ENDS it rather than replacing it. That distinction
         /// is the whole design of this branch. <see cref="RallyStage.Run"/> is parked on
         /// <c>while (!_boot.Finished)</c> and everything that has to happen on the way out — the
-        /// seam, the unload, waking Main's sleeping roots, banking the stage result — happens after
+        /// seam, the unload, waking Main's sleeping roots, closing the round on the standings —
+        /// happens after
         /// it and only after it. So the exit here is the same single line it always was, reached
         /// either by waiting or by asking; there is no second way out of this scene for the round
         /// to fall out of step with. Nothing before the hold is skippable: the bench below is

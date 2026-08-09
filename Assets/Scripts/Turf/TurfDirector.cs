@@ -741,8 +741,16 @@ namespace DuckMow
             foreach (int slot in _standings)
             {
                 var s = TurfArena.Get(slot);
-                // This stage's contribution, on the competition's own scale rather than as a share.
-                float stageMarks = mask.Share(slot) * 30f;
+                // This round's marks, on the competition's own scale rather than as a share.
+                //
+                // Through Tournament.BloomMarks rather than the bare `share * 30` this used to do,
+                // and the difference is not cosmetic. That expression is what the CHAMPIONSHIP banks
+                // for this round, and it normalises against an even four-way split — a quarter of
+                // the arena is par and scores half the round. Multiplying the raw share by thirty
+                // here made this board predict seven marks for a round that was about to be banked
+                // at fifteen, so the last thing the player read before the ending disagreed with the
+                // total the ending turns on.
+                float stageMarks = Tournament.BloomMarks(new TurfHandoff.Result { share = mask.Share(slot) });
                 float running = stageMarks;
 
                 if (table != null)

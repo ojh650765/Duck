@@ -294,9 +294,14 @@ namespace DuckMow
         /// Spelled out rather than given as "5 · 3 · 2 · 1", which is only legible to somebody who
         /// already knows what it means — and the one round this line appears on is the round where
         /// nobody does.
+        ///
+        /// It used to end "PLUS WHAT THE GEESE COST YOU", from when the rally was a beat hung off a
+        /// mowing round and its award was added onto the picture's thirty. The geese are a ROUND now
+        /// and are marked out of the same thirty as the lawn, so the line says the thing that is
+        /// actually true of all three rounds and is the whole of the rule.
         /// </summary>
         public static string PointsRule()
-            => $"EVERY MARK COUNTS — {RivalRoundMax} A ROUND, PLUS WHAT THE GEESE COST YOU";
+            => $"EVERY MARK COUNTS — {RivalRoundMax} A ROUND, LAWN OR ARENA";
 
         /// <summary>
         /// The exact placing that guarantees the title, worked out rather than guessed at.

@@ -336,11 +336,9 @@ namespace DuckMow
                     // What the continue key will do, written now and shown later.
                     //
                     // Written HERE rather than per frame because the answer cannot change while the
-                    // reveal is on screen — the two stage gates behind PressOnLabel are settled the
-                    // moment the round reaches this beat — and because the arena chain re-enters
-                    // this state on its way back, which re-asks the question with the stage it just
-                    // played now marked as played. Shown later: see UpdateOutro, which holds it back
-                    // until the reveal has stopped moving.
+                    // reveal is on screen — a reveal only ever happens in the Lawn Art round and the
+                    // bench is the only thing on the far side of one. Shown later: see UpdateOutro,
+                    // which holds it back until the reveal has stopped moving.
                     if (outroPrompt != null) outroPrompt.text = $"[SPACE]  {director.PressOnLabel}";
                     break;
 
@@ -370,22 +368,24 @@ namespace DuckMow
                     // The prompt itself is held back until the board has settled — see UpdateOutro.
                     if (outroGroup != null) outroGroup.alpha = 0f;
                     if (outroPrompt != null)
-                        // Nothing to offer on the last board: the ceremony takes over by itself, and
-                        // a prompt here would invite the player to skip their own prize-giving.
+                        // Nothing to offer on the last board: the ending page takes over by itself,
+                        // and a prompt here would invite the player to skip their own payoff.
                         //
-                        // "NEXT ROUND" rather than the "NEXT PICTURE" this used to say. Both are
-                        // true — the next round is a new subject on a fresh lawn — but the game has
-                        // just removed a key called NEW PICTURE that meant something quite
-                        // different, and leaving a prompt one word away from the thing that was cut
-                        // is how a player learns the wrong lesson. Rounds are also the unit every
-                        // curtain in the run has already been counting at them.
+                        // It NAMES THE NEXT STAGE. This said "NEXT ROUND", which was true and told
+                        // the player nothing, and before that "NEXT PICTURE", which was true only
+                        // while every round was a picture. A round is a stage now — press on from
+                        // round one's board and the goose rally is what opens — so the honest answer
+                        // to "what does this key do" is the name of the thing about to happen. See
+                        // GameDirector.NextRoundLabel, which is answered by the same running order
+                        // the board is about to walk into, so the prompt cannot promise a stage the
+                        // championship is not going to play.
                         //
                         // R does reset the running points — it has to, because they are already
                         // banked by the time this board is up — but saying so would put the points
                         // table back on screen, and "START OVER" is true either way.
                         outroPrompt.text = Champ != null && Champ.IsComplete
                             ? ""
-                            : "[SPACE]  NEXT ROUND     [R]  START OVER     [ESC]  PAUSE";
+                            : $"[SPACE]  {director.NextRoundLabel}     [R]  START OVER     [ESC]  PAUSE";
                     break;
 
                 case GameState.Ceremony:

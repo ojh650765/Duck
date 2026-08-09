@@ -111,24 +111,29 @@ namespace DuckMow.EditorTools
         }
 
         /// <summary>
-        /// From a round in progress, go to the arena now.
+        /// From a championship in progress, go to the arena now.
         ///
-        /// The rally is the LAST beat of the LAST round of a championship, which means reaching it
-        /// honestly costs three full rounds — and every pass over the handover, the sleeping scene,
-        /// the results crossing back and the reveal that follows has to start by getting there. That
-        /// is not a review process.
+        /// The rally is ROUND TWO of three, which means reaching it honestly costs a whole round of
+        /// mowing plus a judging, a venue tour and a board — and every pass over the handover, the
+        /// sleeping scene and the results crossing back has to start by sitting through all of it.
+        /// That is not a review process.
+        ///
+        /// A round is a stage now, so entering the state IS entering the round: the Rally case in
+        /// GameDirector.SetState starts the stage on the frame it lands. This used to force the
+        /// KLAXON instead and let the round's own chain carry on into the arena, which is a route
+        /// that no longer exists — the klaxon belongs to the picture and the picture is a different
+        /// round. It also used to write rallyEnabled and rallyOnRound on the live director, which
+        /// were serialized fields on a component in Main.unity and one absent-minded Apply away from
+        /// a championship with no round two in it, permanently, in a scene file.
         /// </summary>
         [MenuItem("Duck/Rally · Jump to the rally (from a round)", priority = 36)]
         public static void JumpToRally()
         {
             var d = Object.FindFirstObjectByType<GameDirector>();
             if (d == null) { Debug.LogWarning("[Rally] enter play mode on Main first."); return; }
-            d.rallyEnabled = true;
-            d.rallyOnRound = 0;          // any round, for review
 
-            d.DebugSetTimeRemaining(0.01f);
-            d.DebugForceState(GameState.Klaxon);
-            Debug.Log("[Rally] klaxon forced; the arena is next.");
+            d.DebugForceState(GameState.Rally);
+            Debug.Log("[Rally] the arena is opening.");
         }
 
         /// <summary>

@@ -35,8 +35,8 @@ namespace DuckMow
                  "the beat says nothing.")]
         public ContestantPortraits portraits;
         [Tooltip("The championship board behind the bench. The cards say WHO; the board says what " +
-                 "it was worth — the round's marks plus the rally's, which is the number that " +
-                 "actually decides the tournament. Null is tolerated and the beat ends at the cards.")]
+                 "it was worth — this round's marks out of thirty, which is the number that goes " +
+                 "into the tournament. Null is tolerated and the beat ends at the cards.")]
         public Scoreboard scoreboard;
 
         [Header("Timing")]
@@ -187,16 +187,22 @@ namespace DuckMow
             for (int i = 0; i < ranked.Length; i++)
             {
                 var r = ranked[i];
+                // The round's marks, out of thirty, off the same static the championship uses — so a
+                // standalone rally and one played as round two print the same number for the same
+                // garden. This used to carry the bare award in defenceAward with a zero total, which
+                // was right while the rally was a bonus hung off a picture and is wrong now that it
+                // is a round: the board would have shown "7" where every other round shows "21 / 30".
+                float marks = Tournament.RallyMarks(r, i + 1, ranked.Length);
                 list.Add(new Standing
                 {
                     name = r.contestant,
                     species = RallyArena.Get(r.slot).species,
                     isPlayer = r.isPlayer,
                     livery = RallyArena.Get(r.slot).livery,
-                    total = 0f,
-                    defenceAward = Tournament.RallyAwardForPlace(r, i + 1, ranked.Length),
-                    rallyMarked = true,
-                    rank = Scoring.Rank(0f),
+                    total = marks,
+                    defenceAward = 0,
+                    rallyMarked = false,
+                    rank = Scoring.Rank(marks),
                 });
             }
             return list;
@@ -207,7 +213,18 @@ namespace DuckMow
             if (scoreboard == null) return false;
 
             var t = Tournament.Instance;
-            if (t != null) t.ApplyRallyResults();
+            // Close the ROUND, not fold a beat into somebody else's. The rally is round two of the
+            // championship in its own right, so what the four gardens ended in IS this round's
+            // result — see Tournament.CloseMatchRound, which builds the standings from the handoff
+            // rather than from four lawns nobody mowed this round.
+            //
+            // Asked for here rather than only by the director, because THIS board is what the player
+            // reads first: it is on screen while the arena is still loaded, a good few seconds before
+            // Main wakes up behind it. A board filled from stale standings would show round one's
+            // pictures with the rally's placings sorted over the top of them. The call is idempotent
+            // and the director makes it again on the way out, which covers the routes that never
+            // reach this beat at all.
+            if (t != null) t.CloseMatchRound(MatchStage.Rally, Venue.Player.centre);
 
             System.Collections.Generic.IReadOnlyList<Standing> order =
                 t != null && t.Standings != null && t.Standings.Count > 0 ? t.Standings : StandingsFromRally();
