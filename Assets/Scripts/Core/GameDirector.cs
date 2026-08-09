@@ -856,33 +856,23 @@ namespace DuckMow
             yield return StageSeam.End(extraHold);
         }
 
-        /// <summary>
-        /// What the sign should say on the way OUT of an arena.
-        ///
-        /// Asked by RallyStage and TurfStage as they close the curtain behind themselves, and the
-        /// answer no longer needs a search: a round IS a stage, so the only thing on the far side of
-        /// an arena is that round's board.
-        ///
-        /// It used to walk the running order looking for the next stage this round was going to
-        /// play, and fall through to the lawn. Both of those destinations are gone — the arena is
-        /// not inside a round any more, so there is nothing left of the round to come back to, and
-        /// the picture is a different round entirely.
-        ///
-        /// ---- why the last line does not say THE PANEL ----
-        ///
-        /// A sign is on screen for about a second and it is the worst possible place to teach a
-        /// player a word. "THE PANEL" is the English village-fair term for a judging bench, and the
-        /// rest of this game's copy was written in that register — the green, the gate, the classes —
-        /// which is charming and completely opaque to somebody who has never been to a village fair.
-        /// The same rule applies here: the board names the destination in the plainest word the game
-        /// has for it, and the kicker names what is coming, which is the job a sign has and the only
-        /// job it can do in a second.
-        /// </summary>
-        public void NextSeamLabel(out string headline, out string kicker)
-        {
-            headline = "THE STANDINGS";
-            kicker = MatchState.FinalRound ? "THE LAST BOARD" : "THE BOARD IS NEXT";
-        }
+        // NextSeamLabel USED TO BE HERE, and it is deleted rather than left for later.
+        //
+        // It answered "what should the sign say on the way out of an arena", and its two callers
+        // were RallyStage.Leave and TurfStage.Leave. Both of them stopped showing a sign when the
+        // arena's exit became an instant cover over the scene unload instead of a signed wipe, which
+        // left this handing back "THE STANDINGS" and "THE BOARD IS NEXT" for a board that arrives
+        // with no sign in front of it.
+        //
+        // Dead copy that still reads as live is a fault this project has paid for more than once —
+        // DuckShoot's hint went stale twice and the curtain sheet captioned a ceremony that had been
+        // cut — and the cost is never the dead code, it is the next author believing it. Anybody
+        // reading this method would reasonably conclude the game still signs its way out of an
+        // arena, and would go looking for why theirs was not appearing.
+        //
+        // If a sign is ever wanted there again, the copy is one line and the argument for it is in
+        // this commit; what should not survive is a function whose only remaining effect is to
+        // describe a beat that does not happen.
 
         /// <summary>
         /// Same picture, fresh lawn. NO LONGER ON ANY ROUTE THE PLAYER CAN TAKE.

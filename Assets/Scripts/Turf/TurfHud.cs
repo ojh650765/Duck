@@ -71,7 +71,7 @@ namespace DuckMow
         readonly TextMeshProUGUI[] _pct = new TextMeshProUGUI[TurfArena.Count];
         readonly Image[] _stripe = new Image[TurfArena.Count];
         readonly RectTransform[] _row = new RectTransform[TurfArena.Count];
-        TextMeshProUGUI _resultsRank, _resultsTotal, _resultsMarks;
+        TextMeshProUGUI _resultsRank, _resultsMarks, _resultsChampionship;
         Image _boostFill;
         CanvasGroup _exitGroup;
         TextMeshProUGUI _exitPrompt;
@@ -381,43 +381,82 @@ namespace DuckMow
                 _pct[i].fontStyle = FontStyles.Bold;
             }
 
-            // The summary band, the round's dark plate with the round's gold on it: where the
-            // player finished, and what that ground is worth to the competition.
+            // The summary band: where the player finished, what the ground was worth, and what the
+            // championship now stands at.
             //
-            // ---- laid out in the same grammar as the four rows above it ----
+            // ---- WHY THIS BAND IS TALLER THAN IT LOOKS LIKE IT NEEDS TO BE ----
             //
-            // Both of its lines used to run the full width and both were LEFT aligned, so the plate
-            // held a three-letter word in 56 pt and one short line of 26, each hugging the left edge
-            // with two thirds of a full-width box empty beside it. The owner read it as exactly what
-            // it looked like: an unnecessary background box, bottom left.
+            // The last version of it lost a word. The captured frame shows "22 / 30" and two small
+            // lines and NO "1ST" at all, and the reason is a trap worth naming: CardText autosizes
+            // with fontSizeMin = max(9, requested * 0.4) and overflowMode = Truncate, so THE LARGER
+            // THE REQUESTED SIZE, THE HIGHER THE FLOOR IT CANNOT SHRINK BELOW. In a band 0.13 of the
+            // column tall the field is about sixty reference pixels; the top line got half of that,
+            // and 56 pt could not go below 22.4 pt, could not fit, and was truncated away entirely.
+            // The 44 pt beside it had a floor of 17.6 and survived. Asking for BIGGER type is what
+            // made the text vanish, which is the opposite of what anyone debugging it would try.
             //
-            // The fix is not to shrink the plate. Every row above it already says "who, on the left;
-            // the number, hard right" — that is this card's grammar, and the summary is a summary of
-            // those rows, so it should be read the same way. Placing goes left where the names are,
-            // the marks go right in the same column as the four shares, and the small type sits
-            // under each of them as its label. Nothing is narrower and nothing is empty.
-            var summary = Frac("Summary", column, 0f, 0.235f, 1f, 0.365f);
+            // So the box is the fix, not the font size — and the sizes below are chosen to FIT the
+            // boxes rather than to be shrunk into them, so autosizing does nothing at all and the
+            // floor is never in play. There is room: the column had nothing between 0 and 0.235.
+            //
+            // ---- and why it is three lines in the card's own grammar ----
+            //
+            // Two full-width lines, both left aligned, made a plate with a word in one corner and a
+            // phrase in the other, which the owner read as three unrelated pieces rather than one
+            // statement. Every row above says "the name on the left, the number hard right"; that is
+            // this card's grammar and a summary of those rows should be read the same way. So each
+            // line here is a complete phrase in exactly that shape.
+            //
+            // The share and the placing are NOT repeated in small type down here. They are already
+            // on the card — row one carries the scorecard "1" and "23.9%" — and printing them twice
+            // is what made the band feel like filler.
+            //
+            // The 0.02 gutters are layout, not padding: CardArt's field has already cleared the
+            // painted rule, and its own note says fractions inside that field mean what an author
+            // expects them to mean. This is a column gap and a hair of daylight, on top of the
+            // margin, so nothing sits against the frame on either side.
+            var summary = Frac("Summary", column, 0f, 0.115f, 1f, 0.375f);
             var summaryField = Field(summary, cardPanelDark, Color.white);
 
-            var rank = Frac("Rank", summaryField, 0f, 0.46f, 0.50f, 1f);
-            _resultsRank = CardText(rank, "", 56f, TextAlignmentOptions.Left, Gold, 0.26f, false);
+            // ---- the three bands, sized against the box rather than hoped into it ----
+            //
+            // Worked out rather than eyeballed, because eyeballing is what produced the missing word.
+            // The canvas is 1920x1080 reference, the column is 0.89 of its height, so this band is
+            // 0.26 x 0.89 x 1080 = 250 px; panel_card_dark_256 wants 26+6 bottom and 22+6 top and
+            // does not shrink its slice at that height, leaving a field of about 190. Each line
+            // below keeps its share of that minus CardText's own 6 px top and bottom, and each font
+            // is set so its line box (about 1.2 x the point size) fits inside what is left. Nothing
+            // here autosizes, so the floor that ate "1ST" is never consulted.
+            //
+            // The same arithmetic on the OLD band reproduces the captured frame exactly, which is
+            // how the diagnosis was confirmed: a 125 px plate, a 65 px field, a 35 px top line with
+            // 23 usable — and 56 pt could not go below 27 px, so it was truncated to nothing, while
+            // the 44 pt beside it squeezed into 21 and printed at its floor.
+            var rank = Frac("Rank", summaryField, 0.02f, 0.66f, 0.98f, 0.98f);
+            _resultsRank = CardText(rank, "", 40f, TextAlignmentOptions.Left, Gold, 0.26f, false);
             _resultsRank.fontStyle = FontStyles.Bold;
 
-            // The marks, in the shares' own column. This is the number the championship banks and
-            // until now the card did not print it at all — it printed a different number that was
-            // three times too small. See the note at the assignment.
-            var marks = Frac("Marks", summaryField, 0.50f, 0.46f, 1f, 1f);
-            _resultsMarks = CardText(marks, "", 44f, TextAlignmentOptions.Right, Gold, 0.26f, false);
+            var roundLabel = Frac("RoundLabel", summaryField, 0.02f, 0.35f, 0.55f, 0.63f);
+            CardText(roundLabel, "THIS ROUND", 24f, TextAlignmentOptions.Left, Cream, 0.20f, false)
+                .fontStyle = FontStyles.Bold;
+            var roundValue = Frac("RoundValue", summaryField, 0.55f, 0.35f, 0.98f, 0.63f);
+            _resultsMarks = CardText(roundValue, "", 32f, TextAlignmentOptions.Right, Cream, 0.22f, false);
             _resultsMarks.fontStyle = FontStyles.Bold;
 
-            var total = Frac("Total", summaryField, 0f, 0f, 0.56f, 0.42f);
-            _resultsTotal = CardText(total, "", 24f, TextAlignmentOptions.Left, Cream, 0.22f, false);
-            _resultsTotal.fontStyle = FontStyles.Bold;
-
-            // A fixed label rather than another readout: it names what the figure above it is, which
-            // is the one thing a bare "22 / 30" on a stage about square metres does not say.
-            var marksLabel = Frac("MarksLabel", summaryField, 0.56f, 0f, 1f, 0.42f);
-            CardText(marksLabel, "TO THE ROUND", 18f, TextAlignmentOptions.Right, Cream, 0.18f, false);
+            // The championship line, given the deepest band and the largest figure of the three.
+            // On this card that is the right emphasis: Bloom Rush is the final round, so what the
+            // player is waiting for is where the evening finished, not what the last stage was
+            // worth. Grouped as a row so the label and its figure are laid out against each other
+            // rather than against the field — see the assignment for what it prints when there is
+            // no championship behind the stage.
+            var champRow = Frac("Championship", summaryField, 0f, 0.02f, 1f, 0.32f);
+            var champLabel = Frac("Label", champRow, 0.02f, 0f, 0.55f, 1f);
+            CardText(champLabel, "CHAMPIONSHIP", 24f, TextAlignmentOptions.Left, Cream, 0.20f, false)
+                .fontStyle = FontStyles.Bold;
+            var champValue = Frac("Value", champRow, 0.55f, 0f, 0.98f, 1f);
+            _resultsChampionship = CardText(champValue, "", 36f, TextAlignmentOptions.Right, Gold,
+                                            0.26f, false);
+            _resultsChampionship.fontStyle = FontStyles.Bold;
         }
 
         // ------------------------------------------------------------------ per frame
@@ -691,14 +730,53 @@ namespace DuckMow
                 // Routed through the static rather than re-derived, with the PLACE filled in from the
                 // standings this card is already reading — an unplaced result is owed no premium, so
                 // leaving it at its default zero would under-report the winner by four.
+                // ONE CALL, TWO READINGS. The round's marks and the running total are the same
+                // fact stated twice, so they come off one BloomMarks and the total is that value
+                // added to what is already banked. A second evaluation could differ from this one
+                // by a rounding step and print a total that does not equal the line above it.
+                //
+                // This is the shape that was wrong here before, and the difference is worth stating
+                // rather than trusting: the version I deleted RE-DERIVED the round's marks with its
+                // own `share * 30`, which is why it once predicted 7 for a round that banked 22. A
+                // projection is safe when it asks for the marks and unsafe when it works them out.
                 float marks = Tournament.BloomMarks(new TurfHandoff.Result
                 {
                     share = mine,
                     place = me + 1
                 });
-                _resultsTotal.text = $"{mine * 100f:0.0}% OF THE ARENA";
                 if (_resultsMarks != null)
                     _resultsMarks.text = $"{marks:0} / {Championship.RivalRoundMax}";
+
+                // THE TOTAL, which on this card is the number that actually matters — Bloom Rush is
+                // the final round, so by now the round's own marks are the least interesting figure
+                // on screen and where the championship FINISHED is what the player is waiting for.
+                //
+                // Banked-so-far PLUS this round, because this round is not banked yet: the arena
+                // does not close its standings until it hands back, so Championship.Table at this
+                // moment holds rounds one and two only. That is the same fact TurfVerdict's own note
+                // relies on when it refuses to read Tournament.Standings here.
+                //
+                // The denominator comes off the championship's own round count rather than a typed
+                // 90, because roundsPerChampionship is a serialized field and a card that says
+                // "/ 90" under a four-round championship is a card that is lying quietly.
+                //
+                // A STAGE PLAYED ON ITS OWN has no championship to total, and the honest answer is
+                // a dash. Not a zero and not "0 / 90", which would tell a player who opened Bloom
+                // Rush from the front page that they had lost two rounds they never played. Not a
+                // hidden row either: the line keeps its place, because leaving a third of the plate
+                // blank is the exact fault this band was rebuilt to fix, and a dash in a labelled
+                // row reads as "not applicable" to everybody.
+                var champ = Tournament.Instance != null ? Tournament.Instance.Championship : null;
+                if (_resultsChampionship != null)
+                {
+                    if (champ == null) _resultsChampionship.text = "—";
+                    else
+                    {
+                        int total = champ.PlayerPoints + Mathf.RoundToInt(marks);
+                        int outOf = Mathf.Max(champ.RoundsTotal, 1) * Championship.RivalRoundMax;
+                        _resultsChampionship.text = $"{total} / {outOf}";
+                    }
+                }
             }
 
             // The headline belongs to the overhead only. Once the bench has it, the card speaks.
