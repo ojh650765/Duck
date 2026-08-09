@@ -351,7 +351,12 @@ namespace DuckMow.EditorTools
             // screenshot and therefore from every review.
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
             canvas.worldCamera = camera;
-            canvas.planeDistance = 0.9f;      // in front of the HUD's plane, not fighting it
+            // Just outside the lens's near clip, and NOT a round number chosen to sit in front of
+            // the HUD's plane, which is what it used to be. A camera-space canvas is sorted by the
+            // depth buffer, so at 0.9 m every blade of grass within 90 cm of the lens drew on top of
+            // the story. See ComicSequence.PlaneDistanceFor, which owns the number so that the value
+            // baked here and the floor the page applies to itself at runtime cannot disagree.
+            canvas.planeDistance = ComicSequence.PlaneDistanceFor(camera);
             canvas.sortingOrder = 200;        // the HUD sits at 100
 
             var scaler = canvasGO.GetComponent<CanvasScaler>();

@@ -136,18 +136,16 @@ namespace DuckMow
             SetGroup(resultsGroup, 0f);
             SetGroup(bannerGroup, 0f);
 
-            // NOT in the top-right CORNER on this HUD, and the offset is not a taste decision.
-            // BuildRoundHud parks the SHAPE CARD at 0.815..0.985 of the frame — the picture the
-            // player is being marked on, and the one thing on this screen they must always be able
-            // to see — so a plate in the corner would sit on top of it. The anchor is a FRACTION for
-            // the same reason the card's is: a pixel inset from the right edge stays put while a
-            // fraction-anchored card walks left as the window narrows, and a browser window is
-            // dragged to every aspect there is.
+            // The top-right corner, the same corner as the other two stages, with no position
+            // argument. This HUD used to pass one: the shape card was parked in that corner at
+            // 0.815..0.985 of the frame and the plate was pushed inboard to 0.795 to pass beside it,
+            // which left the only pressable thing on the screen floating in the middle of the top
+            // edge with an empty corner next to it. BuildRoundHud brings the card DOWN instead and
+            // clears PauseButton.ReservedTop below the top edge for the plate.
             //
             // This component IS on the canvas object — DuckUIBuilder does canvasGO.AddComponent<HUD>
             // — so there is no walk up a hierarchy to get wrong here.
-            _pause = DuckMow.UI.PauseButton.Attach(GetComponent<Canvas>(),
-                                                   new Vector2(0.795f, 1f), new Vector2(0f, -34f));
+            _pause = DuckMow.UI.PauseButton.Attach(GetComponent<Canvas>());
         }
 
         void Start()

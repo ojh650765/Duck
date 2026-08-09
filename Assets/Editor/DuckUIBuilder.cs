@@ -283,7 +283,34 @@ namespace DuckMow.EditorTools
             // look is doing real work: an inset panel that resembles a display invites the player
             // to keep checking it for position, whereas a pinned sheet reads as a reference and
             // gets glanced at once.
-            var cardFrame = Frac("ShapeCard", group, 0.815f, 0.70f, 0.985f, 0.985f);
+            //
+            // ---- and it comes DOWN the frame to leave the corner to the pause plate ----
+            //
+            // The card used to sit flush with the top edge at 0.985, and the plate that opens the
+            // pause board was pushed inboard to a 0.795 anchor to pass beside it. That cleared the
+            // collision and read badly: the only pressable thing on the screen floating in the
+            // middle of the top edge with an empty corner next to it, which is not where anybody
+            // looks for a pause button. The plate has the corner now and the card gives way, which
+            // is the right way round — the card is a reference glanced at once, the plate is the
+            // one control, and it is in the same corner on all three stages.
+            //
+            // The two are separated VERTICALLY, and that is what makes it safe at every aspect
+            // ratio. This canvas matches on HEIGHT, so a fraction of the height is a fixed number of
+            // reference pixels whatever shape the window is, while a fraction of the WIDTH walks as
+            // the window is dragged — the horizontal separation this replaces would have had to be
+            // re-argued for every window shape a browser can be dragged into.
+            //
+            // The clearance is read off PauseButton rather than copied, so resizing the plate moves
+            // the card rather than quietly overlapping it. Card and aerial row shift by the SAME
+            // amount, so the pair still reads as one pinned block, and the card keeps its exact
+            // size and its left edge.
+            const float RefHeight = 1080f;      // the CanvasScaler's reference height, above
+            const float PlateGap = 16f;         // reference pixels of daylight under the plate
+            const float WasTop = 0.985f;        // where the card used to be pinned
+            float cardTop = 1f - (DuckMow.UI.PauseButton.ReservedTop + PlateGap) / RefHeight;
+            float drop = WasTop - cardTop;
+
+            var cardFrame = Frac("ShapeCard", group, 0.815f, 0.70f - drop, 0.985f, cardTop);
             var cardImg = Frac("Card", cardFrame, 0.08f, 0.08f, 0.92f, 0.92f);
             var raw = cardImg.gameObject.AddComponent<RawImage>();
             raw.raycastTarget = false;
@@ -311,7 +338,10 @@ namespace DuckMow.EditorTools
             AddImage(cardFrame, Spr("minimap_frame_256"), Color.white, Image.Type.Sliced);
 
             // ---- aerial check token, under the card ----
-            var aerial = Frac("AerialCheck", group, 0.815f, 0.628f, 0.985f, 0.694f);
+            //
+            // Follows the card by the same drop, so the two stay one pinned block rather than the
+            // card moving and its footnote staying behind.
+            var aerial = Frac("AerialCheck", group, 0.815f, 0.628f - drop, 0.985f, 0.694f - drop);
             var token = Frac("Token", aerial, 0.02f, 0.05f, 0.30f, 0.95f);
             hud.aerialToken = AddImage(token, Spr("icon_coverage_128"), new Color(1f, 0.86f, 0.44f), Image.Type.Simple);
             var aerialHint = Frac("Hint", aerial, 0.34f, 0.05f, 1f, 0.95f);

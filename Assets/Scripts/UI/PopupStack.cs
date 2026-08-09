@@ -473,6 +473,76 @@ namespace DuckMow.UI
         }
 
         /// <summary>
+        /// Hand the clock back before the application ends, if this class is the reason it is
+        /// stopped.
+        ///
+        /// ---- the fault this closes, which shipped as far as a committed project setting ----
+        ///
+        /// This class is the ONLY thing in the runtime that ever writes Time.timeScale = 0; the
+        /// klaxon hit stop bottoms out at 0.05 and the defence phase at 0.02. It borrows the clock
+        /// on push and hands it back on pop, and that contract is complete for every popup that is
+        /// closed. A play session STOPPED while a popup is open never pops.
+        ///
+        /// In the editor that is not a lost frame, it is a lost setting: Time.timeScale is one of
+        /// the few globals whose play-mode value Unity WRITES BACK to ProjectSettings, so a session
+        /// killed with the pause board up leaves m_TimeScale: 0 in TimeManager.asset. It is a real
+        /// file on disk, it survives branch switches and domain reloads, it is easy to commit by
+        /// accident, and every later session starts with the world stopped — the story and the
+        /// curtain still play, because they run unscaled, while the game behind them never advances
+        /// a single state. This project lost days to that: a frozen world was diagnosed twice as a
+        /// broken controls-card trigger, because the trigger's watchdog reported truthfully that the
+        /// stage's camera never left its establishing shot, which it never did, because nothing was
+        /// entering any state at all.
+        ///
+        /// Application.quitting is the right hook and not a convenience: it is raised on the way out
+        /// of play mode in the editor as well as on a real quit, which is precisely the moment the
+        /// value is about to be written down. It cannot cover the editor being killed outright — a
+        /// crash or an End Task takes the process with it — which is what ReclaimAStoppedClock is
+        /// for on the way back in.
+        /// </summary>
+        static void HandBackTheClock()
+        {
+            if (!_timeHeld) return;
+            _timeHeld = false;
+            if (SimClock.Scripted) return;
+            // Never a zero, whatever was collected: this runs to make sure the value left behind is
+            // one a game can start on.
+            Time.timeScale = _timeScaleOnHold > 0f ? _timeScaleOnHold : 1f;
+        }
+
+        /// <summary>
+        /// Refuse to begin a session on a stopped clock.
+        ///
+        /// The second half of <see cref="HandBackTheClock"/>, and the half that repairs the damage
+        /// already done rather than preventing more: a TimeManager.asset that has ALREADY been
+        /// written with a zero — by a session that was killed rather than quit, by the editor's own
+        /// pause menu, by <c>DuckPlayTools.Pause</c>, or by a colleague's commit — starts every
+        /// session with the world stopped and nothing on screen to say so.
+        ///
+        /// Unconditional, because at this point nothing has borrowed anything: the stack is empty,
+        /// no popup exists, no scene has loaded, and a zero here cannot be anybody's deliberate
+        /// state. It is stated loudly rather than repaired in silence, because the setting is on
+        /// disk and will do this again on the next machine until somebody saves a 1 over it.
+        ///
+        /// Left alone under the capture harness, which owns the clock and steps the game by hand —
+        /// the same rule ApplyGates, StageLauncher and GooseDefence.UpdateClock all follow.
+        /// </summary>
+        static void ReclaimAStoppedClock()
+        {
+            if (SimClock.Scripted) return;
+            if (Time.timeScale > 0f) return;
+
+            Debug.LogWarning("[PopupStack] this session started with Time.timeScale at zero, before " +
+                             "anything had borrowed it. That is a stopped world: the opening story " +
+                             "and the curtain would still play, because they run unscaled, but no " +
+                             "round would ever start. It is almost certainly ProjectSettings/" +
+                             "TimeManager.asset carrying a zero left behind by a session that was " +
+                             "stopped with a popup open. Setting it to 1 — save the project settings " +
+                             "with the clock at 1 to stop this recurring.");
+            Time.timeScale = 1f;
+        }
+
+        /// <summary>
         /// The safety net under a popup that leaves its own scene.
         ///
         /// The polite path is PopAll before the load, and the pause menu's "back to the gate" button
@@ -493,7 +563,16 @@ namespace DuckMow.UI
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void ResetForSession()
         {
+            ReclaimAStoppedClock();
             Abandon();
+
+            // The clock is handed back when the application ends, and this is not tidiness — it is
+            // the one hole through which a transient pause became a permanent project setting. See
+            // HandBackTheClock. Unsubscribed before subscribing for the same reason the scene event
+            // below is: with domain reload off this is the same static delegate the last session
+            // left behind.
+            Application.quitting -= HandBackTheClock;
+            Application.quitting += HandBackTheClock;
 
             // <see cref="PauseFactory"/> is deliberately NOT cleared here, and that is the single
             // most important line in this method. The pause popup registers itself from a

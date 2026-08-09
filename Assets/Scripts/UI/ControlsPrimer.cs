@@ -419,6 +419,30 @@ namespace DuckMow.UI
         /// opening move is allowed to happen while the curtain is still down and an edge missed
         /// behind a covered frame would be an edge missed for good.
         ///
+        /// ---- this trigger was accused of a fault it did not have; do not rewrite it for that ----
+        ///
+        /// It was reported as never firing on the lawn, with the watchdog below giving up every
+        /// single run, and a replacement was written that deleted the whole reading and had the
+        /// three directors call StageHandingOver() instead. It was not the trigger. It was not even
+        /// this file. Time.timeScale was ZERO — a play
+        /// session had been stopped with a popup holding the clock, and Unity had written that zero
+        /// into ProjectSettings/TimeManager.asset, where it sat and started every later session with
+        /// the world stopped. The story and the curtain still ran, because both are unscaled;
+        /// GameDirector never left the venue preview, because Briefing, Preview and Countdown are
+        /// all timed on the scaled clock. So the rig really did stay in its establishing shot, and
+        /// the watchdog was telling the truth.
+        ///
+        /// The reading below was re-checked against all three directors afterwards and is correct in
+        /// all three: GameDirector enters Briefing, then VenuePreview, and reaches CameraMode.Chase
+        /// only on the countdown; RallyDirector snaps to Reveal and drops to Chase as the last beat
+        /// of its intro; TurfDirector holds Reveal and swoops to Chase before its 3-2-1. The lawn's
+        /// own numbers leave 4.6 s of slack — briefingDuration 3.4 plus previewDuration 4 puts Chase
+        /// 7.4 s after the budget starts, against the twelve below.
+        ///
+        /// PopupStack now refuses to begin a session on a stopped clock and hands the clock back on
+        /// the way out of play mode, so the fault cannot be laid again; and the watchdog prints the
+        /// clock, so the next person to read it is not offered a shortlist that excludes the answer.
+        ///
         /// Each gate below says NOT YET rather than NEVER, and the difference matters:
         ///
         ///   SimClock.Scripted    never, and this one really is never. The capture harness steps the
@@ -475,11 +499,7 @@ namespace DuckMow.UI
             _age += dt;
             if (_age > GiveUpAfter)
             {
-                Debug.LogWarning($"[Primer] gave up on '{_pending.name}' after {GiveUpAfter:0}s: no " +
-                                 "controls card was shown for it. Either the seam never lifted " +
-                                 $"(curtain busy: {Curtain.Live != null && Curtain.Live.Busy}, seam: " +
-                                 $"{StageSeam.InProgress}) or the stage's camera never left its " +
-                                 "establishing shot for the chase the way its director is supposed to.");
+                ReportGivingUp();
                 Disarm();
                 return;
             }
@@ -543,6 +563,48 @@ namespace DuckMow.UI
             Disarm();
 
             PopupStack.Push(new ControlsPrimer(scene, Shown.Opening));
+        }
+
+        /// <summary>
+        /// Say what this watcher was actually waiting for when it ran out of budget.
+        ///
+        /// ---- why this is worth twenty lines ----
+        ///
+        /// The message this replaces offered two candidate causes — a seam that never lifted, or a
+        /// camera that never left its establishing shot — and printed the seam's state to let the
+        /// reader choose between them. The real cause was NEITHER, and the shortlist is what made it
+        /// expensive: TIME.TIMESCALE WAS ZERO. Unity writes the play-mode value of that global back
+        /// into ProjectSettings/TimeManager.asset, so a session stopped with a popup open leaves a
+        /// zero on disk and every session after it starts with the world stopped. The story still
+        /// plays and the curtain still lifts, because both run unscaled; GameDirector never advances
+        /// out of the venue preview, because every beat it owns is timed on the scaled clock. So the
+        /// camera genuinely never reached the chase, and this watcher said so, accurately, and two
+        /// people in a row read it as an accusation against the trigger and rewrote the trigger.
+        ///
+        /// The budget is spent on the UNSCALED clock, which is right — a watchdog that stops when the
+        /// world stops cannot report a stopped world — and is exactly why this can fire while nothing
+        /// else is moving. That makes naming the clock the single most useful thing it can print.
+        ///
+        /// So this reports the OBSERVATIONS rather than a shortlist of conclusions: which of the two
+        /// latches is still down, what the rig's mode actually is, what state the director is in, and
+        /// whether the world is moving at all. A watchdog that cannot say what it was waiting for
+        /// makes its own failure harder to fix than silence would.
+        /// </summary>
+        static void ReportGivingUp()
+        {
+            string mode = _rig == null ? "no rig found" : _rig.Mode.ToString();
+            var director = GameDirector.Instance;
+            string state = director == null ? "no director" : director.State.ToString();
+            bool curtain = Curtain.Live != null && Curtain.Live.Busy;
+
+            Debug.LogWarning(
+                $"[Primer] gave up on '{_pending.name}' after {GiveUpAfter:0}s of waiting: no " +
+                $"controls card was shown for it. wheel held: {_sawHeld}, establishing shot seen: " +
+                $"{_sawEstablishing}, hand-over seen: {_handover}, camera: {mode}, director: {state}, " +
+                $"curtain busy: {curtain}, seam: {StageSeam.InProgress}, timeScale: {Time.timeScale:0.###}. " +
+                "A timeScale of zero is the answer whenever it appears here and nothing else has " +
+                "moved: this budget runs unscaled while the round does not, so the stage really did " +
+                "stay in its establishing shot — because the whole world did. See PopupStack.");
         }
 
         // ==================================================================================

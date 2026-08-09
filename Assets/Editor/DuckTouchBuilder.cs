@@ -73,7 +73,7 @@ namespace DuckMow.EditorTools
             // whether it is in the way of the game.
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
             canvas.worldCamera = cam;
-            canvas.planeDistance = 0.95f;   // nearer than the HUD's 1.0, behind the cutscene's 0.9
+            canvas.planeDistance = 0.95f;   // nearer than the HUD's 1.0, behind the cutscene's page
             canvas.sortingOrder = 150;      // HUD is 100, the opening comic is 200
 
             var scaler = go.GetComponent<CanvasScaler>();
