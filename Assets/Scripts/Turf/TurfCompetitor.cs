@@ -44,12 +44,16 @@ namespace DuckMow
         public float minPaintSpeed = 0.5f;
 
         [Header("Reward for stealing")]
-        [Tooltip("Boost fuel paid per square metre taken off an opponent. Claiming empty ground " +
-                 "pays nothing — that asymmetry is the mode's whole risk curve.")]
-        public float boostPerStolenMetre = 0.010f;
-        [Tooltip("Boost fuel paid per square metre of empty ground. Small, but not nothing, or the " +
-                 "opening thirty seconds have no economy at all.")]
-        public float boostPerNeutralMetre = 0.0016f;
+        [Tooltip("Boost fuel per SECOND for a roller whose whole swath is being taken off an " +
+                 "opponent, at full speed. Living in somebody else's garden is still what fuels " +
+                 "you; this is the most it can ever pay.\n\n" +
+                 "MUST STAY BELOW MowerController.boostDrainPerSecond (0.42). That comparison is " +
+                 "the whole of 'boost cannot pay for itself', and Awake shouts if it stops holding.")]
+        public float boostPerStolenSecond = 0.30f;
+        [Tooltip("Boost fuel per second for a roller claiming entirely empty ground, at full " +
+                 "speed. Small, but not nothing, or the opening thirty seconds have no economy " +
+                 "at all — the asymmetry with the rate above is the mode's whole risk curve.")]
+        public float boostPerNeutralSecond = 0.05f;
 
         [Header("Collisions")]
         [Tooltip("How hard a mower-to-mower shunt kicks this machine, 0..1, through MowerController.Bonk.")]
@@ -133,6 +137,21 @@ namespace DuckMow
             if (mower == null) mower = GetComponentInChildren<MowerController>();
             if (mower != null) _rb = mower.GetComponent<Rigidbody>();
             if (brain != null && mower != null) mower.inputSource = brain;
+
+            // THE ONE INVARIANT THE FUEL ECONOMY HAS, said out loud instead of assumed.
+            //
+            // See BoostFuelEarned: the most a swath can ever pay is boostPerStolenSecond per second,
+            // so boost pays for itself the moment that reaches the drain and the mode gets an
+            // infinite booster again. It had one, for exactly as long as nobody did this subtraction.
+            //
+            // A log rather than a clamp, deliberately. Silently correcting a designer's number means
+            // they tune the field, watch nothing change, and conclude the economy is not wired up.
+            if (mower != null && boostPerStolenSecond >= mower.boostDrainPerSecond)
+                Debug.LogError(
+                    $"[Bloom] {Name}: boostPerStolenSecond {boostPerStolenSecond:0.###} is not below " +
+                    $"the mower's boostDrainPerSecond {mower.boostDrainPerSecond:0.###}. Boosting " +
+                    "through an opponent's ground now earns more fuel than it spends, which is an " +
+                    "infinite booster. Lower the reward or raise the drain.", this);
         }
 
         public void ResetForMatch()
@@ -216,11 +235,12 @@ namespace DuckMow
             MetresClaimed += result.neutral;
             OnClaim?.Invoke(result.Total, roller);
 
-            // Boost is paid on the ground, not on the driving. A gardener who spends the match on
-            // empty outfield ends it with an empty tank; one who has been living in somebody else's
-            // garden has been boosting the whole time. The economy IS the strategy advice.
-            mower.AddBoostFuel(result.neutral * boostPerNeutralMetre
-                             + result.Stolen * boostPerStolenMetre);
+            // Boost is paid on WHAT KIND OF GROUND this is, not on the driving. A gardener who spends
+            // the match on empty outfield ends it with an empty tank; one who has been living in
+            // somebody else's garden has been boosting the whole time. The economy IS the strategy
+            // advice, and that has not changed — what changed is that it is now a rate per second
+            // rather than a price per square metre, so the driving cannot buy it. See BoostFuelEarned.
+            mower.AddBoostFuel(BoostFuelEarned(result, travel, dt));
 
             if (result.Stolen <= 1e-4f) return;
 
@@ -236,6 +256,83 @@ namespace DuckMow
                 TurfDirector.NotifyLoss(i, lost);
                 OnSteal?.Invoke(i, lost, roller);
             }
+        }
+
+        /// <summary>
+        /// What one swath is worth in boost fuel — a RATE PER SECOND, not a price per square metre.
+        ///
+        /// ---- the bug this shape exists to make impossible ----
+        ///
+        /// This used to be <c>neutral * 0.0016 + Stolen * 0.010</c>: fuel earned per METRE of ground
+        /// taken, against a drain spent per SECOND. Those are different units, and the exchange rate
+        /// between them is the mower's speed — so boosting, which multiplies speed by 1.42, multiplied
+        /// the INCOME by 1.42 while the cost stayed flat. Boosting made boosting cheaper.
+        ///
+        /// It happened to sit just past break-even. A roller 3.3 m wide at 14.2 m/s covers 46.9 m2 a
+        /// second, and all of it stolen paid 0.469 fuel a second against a 0.42 drain: hold the button
+        /// down inside an opponent's garden and the tank FILLED. The owner reported it as "in stage 3
+        /// the booster is infinite", which is exactly what it was.
+        ///
+        /// Scaling 0.010 down would have moved the loop to just under break-even and left it a loop.
+        /// The next person to raise boostSpeedMultiplier, rollerWidth or crownWidthBonus would have
+        /// reopened it, silently, with no reason to suspect they had touched the fuel economy at all.
+        ///
+        /// ---- why it cannot reopen now ----
+        ///
+        /// Income is measured the way the LAWN has always measured it. MowerController.UpdateCutting
+        /// computes CutLoad as "what fraction of the swath was worth cutting" times
+        /// <c>clamp01(travel / (maxSpeed * dt))</c>, and pays a per-second rate against it. This is
+        /// that construction in Bloom Rush's currency, and it closes the loop three times over:
+        ///
+        ///   SPEED     cannot buy income. The speed term saturates at maxSpeed, and boosting only
+        ///             ever takes the machine ABOVE maxSpeed — so a boosting mower earns exactly what
+        ///             a flat-out coasting one earns, and pays 0.42 a second more for it. Raising
+        ///             boostSpeedMultiplier to any value whatsoever changes nothing on this side of
+        ///             the ledger.
+        ///   WIDTH     cannot buy income. Both the ground taken and the ground swept scale with
+        ///             ActiveWidth, so it cancels. The crown still pays what the crown is for — a
+        ///             wider roller takes more GROUND, which is the actual score — without making
+        ///             fuel cheaper. If anything it lowers the rate, because a wider roller reaches
+        ///             further into unowned ground and dilutes the steal share.
+        ///   CEILING   is a named constant. Every term but the rate is a clamped 0..1, so the most
+        ///             this can ever return is boostPerStolenSecond per second, reached only by a
+        ///             swath taken entirely off an opponent at full speed. "Boost cannot pay for
+        ///             itself" is therefore one comparison between two serialized numbers —
+        ///             0.30 against MowerController's 0.42 — and Awake checks it rather than
+        ///             trusting it.
+        ///
+        /// The intent above the call site survives intact: the rate a swath earns is interpolated by
+        /// how much of it was taken off somebody, so living in an opponent's garden still pays six
+        /// times what mowing the empty outfield does. It just is not free any more.
+        /// </summary>
+        float BoostFuelEarned(TurfMask.Result result, float travel, float dt)
+        {
+            // The ground the roller passed over, whether or not any of it changed hands. This is the
+            // denominator that makes the whole thing a rate, so a zero-length step earns nothing
+            // rather than dividing by nought.
+            float swept = travel * ActiveWidth;
+            if (swept <= 1e-4f || result.Total <= 1e-4f) return 0f;
+
+            // How much of the swept ground actually became this gardener's. Clamped because Claim
+            // works over a capsule and a discrete grid: the first swath after the roller comes down,
+            // or after a spin-out, sweeps an end cap far larger than travel * width and would
+            // otherwise read as several hundred percent of a swath in a single fixed step.
+            float load = Mathf.Clamp01(result.Total / swept);
+
+            // ...and how much of THAT was taken off somebody. The exact area-weighted mean of the two
+            // rates, which is what the old expression computed before it was divided by the ground.
+            float stealShare = Mathf.Clamp01(result.Stolen / result.Total);
+            float rate = Mathf.Lerp(boostPerNeutralSecond, boostPerStolenSecond, stealShare);
+
+            // Fast driving pays more, up to maxSpeed and not one metre per second beyond it. Without
+            // this a machine idling at minPaintSpeed across virgin enemy turf would collect the full
+            // rate for barely moving — the fractions above are speed-independent by construction, so
+            // something has to say that crawling is not the same as committing.
+            float speed01 = mower != null
+                ? Mathf.Clamp01(travel / (Mathf.Max(mower.maxSpeed, 1f) * dt))
+                : 0f;
+
+            return rate * load * speed01 * dt;
         }
 
         /// <summary>Book ground taken off this gardener by somebody else.</summary>
