@@ -387,56 +387,140 @@ namespace DuckMow
 
         // ------------------------------------------------------------------ an arena, in marks
         //
-        // The two functions below are the whole of "what was that match worth", and they exist as
-        // statics so that the ARENA'S OWN board and the championship cannot come up with two
-        // different answers about the same match. Both arenas print a number to the player before
-        // the round is banked; both now print this one.
+        // Everything below is "what was that match worth", and it is static so that the ARENA'S OWN
+        // board and the championship cannot come up with two different answers about the same match.
+        // Both arenas print a number to the player before the round is banked; both print this one.
+        //
+        // The two arenas measure completely different things — a garden that survived, a share of
+        // ground held — and they meet at MarksFromPerformance, which is the only place that decides
+        // what a match round is worth out of thirty. That single meeting point is the point: two
+        // stages marked on the same denominator have to be marked on the same band, or the
+        // championship is decided by which round a contestant happened to be good at rather than by
+        // how well they played it.
+
+        /// <summary>
+        /// The band a MATCH round is marked inside, and the premium for winning it.
+        ///
+        /// ---- why these three numbers exist, and what they were measured against ----
+        ///
+        /// A round is a stage, so an arena is marked on the same thirty a picture is, and the only
+        /// honest way to pick the band is to look at what the bench actually prints. It prints less
+        /// than thirty and more than nothing: PRISCILLA's ceiling is nine, so the panel's arithmetic
+        /// maximum is 29, and a competent lawn lands between 18 and 26 with a near-perfect one at 28.
+        /// At the other end an UNTOUCHED lawn scores 9 — nothing mown means no spill, so neatness is
+        /// a perfect 1 and the outline band matches everywhere outside the shape — and a run that
+        /// tries and fails scores about 13. The lawn round is therefore a 9..28 instrument whose
+        /// working range is 13..26, and four contestants on it usually finish within five or six
+        /// marks of each other.
+        ///
+        /// So an arena is given the same shape. <see cref="MatchMarksFloor"/> is what turning up is
+        /// worth, set level with the empty lawn's 9 rather than at nought, because a flattened garden
+        /// is a bad round and not an absence of one. <see cref="MatchMarksSpan"/> is what performance
+        /// adds on top, and floor plus span plus the winner's premium comes to exactly thirty — so a
+        /// perfect arena round is reachable and has to be a maximum performance AND a win, which is
+        /// the same bargain the lawn's 28 drives.
+        ///
+        /// <see cref="PlacingMarks"/> is deliberately the small part. Placing used to be the whole of
+        /// the rally's score and that is the defect this replaces; four marks between first and last
+        /// makes winning worth something in a ninety-mark championship without letting it decide one.
+        /// </summary>
+        public const int MatchMarksFloor = 10;
+        /// <summary>What performance is worth on top of <see cref="MatchMarksFloor"/>.</summary>
+        public const int MatchMarksSpan = 16;
+        /// <summary>What first, second, third and last are worth on top of what they earned.</summary>
+        public static readonly int[] PlacingMarks = { 4, 2, 1, 0 };
+
+        /// <summary>
+        /// One contestant's marks for a match round: what they did, plus a little for where it put them.
+        ///
+        /// <paramref name="performance01"/> is the arena's own measure of how well the match was
+        /// played, already normalised — the rally's award re-based off its -6..+10 scale, Bloom Rush's
+        /// share of the ground against an even split. Every arena reaches the championship through
+        /// this one function so that two stages marked out of the same thirty cannot quietly be worth
+        /// different amounts.
+        ///
+        /// <paramref name="place"/> below one means UNPLACED, and gets no premium. That is not
+        /// defensive tidying: <see cref="TurfHandoff.Result.place"/> is a plain field that defaults to
+        /// zero, and a zero silently read as "first" would have paid the winner's premium to every
+        /// contestant a caller forgot to place.
+        /// </summary>
+        public static float MarksFromPerformance(float performance01, int place)
+        {
+            int merit = Mathf.RoundToInt(MatchMarksFloor +
+                                         Mathf.Clamp01(performance01) * MatchMarksSpan);
+            int placed = place < 1
+                ? 0
+                : PlacingMarks[Mathf.Clamp(place - 1, 0, PlacingMarks.Length - 1)];
+            return Mathf.Clamp(merit + placed, 0, Championship.RivalRoundMax);
+        }
+
+        /// <summary>
+        /// What a bench award alone is worth in marks, with no placing in it.
+        ///
+        /// Exists so that anything wanting to say "this is what a good rally looks like" on the
+        /// round's own scale can convert a figure from the award scale instead of typing a mark and
+        /// hoping. The rally HUD's card colours are the caller this is for.
+        /// </summary>
+        public static int MarksForAward(int award)
+            => Mathf.RoundToInt(MatchMarksFloor +
+                   Mathf.Clamp01(Mathf.InverseLerp(AwardFloor, AwardCeiling, award)) * MatchMarksSpan);
 
         /// <summary>
         /// What a garden was worth, as marks out of thirty.
         ///
-        /// Built on top of <see cref="RallyAwardForPlace"/> rather than on integrity alone, because
-        /// that curve is where the mode's actual scoring lives — break-even at 60 percent intact,
-        /// knockouts and geese landed in somebody else's flowers paying on top, and the bench's
-        /// picked winner floored at the best mark so the ceremony and the table cannot announce two
-        /// different champions. Throwing that away for a bare percentage would have deleted the
-        /// offensive half of the mode from the championship.
+        /// Built on <see cref="RallyAward"/>, because that curve is where the mode's actual scoring
+        /// lives — break-even at 60 percent intact, knockouts and geese landed in somebody else's
+        /// flowers paying on top. Marking integrity alone would delete the offensive half of the mode
+        /// from the championship.
         ///
-        /// What changes is the UNIT, not the curve: the award's own -6..+10 clamp is re-based onto
-        /// the thirty every other round is marked on. A flattened garden in last scores nothing, a
-        /// picked winner scores the round, and an average rally lands near the middle — which is
-        /// exactly where an average picture lands too.
+        /// ---- what was wrong here, since the fix is the whole point of the function ----
         ///
-        /// ---- one consequence worth stating rather than discovering ----
+        /// This used to go through a RallyAwardForPlace that returned <c>max(earned, placed)</c>
+        /// against a ladder of 10 / 6 / 3 / 0 — the award's own ceiling for the winner. The argument
+        /// was that a bench which picks a winner must pay them the most, and it was sound while the
+        /// rally was a bonus of at most ten points bolted onto a picture. As a whole round it meant
+        /// WINNING THE RALLY WAS AN AUTOMATIC PERFECT THIRTY, with a fixed 22 / 17 / 11 behind it,
+        /// whatever the four gardens actually looked like. A rally in which every contestant was
+        /// flattened paid its winner exactly what a rally nobody was scratched in paid theirs, and no
+        /// lawn round can pay thirty at all — the bench's arithmetic maximum is 29. Round two was the
+        /// cheapest round in the championship and it was cheap by construction.
         ///
-        /// <see cref="RallyAwardForPlace"/> FLOORS the winner at the ceiling, on the argument that a
-        /// bench which picks a winner must pay them the most. Converted, that means winning the
-        /// rally is always a perfect 30 and the ladder behind it is a fixed 22 / 17 / 11. That was a
-        /// bonus of at most ten points on top of a picture before and is a whole round now, so the
-        /// rally is the easiest round in the championship to score highly in. It is left exactly as
-        /// the mode's own designer tuned it — converting a unit is not a licence to retune a curve —
-        /// but if the championship ever reads as decided by round two, this is where it is decided.
+        /// So placing is a premium now instead of a floor: four marks for the win, and the rest of
+        /// the round earned. One thing is knowingly given up for that. The bench still picks its
+        /// winner on integrity (see RallyHandoff.Ranked) while the marks count the offensive half
+        /// too, so a contestant who saved slightly less and fought far harder can out-score the
+        /// picked winner. That is intended — a bad first place SHOULD score below a brilliant second
+        /// — and the premium is what keeps it from being cheap: second has to make up the winner's
+        /// defensive margin plus two whole marks, which is about a knockout and a half of clear
+        /// daylight, before the table disagrees with the ceremony.
         /// </summary>
         public static float RallyMarks(RallyHandoff.Result r, int place, int of)
-            => Mathf.Round(Mathf.Clamp01(Mathf.InverseLerp(AwardFloor, AwardCeiling,
-                                                           RallyAwardForPlace(r, place, of)))
-                           * Championship.RivalRoundMax);
+            => MarksFromPerformance(Mathf.InverseLerp(AwardFloor, AwardCeiling, RallyAward(r)),
+                                    // Nobody to be placed against, so no premium — the same case the
+                                    // old curve handled by returning the bare award.
+                                    of <= 1 ? 0 : place);
 
         /// <summary>
         /// What a share of the plaza was worth, as marks out of thirty.
         ///
         /// Normalised against an EVEN FOUR-WAY SPLIT rather than against the whole arena: a quarter
-        /// is par and scores half the round, and taking half the ground is a rout that saturates.
-        /// Straight <c>share * 30</c> would have made a perfectly respectable four-way scrap score
-        /// seven marks out of thirty and every Bloom Rush round a disaster on the table.
+        /// is par, and taking half the ground is a rout that saturates. That normalisation is the
+        /// tuned part and is unchanged — straight <c>share * 30</c> would have made a perfectly
+        /// respectable four-way scrap score seven marks out of thirty.
         ///
-        /// This arithmetic is not new — it is the line GameDirector.BankStageResult used while the
-        /// arenas were beats inside a lawn round, moved here so the stage's own board and the
-        /// championship read it from one place.
+        /// What changed is where it lands. Bloom Rush never had the rally's placing floor and so
+        /// never had its defect — a share is earned by driving, nothing is handed to the leader, and
+        /// thirty already required half the arena. It had the opposite fault, which only shows up
+        /// once the two arenas are compared with the lawn: shares are ZERO SUM. Four contestants
+        /// divide one arena between them, so their marks used to divide sixty between them however
+        /// hard they all played, and a scrap with thirty percent of the ground left neutral paid the
+        /// whole field 42 marks where a lawn round pays about 85. Every Bloom Rush round quietly cost
+        /// all four contestants marks that round one had given them. Through the shared band a par
+        /// quarter is 18 rather than 15, the field takes about 75, and the round stops being the one
+        /// nobody can score in.
         /// </summary>
         public static float BloomMarks(TurfHandoff.Result r)
-            => Mathf.Round(Mathf.Clamp01(Mathf.InverseLerp(0f, 0.5f, r.share))
-                           * Championship.RivalRoundMax);
+            => MarksFromPerformance(Mathf.InverseLerp(0f, 0.5f, r.share), r.place);
 
         /// <summary>
         /// One contestant's marks for a match round, looked up by name in the arena's handoff.
@@ -455,8 +539,9 @@ namespace DuckMow
 
             if (RallyHandoff.Results.Length == 0) return 0f;
 
-            // Placed first, then marked. The bench's pick has to be the best-paid result — see
-            // RallyAwardForPlace.
+            // Placed first, then marked. The place is only a premium now rather than the score
+            // itself — see RallyMarks — but it still has to be worked out here, because the handoff
+            // stores four gardens and not the ladder they came in.
             var ranked = RallyHandoff.Ranked();
             int place = 1;
             for (int p = 0; p < ranked.Length; p++)
@@ -486,41 +571,15 @@ namespace DuckMow
         /// thirty marks" so a third of a round could not overturn one that was mown properly. The
         /// rally is a whole round now, so that argument no longer applies to it — but the curve's
         /// SHAPE was always the good part, and it is kept exactly as it was and converted to marks
-        /// by <see cref="RallyMarks"/>.
+        /// by <see cref="RallyMarks"/>. Reaching the ceiling takes an untouched garden AND about
+        /// three geese put down, which is what makes a perfect round two something a contestant does
+        /// rather than something the ladder hands them.
         /// </summary>
         public static int RallyAward(RallyHandoff.Result r)
         {
             float defence = (r.integrity - 0.6f) * 14f;
             float offence = r.knockouts * 1.2f + r.landed * 0.45f + r.perfects * 0.25f;
             return Mathf.Clamp(Mathf.RoundToInt(defence + offence), AwardFloor, AwardCeiling);
-        }
-
-        /// <summary>
-        /// The rally's marks, graded by placing rather than computed independently.
-        ///
-        /// The bench PICKS a winner at the end of the rally, and a picked winner has to be worth the
-        /// most — otherwise the ceremony announces one contestant and the points table rewards
-        /// another, which is the sort of contradiction that makes a scoring system feel arbitrary.
-        /// So first place takes the top mark and the rest are stepped down behind it.
-        ///
-        /// Stepped rather than flat, because four contestants who all defended well should not be
-        /// separated by nothing — and the step is small enough that a good rally in fourth still
-        /// beats a bad rally in first, which keeps the mode about defending rather than about
-        /// placing.
-        /// </summary>
-        public static int RallyAwardForPlace(RallyHandoff.Result r, int place, int of)
-        {
-            int earned = RallyAward(r);
-            if (of <= 1) return earned;
-
-            // The winner is floored at a real reward, and everyone else is stepped down from it.
-            int[] byPlace = { 10, 6, 3, 0 };
-            int placed = byPlace[Mathf.Clamp(place - 1, 0, byPlace.Length - 1)];
-
-            // The better of "what you earned" and "what your placing is worth", so a contestant who
-            // was never attacked cannot out-score one who defended a siege — and a winner is never
-            // punished for the flock having been quiet.
-            return Mathf.Clamp(Mathf.Max(earned, placed), AwardFloor, AwardCeiling);
         }
 
         /// <summary>Find the rival working a given plot, for the tour.</summary>
