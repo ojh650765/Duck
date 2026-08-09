@@ -67,6 +67,22 @@ namespace DuckMow
         [Tooltip("Recompute LOD this often. Grass does not need it every frame.")]
         public float lodInterval = 0.15f;
 
+        [Header("Blade draw distance")]
+        [Tooltip("Give this field its own thinning and height-fade range instead of the blade " +
+                 "material's. Off means the shared material decides, which is what every lawn in " +
+                 "the mowing round wants.")]
+        public bool overrideDrawDistance;
+        [Tooltip("Blades start sinking one by one from here. Matches M_GrassBlades' _ThinStart.")]
+        public float thinStart = 15f;
+        [Tooltip("...and the last of them is gone by here. M_GrassBlades' _ThinEnd.")]
+        public float thinEnd = 42f;
+        [Tooltip("Every remaining blade starts shortening from here. M_GrassBlades' _FadeStart.")]
+        public float fadeStart = 26f;
+        [Tooltip("...and has no height left at all by here. M_GrassBlades' _FadeEnd. Nothing is " +
+                 "drawn past this that the player can see, which is what lod1Distance exists to " +
+                 "stop paying for.")]
+        public float fadeEnd = 44f;
+
         [Header("Wind")]
         public float windStrength = 0.055f;
         public float windSpeed = 1.9f;
@@ -91,6 +107,7 @@ namespace DuckMow
         void Awake()
         {
             if (buildGround) BuildGround();
+            ApplyDrawDistance();
             BuildBladeMeshes();
             BuildChunks();
             ApplyWind();
@@ -101,6 +118,64 @@ namespace DuckMow
             if (_groundMesh) DestroyImmediate(_groundMesh);
             if (_bladeMeshL0) DestroyImmediate(_bladeMeshL0);
             if (_bladeMeshL1) DestroyImmediate(_bladeMeshL1);
+            if (_bladeMatOwned) DestroyImmediate(_bladeMatOwned);
+        }
+
+        /// <summary>The material the chunks actually draw with: the shared one, or this field's own.</summary>
+        Material BladeMat => _bladeMatOwned != null ? _bladeMatOwned : bladeMaterial;
+        Material _bladeMatOwned;
+
+        static readonly int IdThinStart = Shader.PropertyToID("_ThinStart");
+        static readonly int IdThinEnd = Shader.PropertyToID("_ThinEnd");
+        static readonly int IdFadeStart = Shader.PropertyToID("_FadeStart");
+        static readonly int IdFadeEnd = Shader.PropertyToID("_FadeEnd");
+
+        /// <summary>
+        /// Give this field its own copy of the blade material, so one lawn can draw grass a shorter
+        /// distance than another without either of them editing a shared asset.
+        ///
+        /// A COPY rather than a MaterialPropertyBlock, and that is the whole design decision here. A
+        /// property block would be the obvious tool and it is the wrong one: it takes every chunk out
+        /// of the SRP batcher, and this field has three hundred and sixty-one of them. Trading a
+        /// vertex win for three hundred draw calls is not a win. One extra material per field is
+        /// batched exactly like the shared one and costs a few hundred bytes.
+        ///
+        /// ---- the two invariants, checked rather than trusted ----
+        ///
+        /// The blade shader thins by id between thinStart and thinEnd, and shortens what is left
+        /// between fadeStart and fadeEnd. The LOD distances have to sit outside both, and the two
+        /// tooltips above have said so in prose since the field was written while nothing enforced
+        /// it. They are easy to break silently, because breaking them does not look like a bug in the
+        /// numbers — it looks like the lawn changing density in eight-metre squares as the player
+        /// drives, which reads as a rendering fault somewhere else entirely.
+        /// </summary>
+        void ApplyDrawDistance()
+        {
+            if (!overrideDrawDistance || bladeMaterial == null) return;
+
+            _bladeMatOwned = new Material(bladeMaterial) { name = bladeMaterial.name + " (field)" };
+            _bladeMatOwned.SetFloat(IdThinStart, thinStart);
+            _bladeMatOwned.SetFloat(IdThinEnd, thinEnd);
+            _bladeMatOwned.SetFloat(IdFadeStart, fadeStart);
+            _bladeMatOwned.SetFloat(IdFadeEnd, fadeEnd);
+
+            // Stop drawing a chunk only once every blade in it has already shrunk to nothing.
+            if (lod1Distance < fadeEnd)
+                Debug.LogWarning(
+                    $"[Grass] {name}: lod1Distance {lod1Distance} is inside the height fade, which " +
+                    $"ends at {fadeEnd}. Chunks will stop being drawn while their blades still have " +
+                    "height, so the lawn will end in a visible ring at the draw distance.", this);
+
+            // Swap to the half-density mesh only once the shader has already sunk every blade that
+            // mesh drops. The far mesh keeps ids below GrassField.BladeIdCutoff; the shader kills a
+            // blade once its id passes (1 - t) + 0.12, where t runs 0..1 across the thinning range.
+            // Solving for the distance at which the cutoff is safely under the threshold gives this.
+            float safeSwap = thinStart + (1f - BladeIdCutoff + 0.12f) * Mathf.Max(thinEnd - thinStart, 0f);
+            if (lod0Distance < safeSwap)
+                Debug.LogWarning(
+                    $"[Grass] {name}: lod0Distance {lod0Distance} is nearer than {safeSwap:0.#}, so " +
+                    "the far blade mesh will drop blades the shader is still drawing. The lawn will " +
+                    "visibly change density one chunk at a time.", this);
         }
 
         public void ApplyWind()
@@ -361,7 +436,7 @@ namespace DuckMow
                     var mf = go.AddComponent<MeshFilter>();
                     mf.sharedMesh = _chunkOverride[i] != null ? _chunkOverride[i] : _bladeMeshL0;
                     var mr = go.AddComponent<MeshRenderer>();
-                    mr.sharedMaterial = bladeMaterial;
+                    mr.sharedMaterial = BladeMat;
                     mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                     mr.receiveShadows = true;
                     mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;

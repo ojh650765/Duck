@@ -1256,7 +1256,27 @@ namespace DuckMow
             // would flicker the arena's load into view between the two.
             bool ownsItsOwnSeam = s == GameState.Rally || s == GameState.Bloom || s == GameState.Defence;
             if (StageSeam.InProgress && !_seam && !ownsItsOwnSeam && isActiveAndEnabled)
-                StartCoroutine(RaiseSeam());
+            {
+                // CUT the curtain when the state under it was reached from an ARENA, exactly as the
+                // camera does eight lines up in the Scoreboard case, and for the same reason.
+                //
+                // The arena's exit no longer plays a transition — RallyStage.Leave and TurfStage.Leave
+                // slam an instant cover over the scene unload and nothing else — so there is no wipe
+                // in progress for this to be the second half of. Animating it open would put the
+                // whole sequence back on its way UP: a quarter-second hold and the best part of a
+                // second of leaves lifting off a board that is already sitting there finished.
+                //
+                // Same condition as hardCut, deliberately written from the same two states rather
+                // than from a flag one of them sets, so a third arena cannot be added and quietly
+                // get the animated raise while getting the hard camera cut.
+                bool cameFromArena = from == GameState.Rally || from == GameState.Bloom;
+                if (cameFromArena)
+                {
+                    Curtain.Live?.ClearInstant();
+                    StageSeam.Forget();
+                }
+                else StartCoroutine(RaiseSeam());
+            }
 
             OnStateChanged?.Invoke(s);
         }
