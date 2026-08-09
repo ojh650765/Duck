@@ -727,23 +727,16 @@ namespace DuckMow
                 // Grepping the tree for the pattern now finds no others: every remaining `Share(..)
                 // * 100` is a percentage for display, which is what it claims to be.
                 //
-                // Routed through the static rather than re-derived, with the PLACE filled in from the
-                // standings this card is already reading — an unplaced result is owed no premium, so
-                // leaving it at its default zero would under-report the winner by four.
-                // ONE CALL, TWO READINGS. The round's marks and the running total are the same
-                // fact stated twice, so they come off one BloomMarks and the total is that value
-                // added to what is already banked. A second evaluation could differ from this one
-                // by a rounding step and print a total that does not equal the line above it.
+                // ONE SOURCE, THREE READINGS. This card, the arena board a few seconds later, and
+                // the championship all have to say the same thing about the same ground, so none of
+                // them works it out — they all ask TurfDirector.StageMarks, which is the only place
+                // BloomMarks is called in this stage.
                 //
-                // This is the shape that was wrong here before, and the difference is worth stating
-                // rather than trusting: the version I deleted RE-DERIVED the round's marks with its
-                // own `share * 30`, which is why it once predicted 7 for a round that banked 22. A
-                // projection is safe when it asks for the marks and unsafe when it works them out.
-                float marks = Tournament.BloomMarks(new TurfHandoff.Result
-                {
-                    share = mine,
-                    place = me + 1
-                });
+                // The shape that was wrong here twice is a caller RE-DERIVING it: this card once did
+                // `share * 30` and printed 7 for a round that banked 22, and the arena board did the
+                // same and predicted 7 for one about to bank 15. A projection is safe when it asks
+                // for the marks and unsafe when it works them out.
+                float marks = director.StageMarks(standings[me]);
                 if (_resultsMarks != null)
                     _resultsMarks.text = $"{marks:0} / {Championship.RivalRoundMax}";
 
