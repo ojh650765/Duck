@@ -1,0 +1,508 @@
+<title>Duck Mow · 세션 기록</title>
+<style>
+  :root {
+    --ground:   #EDF0E9;
+    --ground-2: #E4E9DF;
+    --ground-3: #DBE2D6;
+    --ink:      #17211B;
+    --ink-2:    #4C5A52;
+    --ink-3:    #6E7C73;
+    --rule:     #C6D0C1;
+    --accent:   #2E6B45;
+    --gold:     #8F6D16;
+    --brick:    #9B3626;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "SF Mono", Menlo, Consolas, monospace;
+
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #121711;
+      --ground-2: #19201A;
+      --ground-3: #212a22;
+      --ink:      #E7ECE3;
+      --ink-2:    #A6B2A2;
+      --ink-3:    #7E8B7C;
+      --rule:     #2D372C;
+      --accent:   #82C296;
+      --gold:     #D6AE55;
+      --brick:    #DE7862;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #121711;
+    --ground-2: #19201A;
+    --ground-3: #212a22;
+    --ink:      #E7ECE3;
+    --ink-2:    #A6B2A2;
+    --ink-3:    #7E8B7C;
+    --rule:     #2D372C;
+    --accent:   #82C296;
+    --gold:     #D6AE55;
+    --brick:    #DE7862;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: clamp(2rem, 6vw, 5rem) clamp(1.1rem, 5vw, 2rem) 6rem;
+  }
+
+  /* ---- masthead ---- */
+
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.6rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 0.9rem;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 5.5vw, 2.9rem);
+    line-height: 1.08;
+    letter-spacing: -0.018em;
+    font-weight: 700;
+    margin: 0 0 0.7rem;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 1.09rem;
+    color: var(--ink-2);
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  /* ---- run of figures under the masthead ---- */
+
+  .tally {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2.4rem;
+    margin: 1.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--mono);
+  }
+  .tally div { padding: 0.55rem 0; }
+  .tally dt {
+    font-size: 0.66rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .tally dd {
+    margin: 0.15rem 0 0;
+    font-size: 1.5rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+  .tally dd small { font-size: 0.8rem; color: var(--ink-3); }
+
+  /* ---- sections ---- */
+
+  section { margin-top: 3.4rem; }
+
+  h2 {
+    font-size: 1.42rem;
+    letter-spacing: -0.012em;
+    margin: 0 0 0.2rem;
+    text-wrap: balance;
+  }
+  .sec-label {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.55rem;
+  }
+  h2 + p, .sec-note { color: var(--ink-2); margin: 0.5rem 0 1.4rem; text-wrap: pretty; }
+
+  h3 {
+    font-size: 1.03rem;
+    margin: 2rem 0 0.4rem;
+    letter-spacing: -0.005em;
+  }
+
+  p { margin: 0 0 1rem; text-wrap: pretty; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--ground-3);
+    padding: 0.08em 0.34em;
+    border-radius: 2px;
+  }
+
+  /* ---- the causal chain: a real sequence, so it is numbered ---- */
+
+  ol.chain { list-style: none; counter-reset: step; margin: 0; padding: 0; }
+  ol.chain li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 2.1rem 1fr;
+    gap: 0 0.85rem;
+    padding: 0.72rem 0;
+    border-top: 1px solid var(--rule);
+  }
+  ol.chain li:last-child { border-bottom: 1px solid var(--rule); }
+  ol.chain li::before {
+    content: counter(step);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-3);
+    padding-top: 0.28em;
+  }
+  ol.chain b { font-weight: 700; }
+  ol.chain .why { display: block; color: var(--ink-2); font-size: 0.95rem; }
+
+  /* ---- evidence: quoted machine output ---- */
+
+  .evidence {
+    font-family: var(--mono);
+    font-size: 0.79rem;
+    line-height: 1.65;
+    color: var(--ink-2);
+    background: var(--ground-2);
+    border-left: 2px solid var(--rule);
+    padding: 0.85rem 1rem;
+    margin: 0 0 1.2rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ---- tables ---- */
+
+  .tablewrap { overflow-x: auto; margin: 0 0 1.3rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  caption {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-bottom: 0.5rem;
+  }
+  th, td { text-align: left; padding: 0.42rem 0.9rem 0.42rem 0; border-bottom: 1px solid var(--rule); }
+  th {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 400;
+    color: var(--ink-3);
+  }
+  td.num, th.num {
+    text-align: right;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    padding-right: 0;
+  }
+  td.was { color: var(--ink-3); }
+  .bad  { color: var(--brick); font-weight: 700; }
+  .good { color: var(--accent); font-weight: 700; }
+
+  /* ---- commit list ---- */
+
+  dl.commits { margin: 0; }
+  dl.commits div {
+    display: grid;
+    grid-template-columns: 5.6rem 1fr;
+    gap: 0 0.9rem;
+    padding: 0.5rem 0;
+    border-top: 1px solid var(--rule);
+  }
+  dl.commits div:last-child { border-bottom: 1px solid var(--rule); }
+  dl.commits dt {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--gold);
+    padding-top: 0.2em;
+  }
+  dl.commits dd { margin: 0; font-size: 0.97rem; }
+
+  /* ---- flagged items ---- */
+
+  ul.flags { list-style: none; margin: 0; padding: 0; }
+  ul.flags li {
+    padding: 0.8rem 0;
+    border-top: 1px solid var(--rule);
+  }
+  ul.flags li:last-child { border-bottom: 1px solid var(--rule); }
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 0.16em 0.45em;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    margin-right: 0.55rem;
+    vertical-align: 0.12em;
+  }
+  .tag.blocked  { color: var(--brick); }
+  .tag.unseen   { color: var(--gold); }
+  .tag.open     { color: var(--ink-3); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.2rem;
+    border-top: 2px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--ink-3);
+    line-height: 1.8;
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Duck Mow · Unity 6 URP · 세션 기록</p>
+    <h1>측정이 진단을 세 번 뒤집은 세션</h1>
+    <p class="standfirst">
+      라운드 구조를 스테이지 단위로 바꾸고, 컷씬을 멈춰 세우던 원인을 찾고,
+      채점과 부스트 경제에서 “아무것도 안 하는 쪽이 이득”인 구멍을 닫았습니다.
+      고친 것보다 <em>잘못 짚었다가 바로잡은 것</em>이 더 많이 남은 세션이라, 그쪽을 함께 기록합니다.
+    </p>
+
+    <dl class="tally">
+      <div><dt>커밋</dt><dd>23</dd></div>
+      <div><dt>origin 대비</dt><dd>73 <small>ahead</small></dd></div>
+      <div><dt>워커</dt><dd>4</dd></div>
+      <div><dt>미푸시</dt><dd>전부</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <p class="sec-label">가장 큰 발견</p>
+    <h2>컷씬이 멈춘 건 코드가 아니라 프로젝트 설정이었다</h2>
+    <p>
+      <code>ProjectSettings/TimeManager.asset</code>의 전역 Time Scale이 <b>0</b>으로 저장돼 있었습니다.
+      커밋되지 않은 로컬 변경이라 <b>브랜치를 바꿔도 따라다녔고</b>, 정상 동작하던 기준선을 체크아웃해도
+      똑같이 멈췄을 겁니다. 경위는 팝업이 <code>timeScale = 0</code>으로 잡은 상태에서 플레이 모드가
+      중지됐고, Unity가 그 값을 프로젝트 설정에 영구 저장한 것입니다.
+    </p>
+
+    <ol class="chain">
+      <li><b>전역 timeScale이 0으로 시작</b><span class="why">모든 플레이 세션이 멈춘 채로 출발</span></li>
+      <li><b>컷씬은 정상 재생</b><span class="why"><code>ComicSequence</code>는 unscaled 시간을 씀 — 스킵도 정상</span></li>
+      <li><b>디렉터는 정지</b><span class="why"><code>GameDirector.Update</code>는 <code>Tick(Time.deltaTime)</code> — scaled</span></li>
+      <li><b>Preview에서 영구 정지</b><span class="why">브리핑은 건너뛸 수 있지만 Preview는 의도적으로 스킵 불가</span></li>
+      <li><b>카메라가 Chase에 영영 도달 못 함</b><span class="why">어떤 상태에도 진입하지 않으니 당연한 결과</span></li>
+      <li><b>컨트롤 카드가 12초 뒤 포기</b><span class="why">이 예산만 unscaled라 혼자 흘러감 — 경고의 모든 문장이 사실이었다</span></li>
+    </ol>
+
+    <p style="margin-top:1.2rem">
+      이 때문에 “잔디밭에서 컨트롤 카드가 안 뜬다”와 “스킵해도 게임이 시작 안 된다”가
+      <b>별개 버그로 보였지만 둘 다 같은 원인의 다른 얼굴</b>이었습니다.
+      트리거 코드는 처음부터 정상이었고, 그대로 두었습니다.
+    </p>
+    <div class="evidence">Editor.log — [Cheats] armed 이후 완전 침묵
+  라운드 시작 로그 없음
+  인트로 예산 실패 경고조차 없음  ← 예산도 scaled 시계 위에 있었다</div>
+    <p>
+      재발 방지는 원인이 놓인 자리에 넣었습니다. 런타임에서 정확히 0을 쓰는 코드는
+      <code>PopupStack</code>뿐이라(히트스톱은 0.05, 디펜스는 0.02), 종료 시 시계를 돌려주고
+      0으로 시작한 세션은 스스로 복구합니다.
+    </p>
+  </section>
+
+  <section>
+    <p class="sec-label">측정으로 닫은 구멍</p>
+    <h2>“아무것도 안 하는 쪽이 이득”이던 두 곳</h2>
+
+    <h3>잔디밭 채점 — 바닥이 아니라 경사가 있었다</h3>
+    <p>
+      아무것도 안 깎으면 <code>spill</code> 가드가 0을 돌려주고 <code>neatness = 1 - spill</code>이
+      <b>만점</b>이 됩니다. “흘리지 않았다”와 “깎지 않았다”를 구분하지 못했습니다.
+      거기에 외곽선 검사가 도형 바깥 경계만으로 절반을 먹었습니다.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <caption>실제 하트 잔디밭을 래스터화해 실제 <code>Evaluate</code> + <code>Mark</code>로 측정</caption>
+        <thead><tr><th>상황</th><th class="num">전</th><th class="num">후</th></tr></thead>
+        <tbody>
+          <tr><td>아무것도 안 깎음</td><td class="num was">9</td><td class="num good">2</td></tr>
+          <tr><td>5% 조각만 깔끔하게</td><td class="num bad">10</td><td class="num good">3</td></tr>
+          <tr><td>25% 구석만 깔끔하게</td><td class="num was">12</td><td class="num">10</td></tr>
+          <tr><td>실제 시도 (37%)</td><td class="num was">11</td><td class="num">—</td></tr>
+          <tr><td>좋은 라운드 (95%)</td><td class="num was">25</td><td class="num good">25</td></tr>
+          <tr><td>완벽</td><td class="num was">28</td><td class="num good">28</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <b>5% 조각(10점)이 아무것도 안 한 9점보다 높았고</b>, 깔끔한 25%(12점)가
+      진짜로 37%를 시도한 라운드(11점)를 이겼습니다. “조금만 깔끔하게 하고 말기”가
+      올라갈 언덕이 있는 전략이었던 셈입니다. 윗쪽 점수는 움직이지 않았고 — 새 식이
+      외곽선을 제대로 돈 경우 옛 식과 대수적으로 동일합니다 — 심사위원 하한·상한은 건드리지 않았습니다.
+      빈 잔디밭의 남은 <b>2점이 곧 BORIS의 하한</b>입니다.
+    </p>
+
+    <h3>Bloom Rush 부스터 — 무한이었고, 이기는 쪽이 더 강했다</h3>
+    <p>
+      연료를 <b>미터당 벌고 초당 쓰는</b> 단위 불일치였습니다. 부스트가 속도를 1.42배 올리니
+      수입만 1.42배가 되고 비용은 그대로 — 부스트를 켤수록 부스트가 싸졌습니다.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <caption>초당 연료 (탱크 = 1.0), 소모는 0.42/s</caption>
+        <thead><tr><th>상황</th><th class="num">전</th><th class="num">후</th></tr></thead>
+        <tbody>
+          <tr><td>남의 땅, 기본 롤러 3.3 m</td><td class="num bad">0.469 무한</td><td class="num good">0.300 → 8.3s</td></tr>
+          <tr><td>남의 땅, 크라운 4.95 m</td><td class="num bad">0.703 무한</td><td class="num good">0.300 → 8.3s</td></tr>
+          <tr><td>빈 땅</td><td class="num was">0.075 → 2.9s</td><td class="num">0.050 → 2.7s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      즉 <b>이미 이기고 있는 참가자가 가장 강한 무한 부스터를 갖고</b> 복리로 굴렀습니다.
+      수치만 낮추면 고리가 손익분기 아래로 옮겨갈 뿐이라, 모양을 고쳤습니다. 이제 고리가
+      다시 열리지 않는 이유가 셋이고 서로 독립적입니다 — 속도는 <code>maxSpeed</code>에서 포화하고,
+      폭은 분자·분모에서 상쇄되며, 나머지 항이 전부 0~1 클램프라 최대 수입이 상수 그 자체입니다.
+    </p>
+    <p>
+      새 메커니즘은 만들지 않았습니다. <b>잔디밭이 이미 올바른 방식을 갖고 있었고</b>,
+      블룸이 같은 경제를 미터당으로 재발명하면서 단위를 틀린 것뿐이었습니다.
+    </p>
+  </section>
+
+  <section>
+    <p class="sec-label">내가 틀렸고 바로잡힌 것</p>
+    <h2>진단 네 건의 정정</h2>
+    <p class="sec-note">기록해 두는 이유는, 네 건 모두 “그럴듯한 추론”이 “측정”에 진 사례이기 때문입니다.</p>
+    <ul class="flags">
+      <li>
+        <b>카드 여백을 57px 주라고 지시했다 — 틀렸다.</b>
+        나인슬라이스 테두리가 57인 건 모서리가 늘어나도 살아남게 자른 값이고,
+        실제 장식선은 <b>20~23px</b>에 있습니다. 57을 그대로 썼으면 카드마다 세로로 118px 구멍이 나는데,
+        <b>18개 카드 중 8개가 전체 높이 118px 미만</b>입니다. 워커가 PNG를 직접 재서 잡아냈습니다.
+      </li>
+      <li>
+        <b>컨트롤 카드 트리거가 고장났다고 판단해 재설계를 지시했다 — 버그는 없었다.</b>
+        위의 timeScale 연쇄가 원인이었고, 트리거는 그대로 두는 게 정답이었습니다.
+        세 번째 재설계를 막았습니다.
+      </li>
+      <li>
+        <b>컴파일 통과를 근거로 삼았는데, 죽은 worktree를 컴파일하고 있었다.</b>
+        재사용한 응답 파일의 소스 목록이 낡아서, exit 0이 아무것도 보증하지 않았습니다.
+        이후로는 디스크에서 목록을 매번 새로 생성합니다.
+      </li>
+      <li>
+        <b>“멈춘 화면에 카드가 안 보인다”를 근거로 가설을 버렸다 — 낡은 프레임이었다.</b>
+        에디터가 비활성이면 게임 뷰가 갱신되지 않습니다. 그 뒤로 상태 확인은 스크린샷이 아니라
+        Editor.log로 합니다.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="sec-label">구조 변경</p>
+    <h2>라운드가 곧 스테이지가 되었다</h2>
+    <p>
+      “스테이지 1 스코어보드에서 Space를 눌렀는데 왜 또 그림을 그리지?”가 출발점이었습니다.
+      원인은 두 계층이 <b>라운드의 뜻을 서로 다르게</b> 알고 있었다는 것입니다 —
+      <code>GameDirector</code>에게 라운드는 “잔디 그리기 라운드”이고 아레나는 그 안에 끼워 넣는 것이었는데,
+      커튼 간판은 이미 <code>ROUND 2 OF 3 / GOOSE RALLY</code>라고 적고 있었습니다.
+    </p>
+    <div class="evidence">Round 1  LAWN ART     mow → reveal → judges → board
+Round 2  GOOSE RALLY  match                 → board
+Round 3  BLOOM RUSH   match                 → board → ending
+
+그림 그리기: 1회</div>
+    <p>
+      그 과정에서 <code>Main.unity</code>에 <code>bloomEnabled: 1</code>이 손으로 들어가 있고
+      필드 기본값은 <code>false</code>였다는 게 드러났습니다. 즉 <b>그 시점 이전에 씬 빌더를 돌린 사람은
+      스테이지 3을 조용히 잃었습니다.</b>
+    </p>
+  </section>
+
+  <section>
+    <p class="sec-label">커밋</p>
+    <h2>이번 세션에 남은 것</h2>
+    <dl class="commits">
+      <div><dt>f32493e</dt><dd>세 씬을 카드 여백 규칙 위로 재빌드</dd></div>
+      <div><dt>0b8ecd6</dt><dd>텍스트가 카드 자신의 장식선을 침범하지 않도록 — 18개 카드 일괄</dd></div>
+      <div><dt>3177cbf</dt><dd>일하지 않은 대가로 품질 점수를 먼저 주지 않도록</dd></div>
+      <div><dt>d6922d0</dt><dd>오프닝 스킵 가능 시점 8초 → 3초</dd></div>
+      <div><dt>b3184bc</dt><dd>블룸 씬을 초당 부스트 필드 위로 재빌드</dd></div>
+      <div><dt>b98471d</dt><dd>부스트를 초당으로 지불 — 잔디밭이 늘 그래왔던 대로</dd></div>
+      <div><dt>bcc01ee</dt><dd>벤치에 승자 얼굴, 보드 하나로, 리트라이 제거, 시작 지점 선점</dd></div>
+      <div><dt>8473da1</dt><dd>아레나 승리가 자동 30점이 아니게</dd></div>
+      <div><dt>d9f35aa</dt><dd>트리거는 멀쩡했고, 잔디는 페이지 앞에 있었다</dd></div>
+      <div><dt>726010a</dt><dd>SimClock만 부트 리셋 메모를 놓치고 있었다</dd></div>
+      <div><dt>a4811ef</dt><dd>라운드가 스테이지가 되고, 그림은 한 번만 그린다</dd></div>
+    </dl>
+    <p class="sec-note" style="margin-top:1rem">
+      전체 23건 중 주요 항목입니다. 나머지는 씬 재직렬화 churn과 meta 파일 커밋입니다.
+    </p>
+  </section>
+
+  <section>
+    <p class="sec-label">막힌 것 · 확인 못 한 것</p>
+    <h2>남은 항목</h2>
+    <ul class="flags">
+      <li>
+        <span class="tag blocked">막힘</span>
+        <b>WebGL 빌드 불가.</b> <code>PlaybackEngines/</code>에 <code>windowsstandalonesupport</code>만 있습니다.
+        Unity Hub에서 <b>WebGL Build Support</b> 모듈을 설치해야 하며, 그 전에는 누가 실행해도 실패합니다.
+        프로젝트의 최종 목표가 WebGL이라 우선순위가 높습니다.
+      </li>
+      <li>
+        <span class="tag blocked">막힘</span>
+        <b>GitHub 푸시 불가.</b> 인증이 없어 거부됐고 <code>gh</code>도 로그인 상태가 아닙니다.
+        로컬 <code>main</code>이 origin보다 73커밋 앞서 있습니다.
+      </li>
+      <li>
+        <span class="tag unseen">미확인</span>
+        <b>블룸 벤치의 초상화가 실제로 렌더되는지</b> 못 봤습니다. 폴백 경로만 컴파일 검증됐습니다.
+      </li>
+      <li>
+        <span class="tag unseen">미확인</span>
+        <b>카드 여백 일괄 적용 후의 실제 화면.</b> 특히 투어 카드의 초상 프레임이 124px → 80px로
+        가장 크게 줄었고, 점수판 두 곳은 세로가 모자라 워커가 손대지 않고 남겼습니다 — 구성 판단이 필요합니다.
+      </li>
+      <li>
+        <span class="tag open">기존</span>
+        <b>컷씬 효과음 10개와 나레이션 13줄 전부 없음.</b> 오프닝이 무음으로 재생됩니다.
+        빌드가 매번 크게 경고하고 있습니다.
+      </li>
+      <li>
+        <span class="tag open">기존</span>
+        <b><code>RallyHud</code> 색상 임계값 어긋남.</b> 새 척도의 바닥이 10인데 <code>ParMark</code>가 11이라
+        “기준 이하” 색이 사실상 뜨지 않습니다. 드롭인용 <code>Tournament.MarksForAward</code>가 준비돼 있습니다.
+      </li>
+    </ul>
+  </section>
+
+  <footer>
+    Duck Mow · Unity 6000.3.6f1 · URP<br>
+    기준선 브랜치 <code>baseline-d7b7f17</code> 보존 · 워커 브랜치 4개 미삭제<br>
+    이 기록의 모든 수치는 세션 중 실제 측정값입니다.
+  </footer>
+
+</div>
