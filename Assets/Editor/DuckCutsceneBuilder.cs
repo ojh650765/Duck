@@ -47,6 +47,17 @@ namespace DuckMow.EditorTools
         // reads, and the band is a subtitle before it is a soundtrack. VoiceTail is the beat of
         // silence after the voice stops — without it the band dips on the last syllable, which makes
         // the narrator sound interrupted by the page.
+        /// <summary>
+        /// Seconds before the opening can be skipped, counted from the first frame of the fade-in.
+        ///
+        /// Three, down from the eight the default used to give it. The delay is there so the exit is
+        /// not offered before the player knows what they would be leaving; one panel is enough for
+        /// that, and the fade-in is 0.9 s against a first panel of 4.6 s, so three lands with that
+        /// panel up and read. Eight was in the middle of the SECOND panel, which is no longer
+        /// protecting the choice, only making the player wait to make it.
+        /// </summary>
+        const float SkipArm = 3f;
+
         const float VoiceTail = 0.45f;
         const float ReadRate = 17f;
         const float MinRead = 1.5f;
@@ -365,6 +376,17 @@ namespace DuckMow.EditorTools
             scaler.matchWidthOrHeight = 1f;   // match height, as the HUD does
 
             var seq = canvasGO.AddComponent<ComicSequence>();
+
+            // Said out loud rather than left to the C# default, the way DuckEndingBuilder has always
+            // stated its own — see SkipArm there.
+            //
+            // This is not tidiness. Changing the default in ComicSequence does NOT reach a scene that
+            // already has one saved: Unity keeps the serialized value, and a rebuild that reuses the
+            // component keeps it too. The opening sat at eight seconds through two edits of the
+            // default for exactly that reason, while the two endings — which set theirs here — moved
+            // the moment they were asked to. A field the builder does not write is a field nobody can
+            // change without hand-editing a scene.
+            seq.skipArmDelay = SkipArm;
 
             var root = (RectTransform)canvasGO.transform;
             var page = DuckUIBuilder.Frac("Page", root, 0f, 0f, 1f, 1f);

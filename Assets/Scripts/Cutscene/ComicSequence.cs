@@ -88,8 +88,16 @@ namespace DuckMow
                  "which throws away the one shot where the whole story is on screen at once.")]
         public float pageHold = 2.2f;
         [Tooltip("Seconds before the story can be skipped at all, counted from the first frame of " +
-                 "the fade-in. The hint is shown off the same clock and not a moment earlier.")]
-        public float skipArmDelay = 8f;
+                 "the fade-in. The hint is shown off the same clock and not a moment earlier.\n\n" +
+                 "Three, not the eight this used to be. The delay exists so the exit is not offered " +
+                 "before the player knows what they would be leaving — a skip hint on a black frame " +
+                 "invites skipping a story nobody has seen a frame of. One panel is enough to know " +
+                 "that: the fade-in is 0.9 s and the first panel runs 4.6 s, so three seconds lands " +
+                 "with that panel up and read. Eight was most of the way through the SECOND panel, " +
+                 "which is no longer protecting a choice, just making the player wait to make it.\n\n" +
+                 "The two ending pages set this themselves — see DuckEndingBuilder.SkipArm. Only " +
+                 "the opening took the default, which is why the opening was the slow one.")]
+        public float skipArmDelay = 3f;
 
         [Header("Page layout")]
         [Tooltip("Scale of a panel once it has settled back into its slot in the margin.")]
