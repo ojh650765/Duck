@@ -189,10 +189,48 @@ namespace DuckMow
                 if (t != null) Destroy(t);
         }
 
+        /// <summary>
+        /// One frame of the story, on the UNSCALED clock.
+        ///
+        /// ---- this used to read Time.deltaTime, and it froze the game ----
+        ///
+        /// The symptom was the opening story stopping dead on its fade-in frame and never advancing,
+        /// with no way out at all. The mechanism is worth writing down in full, because every part of
+        /// it was individually correct:
+        ///
+        ///   * PopupStack borrows Time.timeScale and holds it at ZERO for as long as any popup in it
+        ///     wants time stopped. That is its whole job and it is right.
+        ///   * ControlsPrimer pushed itself over the story, because it inferred "a stage is about to
+        ///     start" from the wheel being held — and the wheel is held for the whole of the story.
+        ///   * So the scaled clock stopped, and this Update, reading the scaled clock, stopped with
+        ///     it. The page held whatever frame it had reached.
+        ///   * And the failsafe went with it: GameDirector's Intro budget was accumulating scaled
+        ///     time too, so the deadline that exists to rescue exactly this could never arrive.
+        ///
+        /// The primer's trigger has been fixed and no longer fires here. That is not enough on its
+        /// own, and this line is the reason: any popup that stops time — one that exists today, or
+        /// the next one somebody adds — would reproduce it, and it reproduces as a HANG rather than
+        /// as a glitch. A sequence whose own skip and own timeout are both driven by a clock that
+        /// something else is entitled to stop has no way to survive being interrupted.
+        ///
+        /// UNSCALED is the right clock for this page on its own merits, not merely as a repair. The
+        /// story is not part of the world: nothing in it is simulated, nothing in it collides, and it
+        /// plays over a scene that is deliberately doing nothing. Every other screen in this project
+        /// that sits IN FRONT of the game already runs unscaled and says so — the popup stack ticks
+        /// its popups unscaled, the curtain animates unscaled, PopupView reads nothing else. This
+        /// page belongs to that family and was the one member of it still on the world's clock.
+        ///
+        /// SimClock.Scripted is still honoured. Under the capture harness the game is stepped by
+        /// hand through <see cref="Tick"/> so that frame sheets are reproducible, and a page that
+        /// also advanced itself on a wall clock would put a different panel in every capture.
+        /// </summary>
         void Update()
         {
             if (SimClock.Scripted) return;
-            Tick(Time.deltaTime);
+            // Clamped for the reason the curtain and the popup stack both clamp: a browser tab
+            // regaining focus hands over a quarter-second delta, and a fade stepped through one of
+            // those arrives already finished.
+            Tick(Mathf.Min(Time.unscaledDeltaTime, 0.05f));
         }
 
         // ------------------------------------------------------------------ control

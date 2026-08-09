@@ -870,6 +870,7 @@ namespace DuckMow
             GameState from = State;
             State = s;
             _stateTime = 0f;
+            _stateUnscaled = 0f;
 
             // The reveal's prompt belongs to the reveal and to nothing after it. Cleared here rather
             // than trusted to UpdateReveal's own exit, because half the ways out of that beat do not
@@ -1164,8 +1165,34 @@ namespace DuckMow
         {
             if (SimClock.Scripted) return;
             UpdateHitStop();
+            // Kept alongside the scaled one rather than replacing it — see the field. Accumulated
+            // here, on the live path only, because under the capture harness Tick is called by hand
+            // with the harness's own dt and reading a wall clock inside it would mix two clocks in
+            // one method.
+            _stateUnscaled += Mathf.Min(Time.unscaledDeltaTime, 0.05f);
             Tick(Time.deltaTime);
         }
+
+        /// <summary>
+        /// How long the current state has been up, on a clock NOTHING ELSE CAN STOP.
+        ///
+        /// <see cref="_stateTime"/> is the scaled one and stays the state machine's normal measure:
+        /// the round is meant to slow down when the klaxon lands, and every beat timed against the
+        /// world should feel that.
+        ///
+        /// This exists for the beats whose timeout is a GUARANTEE rather than a piece of pacing, and
+        /// it exists because that guarantee was found to be void. The opening story's budget — "an
+        /// opening nobody can get past is strictly worse than an opening nobody sees" — was measured
+        /// in scaled seconds, so the one thing it was written to rescue could switch it off: a popup
+        /// stopping the clock stopped the story AND the deadline that was supposed to end it, and the
+        /// game hung on a fade-in with no way out. A failsafe that shares a clock with the fault it
+        /// guards against is not a failsafe.
+        ///
+        /// Zero under the capture harness, deliberately, and the two readers below say
+        /// <c>Mathf.Max</c> against the scaled clock for that reason: the harness owns time, steps
+        /// the game by hand and drives these states explicitly, so its behaviour is unchanged.
+        /// </summary>
+        float _stateUnscaled;
 
         /// <summary>Seconds of round-end slow motion still owed. Zero the rest of the time.</summary>
         float _hitStop;
@@ -1343,7 +1370,16 @@ namespace DuckMow
                     // is over. The budget is the failure path, and it is checked here rather than
                     // trusted to the sequence because the whole point is that a broken sequence
                     // cannot be the thing that reports itself broken.
-                    if (intro == null || intro.Finished || _stateTime >= _introBudget)
+                    //
+                    // Measured on the UNSCALED clock, and that is the difference between a guarantee
+                    // and a comment. It was measured on the scaled one, which meant a popup that
+                    // stopped time stopped the story AND this deadline together — the game hung on
+                    // the story's fade-in frame with the only thing that could have rescued it
+                    // frozen alongside. See _stateUnscaled. The scaled reading is kept in the Max so
+                    // the capture harness, which steps this director by hand and never advances the
+                    // unscaled figure, behaves exactly as it did.
+                    if (intro == null || intro.Finished ||
+                        Mathf.Max(_stateTime, _stateUnscaled) >= _introBudget)
                     {
                         if (intro != null && !intro.Finished)
                         {
@@ -1647,11 +1683,24 @@ namespace DuckMow
                     break;
 
                 case GameState.Ending:
-                    _ending?.Tick(dt);
-                    // Budgeted, not trusted — the same rule the opening story is under. A page that
-                    // never reports itself finished would strand the player on the last thing the
-                    // game ever shows them, with no way back.
-                    if (_ending == null || _ending.Finished || _stateTime >= _endingBudget)
+                    // Stepped BY HAND only under the capture harness.
+                    //
+                    // ComicSequence drives itself from its own Update in a live session — the
+                    // opening story has always relied on exactly that and this case never called
+                    // intro.Tick — so ticking it here as well ran the ending page at DOUBLE SPEED,
+                    // which it has been doing since the page was wired in. The harness is the one
+                    // caller that needs this: it sets SimClock.Scripted, which is precisely the flag
+                    // the sequence's own Update stands down for so that frame sheets are
+                    // reproducible, and something has to step it in its place.
+                    if (SimClock.Scripted) _ending?.Tick(dt);
+                    // Budgeted, not trusted — the same rule the opening story is under, including
+                    // the UNSCALED clock. A page that never reports itself finished would strand the
+                    // player on the last thing the game ever shows them, with no way back, and this
+                    // page is reachable with the pause board open over it — which stops the scaled
+                    // clock and would have stopped the deadline with it. Same fault as the opening
+                    // story's, same fix; see _stateUnscaled.
+                    if (_ending == null || _ending.Finished ||
+                        Mathf.Max(_stateTime, _stateUnscaled) >= _endingBudget)
                     {
                         if (_ending != null && !_ending.Finished)
                         {

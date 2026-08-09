@@ -107,6 +107,13 @@ namespace DuckMow
         float _clock;
         bool _resultFilled;
 
+        /// <summary>
+        /// The plate in the top corner that opens the pause board. Built at runtime and stepped from
+        /// <see cref="LateUpdate"/>. See <see cref="DuckMow.UI.PauseButton"/>, which is one class
+        /// shared by all three stages so the three HUDs cannot grow three pause buttons.
+        /// </summary>
+        DuckMow.UI.PauseButton _pause;
+
         void Awake()
         {
             if (director == null) director = FindFirstObjectByType<RallyDirector>();
@@ -115,6 +122,29 @@ namespace DuckMow
             if (tickerGroup != null) tickerGroup.alpha = 0f;
             EnsureExitPrompt();
             if (exitGroup != null) exitGroup.alpha = 0f;
+
+            // Hard top right, which this HUD leaves empty: the clock is centred at 0.435..0.565 and
+            // the contestant cards and the result panel are elsewhere. The default corner is the
+            // right answer here and only the lawn has to argue for a different one.
+            _pause = DuckMow.UI.PauseButton.Attach(ResolveCanvas());
+        }
+
+        /// <summary>
+        /// The canvas this HUD's baked widgets live on.
+        ///
+        /// Reached through a BAKED WIDGET rather than through this component's own transform, and
+        /// that is load bearing: DuckRallyBuilder puts the RallyHud on the "~ Systems" object and
+        /// creates "~ Rally HUD" as a separate scene root, so a walk up from here finds no canvas at
+        /// all. The result panel is on the one we want, by construction.
+        ///
+        /// Extracted from EnsureExitPrompt, which worked this out for itself and now asks here. Two
+        /// runtime widgets hunting for the same canvas by two routes is how one of them ends up on a
+        /// different one after somebody re-parents a panel.
+        /// </summary>
+        Canvas ResolveCanvas()
+        {
+            var anchorTo = resultGroup != null ? (RectTransform)resultGroup.transform : null;
+            return anchorTo != null ? anchorTo.GetComponentInParent<Canvas>() : null;
         }
 
         /// <summary>
@@ -151,13 +181,9 @@ namespace DuckMow
                 return;
             }
 
-            // The canvas is reached through a BAKED widget rather than through this component's own
-            // transform, and that is load bearing. DuckRallyBuilder puts the RallyHud on the
-            // "~ Systems" object and creates "~ Rally HUD" as a separate scene root, so a walk up
-            // from here finds no canvas at all. The result panel is on the one we want, by
-            // construction — it is the thing this prompt sits above.
-            var anchorTo = resultGroup != null ? (RectTransform)resultGroup.transform : null;
-            var canvas = anchorTo != null ? anchorTo.GetComponentInParent<Canvas>() : null;
+            // Through the result panel rather than through this component's own transform — see
+            // ResolveCanvas, which explains why a walk up from here finds nothing.
+            var canvas = ResolveCanvas();
             if (canvas == null)
             {
                 Debug.LogWarning("[Rally] the HUD has no result panel to hang the way-out prompt " +
@@ -225,6 +251,11 @@ namespace DuckMow
 
         void LateUpdate()
         {
+            // Before the director guard, because the pause plate is the one thing on this HUD that
+            // has to work in a scene whose director never came up — that is precisely the situation a
+            // player needs a way out of, and Escape is not one on a touchscreen.
+            _pause?.Tick();
+
             if (director == null) return;
             if (view == null) view = Camera.main;
 
