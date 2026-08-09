@@ -128,3 +128,18 @@ InitTestScene*.unity*
 
 # Python bytecode from the Blender asset scripts. Regenerated on every run.
 /Art/Blender/__pycache__/
+
+# The agent tool's own directory. Nothing under here describes the game.
+#
+# settings.local.json is one machine's tool permissions — it was tracked by mistake and is
+# untracked in the same commit as this line.
+#
+# worktrees/ is the one that mattered. Each folder under it is a FULL CHECKOUT of this
+# repository, made so several agents could edit at once without colliding, so four of them is
+# four more copies of the project — and each carries a .git file pointing into this repo's
+# internals, which means nothing on anybody else's machine. It was untracked but NOT ignored,
+# which is a live hazard rather than a tidy one: a single `git add -A` without a path argument
+# commits the lot. The work those folders produced is not in them anyway; it is in the
+# worktree-agent-* branches, which live in the object database and survive deleting every
+# folder here.
+/.claude/
