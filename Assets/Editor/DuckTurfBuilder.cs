@@ -1830,42 +1830,22 @@ namespace DuckMow.EditorTools
             }
 
             Repaint(go, slot);
-            Unseat(go.transform);
-            SeatRival(go.transform, slot);
+            // Through DuckModelIntegration, which is where the one copy of this now lives. The copy
+            // that used to be in this file parented the driver to the mower ROOT and read the seat
+            // from a constant, which is correct in the saved prefab and wrong the instant the scene
+            // runs — MowerVisuals drops VisualPivot by its ground offset at Awake and takes the duck
+            // with it, so a root-parented rival was left 0.44 m in the air on a 0.42 m seat. Every
+            // gardener, every match. The rally builder had already found and fixed this; only its
+            // copy got the fix.
+            DuckModelIntegration.SeatRival(go.transform, slot.contestant);
             return go;
         }
 
-        /// <summary>
-        /// Take the duck off a machine before somebody else gets on it.
-        ///
-        /// Mower.prefab is not a bare mower — it ships with the PLAYER already sitting on it, as a
-        /// Duck hierarchy of body, head, bill, cap, wings and feet. That is right for the round,
-        /// where there is one machine and the duck is on it, and it is why the prefab is worth
-        /// reusing for all four here: identical chassis, identical physics, no second model to drift
-        /// out of step with the one the player has spent the game driving.
-        ///
-        /// But the three opponents get their own contestant seated at the same offset, and nothing
-        /// was removing the duck first. Every rival machine in the arena had TWO drivers occupying
-        /// one seat — a hare and a duck, a badger and a duck, a sheep and a duck — intersecting each
-        /// other at ground level where the chase camera spends the entire match.
-        ///
-        /// Deactivated rather than destroyed: this is a prefab instance, and deleting a child of one
-        /// is a structural override that Unity records and reapplies noisily on every reimport.
-        /// </summary>
-        static void Unseat(Transform mower)
-        {
-            foreach (var t in mower.GetComponentsInChildren<Transform>(true))
-            {
-                if (t.name != "Duck") continue;
-                t.gameObject.SetActive(false);
-                return;
-            }
-            // Not fatal — a prefab without a duck in it is a prefab somebody has already stripped —
-            // but worth saying, because the symptom otherwise is two animals in one seat and no
-            // clue as to why.
-            Debug.LogWarning("[Bloom] no 'Duck' child on Mower.prefab to take off a rival machine; " +
-                             "if the opponents have two drivers, this is where to look.");
-        }
+        // Unseat() USED TO BE HERE, alongside this file's own SeatRival. Both are gone into
+        // DuckModelIntegration.SeatRival, which does the two halves together — because they ARE one
+        // operation, and splitting them is how this copy ended up able to hide the duck and then put
+        // the rival somewhere else. The shared version also puts the duck back when a rival mesh is
+        // missing, which the pair here could not: Unseat had already run.
 
         static void Repaint(GameObject mower, in TurfArena.Slot slot)
         {
@@ -1880,21 +1860,6 @@ namespace DuckMow.EditorTools
             }
         }
 
-        static void SeatRival(Transform mower, in TurfArena.Slot slot)
-        {
-            string blenderName = char.ToUpper(slot.contestant[0]) + slot.contestant.Substring(1).ToLower();
-            var mesh = DuckAssetLibrary.GetCombined("Rivals.fbx", $"{blenderName}_Root",
-                                                    $"Rival_{blenderName}");
-            if (mesh == null) return;
-
-            var go = new GameObject("Driver");
-            go.transform.SetParent(mower, false);
-            go.transform.localPosition = DuckModelIntegration.DuckSeatOffset;
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = Mat("M_Rivals") ?? Mat("M_PropsAuthored");
-            mr.shadowCastingMode = ShadowCastingMode.On;
-        }
 
         /// <summary>
         /// The wall around the core: a low stone ring nobody drives into.

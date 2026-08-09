@@ -281,6 +281,84 @@ namespace DuckMow.EditorTools
         /// </summary>
         public static readonly Vector3 DuckSeatOffset = new Vector3(0f, 0.42f, -0.10f);
 
+        /// <summary>
+        /// Take the duck off a Mower.prefab instance and put a rival contestant in its place.
+        ///
+        /// ---- why this is here and not in each arena's builder ----
+        ///
+        /// It was in each arena's builder, twice, and the two copies diverged: the rally's was fixed
+        /// and Bloom Rush's was not, so every gardener in stage three drove the whole match sitting
+        /// FORTY-FOUR CENTIMETRES ABOVE THEIR OWN SEAT. Two builders seating the same meshes on the
+        /// same prefab is one behaviour, and one behaviour belongs in one function — otherwise the
+        /// third arena somebody adds inherits whichever copy they happened to read.
+        ///
+        /// ---- the fault the copy had, because it is not obvious and it will be tempting again ----
+        ///
+        /// Mower.prefab is Mower -> VisualPivot -> Duck, with the duck at <see cref="DuckSeatOffset"/>
+        /// under the pivot and the pivot at zero. So parenting a rival to the mower ROOT at that same
+        /// offset looks exactly equivalent, and in the saved prefab it IS exactly equivalent.
+        ///
+        /// It stops being equivalent the moment the scene runs. MowerVisuals.Awake does
+        /// `_pivotBase.y += GroundOffset()` and writes it back — a permanent, static drop applied to
+        /// VisualPivot so the authored model's wheels meet the ground rather than hanging at the
+        /// rigidbody's suspension ride height. Everything under the pivot goes down with it. A rider
+        /// hung off the root does not, and the gap is the whole of GroundOffset: at the prefab's
+        /// 180 kg, 0.30 m rest, 0.16 m travel, 24000 N/m springs and 2.1 gravity scale that is
+        /// -0.442 m, against a seat that is only 0.42 m up. The rival ends up a full seat-height into
+        /// the air, every match, on every machine, and nothing about the built scene looks wrong.
+        ///
+        /// So: parent to the PIVOT, and take the position from the DUCK rather than from the
+        /// constant. The duck is the thing that has been measured against this model, and reading it
+        /// means a re-measure cannot leave the rivals behind.
+        /// </summary>
+        /// <param name="mower">Root of a Mower.prefab instance.</param>
+        /// <param name="contestant">Contestant name, as Venue spells it. Cased for the FBX lookup.</param>
+        public static void SeatRival(Transform mower, string contestant)
+        {
+            if (mower == null || string.IsNullOrEmpty(contestant)) return;
+
+            var pivot = mower.Find("VisualPivot");
+            var duck = pivot != null ? pivot.Find("Duck") : null;
+
+            // Off, not deleted. The prefab connection stays intact, and deleting a child of an
+            // instance is a structural override Unity records and reapplies noisily on reimport.
+            if (duck != null) duck.gameObject.SetActive(false);
+
+            string blenderName = char.ToUpper(contestant[0]) + contestant.Substring(1).ToLower();
+            var mesh = DuckAssetLibrary.GetCombined("Rivals.fbx", $"{blenderName}_Root",
+                                                    $"Rival_{blenderName}");
+            if (mesh == null)
+            {
+                // No rival model is not a reason to ship an empty seat — put the duck back.
+                if (duck != null) duck.gameObject.SetActive(true);
+                Debug.LogWarning($"[Duck] no rival mesh for {contestant}; leaving the duck in the seat.");
+                return;
+            }
+
+            var go = new GameObject("Driver");
+            go.transform.SetParent(pivot != null ? pivot : mower, false);
+
+            // The duck's POSITION, but never its rotation or scale.
+            //
+            // GetCombined expresses each piece relative to the FBX root's parent, which keeps the
+            // importer's axis conversion baked into the vertices — so a rival mesh is already the
+            // right way up and wants an IDENTITY rotation. Copying the duck's local rotation on top
+            // of that is a second conversion applied to an already-converted mesh, and it laid every
+            // contestant on their back staring at the sky.
+            go.transform.localPosition = duck != null ? duck.localPosition : DuckSeatOffset;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = RivalMaterial();
+            mr.shadowCastingMode = ShadowCastingMode.On;
+        }
+
+        static Material RivalMaterial()
+            => AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/M_Rivals.mat")
+            ?? AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/M_PropsAuthored.mat");
+
         /// <summary>Bounds-based fallback, kept for assets that have no authored seat node.</summary>
         static void SeatDuck(GameObject duckGO, GameObject mowerGO)
         {
