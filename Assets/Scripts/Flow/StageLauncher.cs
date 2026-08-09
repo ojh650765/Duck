@@ -28,8 +28,8 @@ namespace DuckMow.Flow
     ///
     /// ---- why this is not a call into GameDirector ----
     ///
-    /// The game already has a way to reach the two arenas, and it is the round chain:
-    /// GameDirector.StageChainNext splices Goose Rally in at <c>rallyOnRound</c> and Bloom Rush at
+    /// The game already has a way to reach the two arenas, and it is the running order:
+    /// GameDirector plays Goose Rally AS round <c>rallyOnRound</c> and Bloom Rush AS round
     /// <c>bloomOnRound</c>, RallyStage and TurfStage load them ADDITIVELY beside Main.unity, put the
     /// lawn to sleep, and unload them again on the way back. Every part of that machinery exists to
     /// serve one thing — a continuous evening — and every part of it is wrong for a stage select:
@@ -69,18 +69,18 @@ namespace DuckMow.Flow
     /// ---- what StageId.LawnArt launches, and why it needed a flag ----
     ///
     /// The other two stages are scenes. LawnArt is not: it is Main.unity, which is the whole
-    /// CHAMPIONSHIP — a GameDirector holding <c>playIntro</c>, a three-round running order, and
-    /// <c>rallyOnRound: 2</c> / <c>bloomOnRound: 3</c> splicing the other two stages into itself.
-    /// So for as long as this class only loaded a scene, picking stage one off a stage select gave
-    /// the player the opening story followed by all three stages, while picking stage two or three
-    /// gave them one match and a horn. Two rows behaved one way and the third behaved like the
-    /// entire game, and a board that offers three equal-looking plates and means something
-    /// different by one of them is lying to the person clicking it.
+    /// CHAMPIONSHIP — a GameDirector holding <c>playIntro</c> and a three-round running order in
+    /// which <c>rallyOnRound: 2</c> and <c>bloomOnRound: 3</c> name rounds two and three as the
+    /// other two stages. So for as long as this class only loaded a scene, picking stage one off a
+    /// stage select gave the player the opening story followed by all three stages, while picking
+    /// stage two or three gave them one match and a horn. Two rows behaved one way and the third
+    /// behaved like the entire game, and a board that offers three equal-looking plates and means
+    /// something different by one of them is lying to the person clicking it.
     ///
     /// The fix is <see cref="SoloRound"/>: an INTENT, set here and honoured by GameDirector, rather
     /// than a reconfiguration performed here. That distinction is the whole of the design and it is
     /// worth being explicit about, because the obvious alternative — reach into the live
-    /// GameDirector and set <c>rallyEnabled = false</c> — is genuinely worse in two ways. It is a
+    /// GameDirector and set <c>rallyOnRound = 0</c> — is genuinely worse in two ways. It is a
     /// launcher editing the thing it launches, which is how a class ends up owning half of somebody
     /// else's state machine. And those fields are SERIALIZED: writing them at runtime in the editor
     /// is one accidental "Apply" away from a championship that no longer has a round two in it,

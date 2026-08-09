@@ -14,9 +14,9 @@ namespace DuckMow
     /// into the game.
     ///
     /// TWO of those four start a game, and the split is the point. PLAY runs the championship —
-    /// rounds chained together, the stages arriving when the chain says they do. THE CLASSES opens
+    /// three rounds, and each round IS one of the three stages. THE CLASSES opens
     /// a board of the individual classes and hands one straight to <see cref="StageLauncher"/>,
-    /// with no chain, no round number and no verdict waiting at the end. The second door exists
+    /// with no championship, no round number and no verdict waiting at the end. The second door exists
     /// because without it two thirds of this game can only be reached by playing through the third
     /// that is not being asked for.
     ///
@@ -1111,11 +1111,11 @@ namespace DuckMow
         //
         // THE CLASS LIST, and the one thing it is careful not to do.
         //
-        // PLAY runs the championship: three rounds, chained, with the picture and the stages the
-        // chain decides on and a verdict at the end. That chain is the game, and it is also the
-        // reason two thirds of the game are hard to reach — the goose rally and the bloom rush only
-        // come up when the round the player is on says so, so somebody wanting to look at the rally
-        // has to play their way to it, every time, through a round they were not interested in.
+        // PLAY runs the championship: three rounds, and each round IS one of the three stages —
+        // the picture, then the goose rally, then the bloom rush. That running order is the game,
+        // and it is also the reason two thirds of the game are hard to reach: the rally is round two
+        // and the bloom rush is round three, so somebody wanting to look at either has to play their
+        // way to it, every time, through rounds they were not interested in.
         //
         // So this board is a SECOND, INDEPENDENT door. It knows three things: which classes exist,
         // what they are called, and how to ask for one. It does not know which scene a class lives

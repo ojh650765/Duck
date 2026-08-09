@@ -510,9 +510,10 @@ namespace DuckMow
         /// the panel reads finished while the state reads Judging.
         ///
         /// WHAT THIS SKIPS, and it is worth being straight about it: the klaxon and its hit stop,
-        /// the reveal's own three beats over the picture, the stage chain out to the goose rally and
-        /// Bloom Rush, and the blossom curtain that normally covers the cut to the bench. Reviewing
-        /// any of those needs the real path — press 6, drive, and let the round end by itself.
+        /// the reveal's own three beats over the picture, and the hold on the finished picture that
+        /// the player presses on from. Reviewing any of those needs the real path — press 6, drive,
+        /// and let the round end by itself. The two arenas are not skipped by this and never were:
+        /// they are rounds TWO and THREE, and this is round one's bench.
         /// </summary>
         void JudgeRound(GameDirector g, Force force)
         {

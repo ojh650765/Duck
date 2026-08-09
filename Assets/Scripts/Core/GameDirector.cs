@@ -110,43 +110,49 @@ namespace DuckMow
                  "phase needs no scene rebuild and cutting it leaves nothing to unwire.")]
         public GooseDefence defence;
 
-        [Header("Goose rally (stage two)")]
-        [Tooltip("Run the four-way goose rally between the klaxon and the reveal. This is the mode " +
-                 "the old one-on-one defence phase above was a prototype for; do not turn both on.")]
-        public bool rallyEnabled = true;
-        [Tooltip("Which round of the championship the rally plays on. Two.\n\n" +
-                 "A number rather than an 'on the final round' flag, which is what this was. That " +
-                 "flag hard-coded the rally as the finale, and it is not the finale — it is stage " +
-                 "two, with something else after it. A named round also means the stages can be " +
-                 "re-ordered from the inspector instead of from a boolean that only knows how to say " +
-                 "'last'.\n\n" +
-                 "Zero or less plays it on every round, which is only useful for review.")]
+        // ------------------------------------------------------------------ the running order
+        //
+        // A ROUND IS A STAGE. Round one is the picture, round two is the goose rally, round three is
+        // Bloom Rush, and the picture is mowed exactly once in a championship.
+        //
+        // It used to be otherwise: a round was a LAWN-ART round with the arenas spliced into it, so
+        // the evening was three pictures with a match hanging off the second and third. Pressing on
+        // from a scoreboard rolled a NEW SUBJECT, and the player asked the obvious question — "why am
+        // I drawing again?". The game's own signage had already answered it the other way for
+        // months: every curtain into an arena reads GOOSE RALLY / ROUND 2 OF 3 and BLOOM RUSH /
+        // FINAL ROUND, which is one stage per round. The signs were right and the state machine was
+        // wrong.
+        //
+        // THREE FIELDS ARE GONE, and each was a trap under the new rule rather than merely unused:
+        //
+        //   stageChainOnConfirm  chose between splicing a stage into the middle of a round and
+        //                        chaining it off the end. There is no middle and no end to chain to
+        //                        any more; a round IS the stage, so both halves of the choice named
+        //                        the same thing.
+        //   rallyEnabled         "is the goose rally in this build". Off, round two would have been
+        //   bloomEnabled         a round with nothing in it — a curtain, a board, and no match. A
+        //                        stage cannot be switched off when it is a whole round; it can only
+        //                        be taken OUT of the running order, which is what the two fields
+        //                        below now do by naming no round at all.
+        //
+        // bloomEnabled also shipped FALSE by default while Main.unity carried a hand-edited 1, so
+        // anybody who rebuilt the scene silently lost stage three and nothing in the diff said so.
+        // Removing the flag removes that possibility as well.
+
+        [Header("Running order")]
+        [Tooltip("Which round of the championship IS the goose rally. Two.\n\n" +
+                 "Not 'which round has the rally spliced into it' — the round is the match, and " +
+                 "nothing is mowed, revealed or judged in it. Naming the round rather than hard " +
+                 "coding it is what lets the running order be re-ordered from the inspector.\n\n" +
+                 "Zero or less takes the rally out of the championship altogether; that round is " +
+                 "then a Lawn Art round like any other, which is the only other honest answer.")]
         public int rallyOnRound = 2;
 
-        [Header("Bloom Rush (stage three)")]
-        [Tooltip("Run the four-way territory match between the rally and the reveal.\n\n" +
-                 "Off by default, and deliberately: the round's flow through the klaxon is a " +
-                 "finished, reviewed sequence, and a new stage that inserted itself into it without " +
-                 "being asked would change every completed round in the game. Turn it on here, or " +
-                 "open BloomRush.unity and press play — the stage runs standalone, which is how it " +
-                 "is meant to be reviewed.")]
-        public bool bloomEnabled;
-        [Tooltip("Which round of the championship Bloom Rush plays on. Three, after the rally's two.\n\n" +
-                 "Zero or less plays it on every round, which is only useful for review.")]
+        [Tooltip("Which round of the championship IS Bloom Rush. Three, after the rally's two.\n\n" +
+                 "Zero or less takes it out of the running order — see rallyOnRound. Two stages " +
+                 "naming the same round is a mistake the round loop resolves in favour of the " +
+                 "rally, which is stated rather than accidental; see StageOfRound.")]
         public int bloomOnRound = 3;
-
-        [Header("Stage chain")]
-        [Tooltip("Play the round's later stages between the reveal and the judging, instead of " +
-                 "splicing them into the middle of the round at the klaxon.\n\n" +
-                 "This is the running order the game is built around: mow the picture, see it, " +
-                 "press on to the goose rally, press on to Bloom Rush, and only THEN face the " +
-                 "panel — so the three judges are marking the whole round rather than only the " +
-                 "part of it that happened on a lawn.\n\n" +
-                 "Off, the stages splice themselves in at the klaxon instead, which is where they " +
-                 "started life and is still how a single stage is reviewed on its own.\n\n" +
-                 "The two paths are mutually exclusive by construction — see StageChainNext — so a " +
-                 "stage can never be played twice in one round.")]
-        public bool stageChainOnConfirm = true;
 
         [Header("Round")]
         public float roundDuration = 75f;
@@ -165,7 +171,8 @@ namespace DuckMow
         public float revealGhostSweep = 1.6f;
         public float revealAnalysisHold = 1.5f;
         [Tooltip("Seconds the finished picture is held, waiting to be pressed on from, before the " +
-                 "round moves itself along. Only used when the stage chain is on.")]
+                 "round moves itself along to the judges. The timeout exists so an unattended " +
+                 "capture run still completes; a player presses on long before it.")]
         public float revealStageHold = 6f;
 
         [Header("Warnings")]
@@ -316,20 +323,45 @@ namespace DuckMow
         /// <summary>
         /// What pressing on from the reveal will actually do, in words a player can read.
         ///
-        /// Deliberately answered by the same two gates <see cref="StageChainNext"/> uses, so the
-        /// prompt can never offer a stage this round is not going to play. A prompt that promises
-        /// the geese and then delivers the judges is worse than no prompt at all — it is the game
-        /// being wrong about itself, in the one place the player is looking for instructions.
+        /// A constant now, and that is the point rather than an oversight. It used to answer through
+        /// the same two gates the stage chain used, so the prompt could never offer a stage the round
+        /// was not going to play — a prompt that promises the geese and then delivers the judges is
+        /// the game being wrong about itself, in the one place the player is looking for
+        /// instructions. Under round == stage there is only ever one thing on the far side of a
+        /// reveal: the reveal only happens in the Lawn Art round, and what follows a picture is
+        /// always the bench that marks it.
+        ///
+        /// Kept as a property rather than inlined into the HUD, because the rule it enforces is the
+        /// valuable part: there is exactly ONE place in this project that decides what the outro
+        /// prompt promises, and it is the same class that decides what actually happens next.
         /// </summary>
-        public string PressOnLabel
+        public string PressOnLabel => "THE JUDGES";
+
+        /// <summary>
+        /// What the next round of the championship IS, in words a player can read, for the prompt on
+        /// the scoreboard.
+        ///
+        /// Under the old rule the board could only ever offer one thing — a fresh picture — and the
+        /// HUD said so in a fixed string. Now the board is the join between two STAGES, and pressing
+        /// on from round one's board goes to the goose rally rather than to another lawn. A prompt
+        /// still reading "NEXT ROUND" would be true and useless; the player's actual question at that
+        /// board is "what am I about to be asked to do".
+        ///
+        /// Safe to read at the board because <see cref="Tournament.BankRound"/> has already run by
+        /// then — see the Scoreboard case in <see cref="SetState"/>, which banks before it fills the
+        /// board — so <see cref="Championship.RoundNumber"/> has already moved on to the round this
+        /// names. Answered through <see cref="StageOfRound"/> so the prompt and the state the board
+        /// is about to enter cannot disagree.
+        /// </summary>
+        public string NextRoundLabel => StageName(ThisRoundsStage);
+
+        /// <summary>The venue's own name for a stage. One spelling, wherever it is printed.</summary>
+        static string StageName(GameState stage) => stage switch
         {
-            get
-            {
-                if (RallyWanted && !Played(GameState.Rally)) return "GOOSE RALLY";
-                if (BloomWanted && !Played(GameState.Bloom)) return "BLOOM RUSH";
-                return "THE JUDGES";
-            }
-        }
+            GameState.Rally => "GOOSE RALLY",
+            GameState.Bloom => "BLOOM RUSH",
+            _ => "LAWN ART"
+        };
 
         void Start()
         {
@@ -337,11 +369,11 @@ namespace DuckMow
             // depend on the answer and one of them is the opening story.
             //
             // Two things can open this scene and they mean different things by it. PLAY on the front
-            // page means the CHAMPIONSHIP: the story page, three rounds, the goose rally spliced in
-            // at round two, Bloom Rush at round three, a ceremony and an ending. The stage select's
-            // first plate means STAGE ONE — one picture, mowed, judged, done — and has to mean that,
-            // because the two plates beside it are exactly that and a board whose three rows keep
-            // three different promises is not a stage select.
+            // page means the CHAMPIONSHIP: the story page, then three rounds which ARE the three
+            // stages — the picture, the goose rally, Bloom Rush — and then an ending. The stage
+            // select's first plate means ROUND ONE — one picture, mowed, judged, done — and has to
+            // mean that, because the two plates beside it are exactly that and a board whose three
+            // rows keep three different promises is not a stage select.
             //
             // The distinction cannot be worked out from this scene: Main.unity is identical on both
             // routes, which is the whole problem. So it is TOLD, by the only thing that knows, and
@@ -413,7 +445,7 @@ namespace DuckMow
                 return;
             }
 
-            BeginRound(_currentShape, true);
+            BeginFirstRound();
         }
 
         float _introBudget = 90f;
@@ -427,7 +459,7 @@ namespace DuckMow
             playIntro = false;
             if (State != GameState.Intro) return;
             intro?.Hide();
-            BeginRound(_currentShape, true);
+            BeginFirstRound();
         }
 
         ShapeId RandomShape()
@@ -497,6 +529,14 @@ namespace DuckMow
             return defence;
         }
 
+        /// <summary>
+        /// Start the LAWN ART round: a picture, mowed, revealed, judged.
+        ///
+        /// One of the two ways a round can begin. The other is <see cref="BeginMatchRound"/>, and
+        /// <see cref="BeginNextRound"/> is what chooses between them — nothing outside this file
+        /// should be picking. This one is still called directly by the retry path, by the opening
+        /// story's exit and by the capture tools, all of which mean "a picture" specifically.
+        /// </summary>
         public void BeginRound(ShapeId shape, bool announce)
         {
             _currentShape = shape;
@@ -560,7 +600,6 @@ namespace DuckMow
             GuideDissolving = false;
             _guideLostFired = false;
             AerialChecksRemaining = Mathf.Max(0, aerialChecksPerRound);
-            _stagesPlayed = 0;
             AerialAmount = 0f;
             _aerialPhase = AerialPhase.Idle;
 
@@ -578,6 +617,140 @@ namespace DuckMow
 
             if (announce) SetState(GameState.Briefing);
             else { cameraDirector?.SnapToChase(); SetState(GameState.Countdown); }
+        }
+
+        // ------------------------------------------------------------------ the running order
+
+        /// <summary>The championship's own round number, 1-based. 1 in a scene with no tournament.</summary>
+        int ChampRound => tournament != null && tournament.Championship != null
+            ? tournament.Championship.RoundNumber : 1;
+
+        /// <summary>
+        /// Which stage a given round of the championship IS.
+        ///
+        /// Three answers and only three: <see cref="GameState.Mowing"/> for Lawn Art,
+        /// <see cref="GameState.Rally"/> for the goose rally, <see cref="GameState.Bloom"/> for
+        /// Bloom Rush. Mowing rather than a fourth enum for "the lawn" because that is genuinely the
+        /// state a lawn round is played in, and a private vocabulary for the same three things is one
+        /// more mapping to get wrong.
+        ///
+        /// The rally is tested first, so two stages configured onto the same round resolve to the
+        /// rally rather than to whichever branch happened to be written second. That is a stated
+        /// resolution rather than an accident, and it is the conservative one: the rally is the
+        /// earlier stage in the running order.
+        ///
+        /// Read off the CHAMPIONSHIP's round number everywhere it is used, never off
+        /// <see cref="RoundNumber"/>, which counts retries — a player who has restarted round one
+        /// four times has not arrived at the arena.
+        ///
+        /// A SOLO ROUND is always Lawn Art, and this is the one place that is decided for the whole
+        /// class. It used to be two properties, RallyWanted and BloomWanted; the argument they
+        /// carried still holds and is worth keeping: a solo round is one picture, and every route
+        /// into an arena, plus every sign that names one, has to be shut by ONE answer or a build
+        /// ends up advertising a stage it will not play. It is deliberately NOT done by writing
+        /// rallyOnRound = 0 at startup — those are serialized fields on a component in Main.unity,
+        /// and setting them at runtime in the editor is one absent-minded Apply away from a
+        /// championship that has permanently lost round two in a scene file, with nothing in the
+        /// diff to explain it. What a solo round changes is what the round WANTS, not what the build
+        /// HAS.
+        /// </summary>
+        GameState StageOfRound(int round)
+        {
+            if (SoloRound) return GameState.Mowing;
+            if (rallyOnRound > 0 && round == rallyOnRound) return GameState.Rally;
+            if (bloomOnRound > 0 && round == bloomOnRound) return GameState.Bloom;
+            return GameState.Mowing;
+        }
+
+        /// <summary>What the round the championship is currently on is made of.</summary>
+        GameState ThisRoundsStage => StageOfRound(ChampRound);
+
+        /// <summary>
+        /// Start whatever round the championship has arrived at, whichever kind it is.
+        ///
+        /// The single door between rounds. Everything that means "the evening carries on" goes
+        /// through here — the scoreboard's continue key, and a fresh championship — so there is one
+        /// answer to "what happens after a board" rather than one per caller.
+        /// </summary>
+        public void BeginNextRound()
+        {
+            var stage = ThisRoundsStage;
+            if (stage == GameState.Mowing) { NextShape(); return; }
+            BeginMatchRound(stage);
+        }
+
+        /// <summary>
+        /// The same door, for the FIRST round of a session.
+        ///
+        /// Separate from <see cref="BeginNextRound"/> for one reason: that one rolls a fresh subject
+        /// through <see cref="NextShape"/>, which deliberately avoids repeating the picture just
+        /// played. The first round of a session has nothing to avoid and does have a configured
+        /// opening — <see cref="randomiseFirstShape"/> and <see cref="startingShape"/>, settled in
+        /// Start — so it uses that instead.
+        ///
+        /// It still asks the running order rather than assuming a lawn. Round one IS Lawn Art in
+        /// every shipping arrangement, but "in every shipping arrangement" is exactly the kind of
+        /// assumption that turns an inspector field into a trap: somebody who sets rallyOnRound to 1
+        /// is entitled to get the rally, not a lawn followed by a board that promises one.
+        /// </summary>
+        void BeginFirstRound()
+        {
+            var stage = ThisRoundsStage;
+            if (stage == GameState.Mowing) { BeginRound(_currentShape, true); return; }
+            BeginMatchRound(stage);
+        }
+
+        /// <summary>
+        /// Start a MATCH round: the goose rally or Bloom Rush, played as the whole of a round.
+        ///
+        /// Almost nothing of <see cref="BeginRound"/> applies. There is no picture to build, no
+        /// start line to park on, no guide to redraw, no chalk, no rivals to begin — they are not
+        /// mowing, they are in the arena — and no briefing, preview or count-in, because the arena
+        /// runs its own. What survives is the bookkeeping every round needs whatever it is made of:
+        /// the round counter, the journey's idea of where the player is, and making sure nothing
+        /// from the last round is still holding the camera or a scene.
+        ///
+        /// The chalk is zeroed rather than left alone. Main sleeps behind the arena rather than being
+        /// unloaded, and the overlay is written to a material instance that survives the trip — so an
+        /// outline left at full alpha would be sitting on the lawn again the moment the arena
+        /// unloads and the board is framed.
+        /// </summary>
+        void BeginMatchRound(GameState stage)
+        {
+            RoundNumber++;
+
+            // The same three teardowns BeginRound opens with, for the same reason: a retry or a
+            // forced state can land here with a raid mid-air or an arena still loaded, and neither
+            // has any business surviving into a fresh round.
+            defence?.Abort();
+            AbandonRally();
+            AbandonBloom();
+
+            BonkCount = 0;
+            LastScore = default;
+            _lowTimeFired = false;
+            AerialAmount = 0f;
+            _aerialPhase = AerialPhase.Idle;
+
+            // No clock of our own: the arena owns the round's time. Zeroed so nothing that reads the
+            // HUD's timer is left showing the last round's remainder.
+            RoundLength = 0f;
+            TimeRemaining = 0f;
+
+            SetChalk(0f, 0f, 0f, 1.2f, 0f, 0f);
+            judges?.ResetPanel();
+            scoreboard?.ResetBoard();
+            cameraDirector?.SetJudgeFocus(null);
+
+            if (tournament != null && tournament.Championship != null)
+                MatchState.Round = tournament.Championship.RoundNumber;
+
+            Debug.Log($"[Duck] round {ChampRound} of {MatchState.RoundsTotal}: {StageName(stage)}.");
+
+            // Straight in. The stage's own Run coroutine closes the curtain, loads the arena and
+            // lifts onto its establishing shot — see the Rally and Bloom cases in SetState, which
+            // start it on the frame the state lands rather than a frame later.
+            SetState(stage);
         }
 
         // ------------------------------------------------------------------ the seams
@@ -625,117 +798,57 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// What the sign should say on the way OUT of a stage, which depends on where the round is
-        /// going next rather than on which stage is ending.
+        /// What the sign should say on the way OUT of an arena.
         ///
-        /// Asked by RallyStage and TurfStage as they close the curtain behind themselves. If another
-        /// stage follows, that stage re-dresses the sign a frame later and this label is never seen —
-        /// so the answer only has to be right for the case where the arena was the last one.
+        /// Asked by RallyStage and TurfStage as they close the curtain behind themselves, and the
+        /// answer no longer needs a search: a round IS a stage, so the only thing on the far side of
+        /// an arena is that round's board.
         ///
-        /// ---- why the last line stopped saying THE PANEL ----
+        /// It used to walk the running order looking for the next stage this round was going to
+        /// play, and fall through to the lawn. Both of those destinations are gone — the arena is
+        /// not inside a round any more, so there is nothing left of the round to come back to, and
+        /// the picture is a different round entirely.
+        ///
+        /// ---- why the last line does not say THE PANEL ----
         ///
         /// A sign is on screen for about a second and it is the worst possible place to teach a
         /// player a word. "THE PANEL" is the English village-fair term for a judging bench, and the
         /// rest of this game's copy was written in that register — the green, the gate, the classes —
         /// which is charming and completely opaque to somebody who has never been to a village fair.
-        /// It also named the wrong thing: what is on the other side of this particular curtain is
-        /// the LAWN, with the player's finished picture on it, and the judges are the beat AFTER
-        /// that. So the board now names the destination and the kicker names what is coming, which
-        /// is the job a sign has and the only job it can do in a second.
+        /// The same rule applies here: the board names the destination in the plainest word the game
+        /// has for it, and the kicker names what is coming, which is the job a sign has and the only
+        /// job it can do in a second.
         /// </summary>
         public void NextSeamLabel(out string headline, out string kicker)
         {
-            // The same two gates the chain itself uses, so the board can never name a stage this
-            // round is not going to play.
-            if (RallyWanted && !Played(GameState.Rally))
-            { headline = "GOOSE RALLY"; kicker = StageSeam.RoundKicker(MatchState.Round); return; }
-            if (BloomWanted && !Played(GameState.Bloom))
-            { headline = "BLOOM RUSH"; kicker = StageSeam.RoundKicker(MatchState.Round); return; }
-            headline = "YOUR PICTURE";
-            kicker = MatchState.FinalRound ? "THE LAST JUDGING" : "THE JUDGES ARE NEXT";
+            headline = "THE STANDINGS";
+            kicker = MatchState.FinalRound ? "THE LAST BOARD" : "THE BOARD IS NEXT";
         }
 
         /// <summary>Same picture, fresh lawn. The fast path the player will use most.</summary>
         public void RetrySameShape() => BeginRound(_currentShape, false);
 
         /// <summary>
-        /// What pressing on at the end of a round should do.
+        /// Hand the arena's result to the championship as THIS ROUND'S result.
         ///
-        /// The stages in running order, skipping any that are switched off or already played, and
-        /// falling through to a fresh picture when there are none left. Returns true when it took
-        /// the round somewhere, so the caller knows not to roll a new subject as well.
+        /// The only route a match reaches the competition by, and the counterpart to what the bench
+        /// does for a picture. It replaces BankStageResult, which folded an arena into a lawn round's
+        /// RoundScore so the three judges could mark it — there is no lawn round to fold it into any
+        /// more, and no bench sitting at the end of a match to do the folding.
         ///
-        /// Deliberately driven off the SAME enable flags the mid-round splice reads, so there is one
-        /// answer to "is stage three in this build" rather than two that can disagree.
+        /// The arithmetic did not go anywhere: Tournament.RallyMarks and Tournament.BloomMarks are
+        /// where it lives now, as statics, precisely so that the ARENA'S OWN board and the
+        /// championship's cannot come up with two different numbers for the same match. Both arenas
+        /// print a result to the player before this is ever called.
+        ///
+        /// Safe if the arena's own verdict already asked for it — see Tournament.CloseMatchRound,
+        /// which opens and closes in one call and is idempotent. Called here anyway, because the
+        /// paths that skip the verdict entirely (a scene that would not load, a match aborted) still
+        /// have to leave the board with something honest on it.
         /// </summary>
-        bool StageChainNext(GameState from)
+        void CloseMatchRound(MatchStage stage)
         {
-            if (!stageChainOnConfirm) return false;
-
-            // Gated on RallyWanted and BloomWanted, not on the bare enable flags.
-            //
-            // This chain used to read rallyEnabled directly, which quietly made rallyOnRound and
-            // bloomOnRound dead fields on the only path the game actually takes: every round played
-            // every stage, and the inspector said otherwise. The result was three identical rounds
-            // that each took eight minutes, and a championship with no shape to it — the geese
-            // arrived in round one, so their arrival was never an event.
-            //
-            // Read through the same two properties the mid-round splice reads, so there is exactly
-            // one answer to "does this round have the geese in it" however the round gets there.
-            if (RallyWanted && !Played(GameState.Rally))
-            {
-                _stageReturn = from;
-                SetState(GameState.Rally);
-                return true;
-            }
-            if (BloomWanted && !Played(GameState.Bloom))
-            {
-                _stageReturn = from;
-                SetState(GameState.Bloom);
-                return true;
-            }
-            return false;
-        }
-
-        bool Played(GameState stage) => (_stagesPlayed & (1 << (int)stage)) != 0;
-        void MarkPlayed(GameState stage) => _stagesPlayed |= 1 << (int)stage;
-
-        /// <summary>
-        /// Fold whatever the stages produced into the round's score, for the panel to mark.
-        ///
-        /// This is the ONLY route a stage result takes into the competition. Bloom Rush does not
-        /// announce a winner and the rally does not award anything: each posts a number to its
-        /// handoff, this reads them, and the three judges do what they do with every other part of
-        /// a round. A stage that declared its own result would be deciding the championship on its
-        /// own authority, which is not a thing any part of this game is allowed to do.
-        ///
-        /// The two are averaged rather than added, so playing both stages is not worth double, and
-        /// the whole thing is normalised against an even split: hold your quarter of the arena and
-        /// keep your garden intact and you score a half, which is exactly par.
-        /// </summary>
-        void BankStageResult()
-        {
-            float total = 0f;
-            int count = 0;
-
-            if (TurfHandoff.ResultsReady || TurfHandoff.Results.Length > 0)
-            {
-                // Share against an even four-way split. A quarter is par and scores 0.5; taking
-                // half the arena is a rout and saturates.
-                float share = TurfHandoff.PlayerResult.share;
-                total += Mathf.Clamp01(Mathf.InverseLerp(0f, 0.5f, share));
-                count++;
-            }
-
-            if (RallyHandoff.Results.Length > 0)
-            {
-                total += Mathf.Clamp01(RallyHandoff.PlayerResult.integrity);
-                count++;
-            }
-
-            var score = LastScore;
-            score.stages = count > 0 ? total / count : 0f;
-            LastScore = score;
+            tournament?.CloseMatchRound(stage, Venue.Player.centre);
         }
 
         /// <summary>Roll a different picture and announce it.</summary>
@@ -880,30 +993,28 @@ namespace DuckMow
                     break;
 
                 case GameState.Rally:
-                {
-                    // The picture is already settled and is never touched again: the rally is played
-                    // in its own scene on a garden grown from it, and the score the reveal is about
-                    // to compute is exactly what the player mowed.
-                    tournament?.FlushMasks();
-                    // Indicative only — the arena prints it on its board and nothing else reads it.
-                    // Not the real mark, because the real mark is what three judges are going to
-                    // argue about after the reveal and does not exist yet.
-                    float pictureSoFar = target != null && cutMask != null
-                        ? target.Evaluate(cutMask, mower.DriftMetres, mower.BoostMetres, BonkCount)
-                                .legibility * 30f
-                        : 0f;
+                    // The whole of round two. Started from here rather than from the first Tick so
+                    // the curtain closes on the frame the state changes — a frame later leaks one
+                    // frame of whatever the board was showing.
+                    //
+                    // ChampRound, not RoundNumber. The number goes onto the arena's own board and
+                    // into the kicker above its name on the curtain ("ROUND 2 OF 3"), and
+                    // RoundNumber counts retries — a player who restarted round one four times would
+                    // otherwise arrive at the rally under a sign reading ROUND 5.
+                    //
+                    // Zero for the picture score, and that is the truth rather than a stub: this
+                    // round has no picture in it. The field is indicative only — the arena logs it
+                    // and nothing else reads it — and passing round one's artwork would have the
+                    // arena reporting a mark that belongs to a different round.
                     _rally = new RallyStage();
-                    StartCoroutine(_rally.Run(RoundNumber, pictureSoFar, _currentShape));
+                    StartCoroutine(_rally.Run(ChampRound, 0f, _currentShape));
                     break;
-                }
 
                 case GameState.Bloom:
-                    // The picture is already settled and is never touched again — same contract the
-                    // rally makes. Bloom Rush is played in its own scene on its own ground, and the
-                    // score the reveal is about to compute is exactly what the player mowed.
-                    tournament?.FlushMasks();
+                    // The whole of round three, on the same terms the rally is on — see above for
+                    // why the round number is the championship's and not this director's.
                     _bloom = new TurfStage();
-                    StartCoroutine(_bloom.Run(RoundNumber));
+                    StartCoroutine(_bloom.Run(ChampRound));
                     break;
 
                 case GameState.Ending:
@@ -971,14 +1082,14 @@ namespace DuckMow
                     // The picture's marks and the defence award meet here and nowhere else. The award is
                     // read off the phase rather than recomputed, and it is zero unless the phase actually
                     // ran and finished — so a round without it scores exactly as it always did.
+                    //
+                    // Only a LAWN round ever reaches this beat. The rally's and Bloom Rush's results
+                    // no longer arrive here at all — each is a round of its own, closed by
+                    // CloseMatchRound the moment its arena reports finished.
                     tournament?.CloseRound(judges != null ? judges.Total : 0f,
                                            judges != null ? judges.Rank : "D",
                                            Venue.Player.centre,
                                            defencePhaseEnabled && defence != null ? defence.Award : 0);
-                    // Then the gardens, for all four. Applied after the pictures rather than passed
-                    // into CloseRound, because each number answers to the beat that produced it —
-                    // see Tournament.ApplyRallyResults. Does nothing at all in a round with no rally.
-                    tournament?.ApplyRallyResults();
                     _tourIndex = -1;
                     _tourHold = 0f;
                     break;
@@ -990,7 +1101,20 @@ namespace DuckMow
                     break;
 
                 case GameState.Scoreboard:
-                    cameraDirector?.SetMode(CameraMode.Scoreboard, 1.1f);
+                {
+                    // Cut, do not blend, when the board is the way out of an ARENA.
+                    //
+                    // The same rule the reveal is under and for the same reason: Bloom Rush and the
+                    // goose rally are DIFFERENT SCENES that have just been unloaded, so there is
+                    // nothing on screen for a blend to leave from — the pose the rig still holds is
+                    // wherever Main's camera was when Main went to sleep, a whole round ago. A blend
+                    // would spend its second sailing the lens across the venue from a shot the player
+                    // has not seen since before the match. From a venue tour, which happens on this
+                    // lawn and ends looking at a neighbour's plot, the blend is the right edit and is
+                    // kept.
+                    bool hardCut = from == GameState.Rally || from == GameState.Bloom;
+                    cameraDirector?.SetMode(CameraMode.Scoreboard, hardCut ? 0f : 1.1f);
+                    if (hardCut) cameraDirector?.SnapToCurrent();
                     // The round's points join the championship here — see Tournament.BankRound for
                     // why this and not the verdict. It has to happen before the board is filled, so
                     // that whether this was the last round is already known by the time the board
@@ -1001,6 +1125,7 @@ namespace DuckMow
                                            tournament.Championship.IsComplete ? "CHAMPION" : "WINNER");
                     AudioDirector.Instance?.CrowdCheer(0.85f, applaud: true);
                     break;
+                }
 
                 case GameState.Ceremony:
                     // OFF THE LIVE ROUTE. Nothing in a played round enters this state any more —
@@ -1226,7 +1351,7 @@ namespace DuckMow
                                              $"{_introBudget:0.0}s; starting the round without it.");
                             intro.Hide();
                         }
-                        BeginRound(_currentShape, true);
+                        BeginFirstRound();
                     }
                     break;
 
@@ -1283,14 +1408,7 @@ namespace DuckMow
 
                 case GameState.Klaxon:
                     if (_stateTime >= klaxonDuration)
-                    {
-                        // With the chain on, the stages are played off the END of the round and the
-                        // klaxon goes straight to the reveal. The two paths are exclusive on
-                        // purpose: a stage entered from both would run twice in one round.
-                        if (!stageChainOnConfirm && RallyWanted) SetState(GameState.Rally);
-                        else if (!stageChainOnConfirm && BloomWanted) SetState(GameState.Bloom);
-                        else SetState(defencePhaseEnabled ? GameState.Defence : GameState.Reveal);
-                    }
+                        SetState(defencePhaseEnabled ? GameState.Defence : GameState.Reveal);
                     break;
 
                 case GameState.Rally:
@@ -1300,17 +1418,15 @@ namespace DuckMow
                     if (_rally == null || _rally.Finished)
                     {
                         if (_rally != null && _rally.Failed)
-                            Debug.LogWarning("[Duck] the rally arena did not open; carrying on " +
-                                             "without it.");
+                            Debug.LogWarning("[Duck] the rally arena did not open; the round is " +
+                                             "scored at nothing and the board is next.");
                         _rally = null;
-                        MarkPlayed(GameState.Rally);
-                        BankStageResult();
-                        // Straight into the next stage if there is one, and only then onward. Going
-                        // to a single remembered state instead would have skipped every stage after
-                        // the first, which is the whole reason the chain is re-consulted here.
-                        if (!StageChainNext(_stageReturn))
-                            SetState(stageChainOnConfirm ? _stageReturn
-                                   : BloomWanted ? GameState.Bloom : GameState.Reveal);
+                        // The round's result, from the only thing that saw it. Then the board — no
+                        // reveal and no bench, because there is no picture in this round to show or
+                        // to mark. Running the reveal here would re-evaluate round one's cut mask
+                        // and hand three judges an artwork they have already marked.
+                        CloseMatchRound(MatchStage.Rally);
+                        SetState(GameState.Scoreboard);
                     }
                     break;
 
@@ -1321,13 +1437,11 @@ namespace DuckMow
                     if (_bloom == null || _bloom.Finished)
                     {
                         if (_bloom != null && _bloom.Failed)
-                            Debug.LogWarning("[Duck] the Bloom Rush arena did not open; carrying " +
-                                             "on without it.");
+                            Debug.LogWarning("[Duck] the Bloom Rush arena did not open; the round " +
+                                             "is scored at nothing and the board is next.");
                         _bloom = null;
-                        MarkPlayed(GameState.Bloom);
-                        BankStageResult();
-                        if (!StageChainNext(_stageReturn))
-                            SetState(stageChainOnConfirm ? _stageReturn : GameState.Reveal);
+                        CloseMatchRound(MatchStage.Bloom);
+                        SetState(GameState.Scoreboard);
                     }
                     break;
 
@@ -1500,16 +1614,20 @@ namespace DuckMow
                         // R restarts the whole championship rather than re-mowing this round. The
                         // round's points are already banked by the time this board is on screen, so
                         // a same-picture retry would let one round be counted twice.
-                        // SPACE CONTINUES, and at the board what comes next is the next round of the
-                        // championship — a fresh subject on a fresh lawn, with the points so far
-                        // still standing. That is a different act from the NEW PICTURE that has been
-                        // removed at the verdict, which threw the points away; this one is simply
-                        // the evening carrying on, and it is the only thing this board can do.
                         //
-                        // N used to be a second, unadvertised key for it. Dropped so that the whole
-                        // game has one continue key and the binding can be retired.
+                        // SPACE CONTINUES, and at the board what comes next is the NEXT STAGE — the
+                        // goose rally after round one, Bloom Rush after round two — with the points
+                        // so far still standing.
+                        //
+                        // It used to call NextShape, which rolled a fresh subject and started the
+                        // whole picture again, because a round used to mean a lawn-art round with the
+                        // arenas hanging off it. That is the seam the player walked into: they had
+                        // just finished a picture, been marked on it and watched the board settle,
+                        // and pressing on put them back on a start line with a new outline. "Why am I
+                        // drawing again?" is the correct reaction to that, and the answer was that
+                        // the game disagreed with its own signage about what a round is.
                         if (input.RetryPressed) RestartChampionship();
-                        else if (_confirm) NextShape();
+                        else if (_confirm) BeginNextRound();
                     }
                     break;
                 }
@@ -1556,65 +1674,11 @@ namespace DuckMow
         RallyStage _rally;
 
         /// <summary>
-        /// Which stages this round has already played, as a bitmask over <see cref="GameState"/>
-        /// values. Cleared by BeginRound.
-        ///
-        /// It exists so the end-of-round prompt can be pressed repeatedly and walk FORWARD through
-        /// the running order rather than re-entering whichever stage is first in the list. Without
-        /// it, space at the verdict sends the player to the goose rally, and then to the goose rally
-        /// again, for ever.
-        /// </summary>
-        int _stagesPlayed;
-
-        /// <summary>
-        /// Where a chained stage hands control back to. Reveal when a stage was spliced into the
-        /// middle of the round; the board the player pressed on FROM when it was chained off the
-        /// end. Getting this wrong replays the reveal of a picture that has already been marked.
-        /// </summary>
-        GameState _stageReturn = GameState.Reveal;
-
-        /// <summary>
         /// The trip out to Bloom Rush, while it is happening. Null the rest of the time, for the
         /// same reason <see cref="_rally"/> is: the stage owns a loaded scene and a list of things
         /// it sent to sleep, and nothing holding state like that should outlive its beat.
         /// </summary>
         TurfStage _bloom;
-
-        /// <summary>
-        /// Does this round finish at the arena?
-        ///
-        /// Stage two of the championship, and only stage two. Every round having the geese would
-        /// make them furniture rather than an event; putting them last would claim a finale the
-        /// mode does not own. Read off the CHAMPIONSHIP's round number rather than this director's,
-        /// because <see cref="RoundNumber"/> counts retries — a player who restarted the first round
-        /// four times would otherwise arrive at the arena in the middle of round one.
-        ///
-        /// A solo round never has it, and this property and <see cref="BloomWanted"/> are where that
-        /// is decided for the whole class. They are the ONLY two questions the round asks about the
-        /// later stages — the klaxon's mid-round splice, <see cref="StageChainNext"/> and
-        /// <see cref="NextSeamLabel"/> all read them and nothing reads the enable flags behind them,
-        /// which is exactly why that discipline was introduced (see StageChainNext's note about
-        /// three identical eight-minute rounds). So one answer here switches off every route into
-        /// the arenas AND stops the sign above the curtain naming a stage that is not coming, and
-        /// there is no fourth place a stage could sneak in from.
-        ///
-        /// Deliberately NOT done by writing <c>rallyEnabled = false</c> at startup. Those are
-        /// serialized fields on a component in Main.unity: setting them at runtime in the editor
-        /// leaves the inspector showing the stage as off, and one absent-minded Apply later the
-        /// championship has permanently lost round two in a scene file, with nothing in the diff to
-        /// explain it. What a solo round changes is what the round WANTS, not what the build HAS.
-        /// </summary>
-        bool RallyWanted
-        {
-            get
-            {
-                if (SoloRound) return false;
-                if (!rallyEnabled) return false;
-                if (rallyOnRound <= 0) return true;
-                var champ = tournament != null ? tournament.Championship : null;
-                return champ == null || champ.RoundNumber == rallyOnRound;
-            }
-        }
 
         /// <summary>
         /// Tear the arena down from underneath whatever is happening.
@@ -1646,29 +1710,6 @@ namespace DuckMow
             stage.WakeNow();
             StartCoroutine(stage.AbortNow());
             RallyHandoff.Clear();
-        }
-
-        /// <summary>
-        /// Does this round finish at Bloom Rush?
-        ///
-        /// Stage three. Read off the CHAMPIONSHIP's round number rather than this director's,
-        /// because <see cref="RoundNumber"/> counts retries — a player who restarted the first round
-        /// four times would otherwise arrive at the arena in the middle of round one. Same rule the
-        /// rally is under, for the same reason.
-        ///
-        /// And a solo round never has it, for the reason set out at length on <see cref="RallyWanted"/>
-        /// — these two properties are the whole of that decision.
-        /// </summary>
-        bool BloomWanted
-        {
-            get
-            {
-                if (SoloRound) return false;
-                if (!bloomEnabled) return false;
-                if (bloomOnRound <= 0) return true;
-                var champ = tournament != null ? tournament.Championship : null;
-                return champ == null || champ.RoundNumber == bloomOnRound;
-            }
         }
 
         /// <summary>
@@ -1745,17 +1786,30 @@ namespace DuckMow
         public VictoryCeremony Ceremony => _ceremony;
 
         /// <summary>
-        /// Wipe the points and start a fresh championship on a new picture.
+        /// Wipe the points and start a fresh championship at round one.
         ///
         /// The only route back to round one, and the reason there is no longer a same-picture retry
         /// at the board: a round is banked the moment the board appears, so re-mowing it would award
         /// its points a second time. Restarting the championship is the honest version of that
         /// offer, and it is also what a player who has just lost actually wants.
+        ///
+        /// It goes through <see cref="BeginNextRound"/> rather than straight to a fresh picture, and
+        /// that is not merely tidiness: ResetChampionship puts RoundsRecorded back to nought, so the
+        /// round the game restarts at is whatever the running order says round one IS. Hard-coding a
+        /// picture here would be a second opinion about that, and it would be the wrong one for
+        /// anybody who has re-ordered the stages in the inspector.
+        ///
+        /// The two arena handoffs are wiped on the way. They are statics that outlive a round, and a
+        /// finished championship leaves the last match's results sitting in one of them — which the
+        /// fresh round two would then find and bank as its own.
         /// </summary>
         public void RestartChampionship()
         {
             tournament?.ResetChampionship();
-            NextShape();
+            RallyHandoff.Clear();
+            TurfHandoff.Clear();
+            MatchState.Round = 1;
+            BeginNextRound();
         }
 
         bool _leavingToMenu;
@@ -2001,14 +2055,15 @@ namespace DuckMow
 
             if (t < analysisEnd) return;
 
-            // The picture is finished and on screen. What happens next is the rest of the ROUND.
+            // The picture is finished and on screen. What happens next is the bench that marks it.
             //
-            // With the chain on, the reveal holds here and waits to be pressed on from — to the
-            // goose rally, then to Bloom Rush, and only when there is nothing left to play, to the
-            // judges. The hold is what makes the running order a sequence the player walks through
-            // rather than four things that happen at them; the timeout behind it is so an unattended
-            // capture run still completes.
-            if (!stageChainOnConfirm) { SetState(GameState.Judging); return; }
+            // The reveal holds here and waits to be pressed on from. The hold used to be the joint in
+            // a chain — press on to the goose rally, press on again to Bloom Rush, and only when
+            // there was nothing left to play, to the judges — and there is only one destination
+            // left now that a round is a stage. It is kept anyway, and deliberately: the hold is what
+            // makes the player's own work something they leave when they are ready rather than
+            // something the game takes away on a timer, and it is the beat this game's one continue
+            // key is taught on. The timeout behind it is so an unattended capture run still completes.
 
             // The finished picture is now a CARD waiting to be pressed on from, and the HUD has to
             // be able to say so. It was silent through this entire hold — six seconds of a player
@@ -2050,7 +2105,7 @@ namespace DuckMow
             // it is not a flicker — it is a frame that changed completely, and one of the things
             // that changed was the overlay. And BeginJudging only sets numbers and starts the lean-
             // in from zero; the judges are already in the world and are not built on this frame.
-            if (!StageChainNext(GameState.Judging)) SetState(GameState.Judging);
+            SetState(GameState.Judging);
         }
 
         // ------------------------------------------------------------------ the memory beat
