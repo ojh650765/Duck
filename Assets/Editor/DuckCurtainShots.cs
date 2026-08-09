@@ -47,13 +47,25 @@ namespace DuckMow.EditorTools
                 CurtainStyle.LeafSweep, CurtainStyle.GrassRise, CurtainStyle.BannerWipe,
                 CurtainStyle.PetalCurtain, CurtainStyle.Fanfare
             };
+            // The sign each style ACTUALLY carries in play, read off the seam that selects it in
+            // MatchState.StyleFor and the strings passed at that seam's call site — not invented for
+            // the sheet. A review harness that dresses the frame in wording the game never shows is
+            // reviewing something else: this sheet was still captioning two of its five frames
+            // "THE CHAMPIONSHIP", one of them "THE SASH IS AWARDED", for a championship that was
+            // renamed and a ceremony that was cut. The sheet looked authoritative and was describing
+            // a game that no longer existed.
             var labels = new[]
             {
-                ("HEDGE CUTTINGS", "THE EVERYDAY WIPE"),
-                ("THE CHAMPIONSHIP", "ROUND 1 OF 3"),
-                ("GOOSE RALLY", "ROUND 2 OF 3"),
-                ("BLOOM RUSH", "FINAL ROUND"),
-                ("THE CHAMPIONSHIP", "THE SASH IS AWARDED")
+                // StageToRound, mid-championship: back out of an arena onto the picture.
+                ("LAWN ART", StageSeam.RoundKicker(2)),
+                // MenuToRound: the grass comes up and you are standing in it.
+                ("LAWN ART", StageSeam.RoundKicker(1)),
+                // RoundToRally on the final round.
+                ("GOOSE RALLY", StageSeam.RoundKicker(3)),
+                // RoundToBloom.
+                ("BLOOM RUSH", StageSeam.RoundKicker(3)),
+                // IntoFinale — GameDirector.cs:1490, the one seam allowed to shout.
+                ("HOW IT ENDED", "YOU WON THE DAY")
             };
 
             for (int i = 0; i < styles.Length; i++)
