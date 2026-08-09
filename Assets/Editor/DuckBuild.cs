@@ -105,6 +105,8 @@ namespace DuckMow.EditorTools
             BuildReport report = BuildPipeline.BuildPlayer(options);
             var s = report.summary;
 
+            if (s.result == BuildResult.Succeeded) StampCacheBust(s.outputPath);
+
             var sb = new StringBuilder("[Duck] WEBGL BUILD REPORT\n");
             sb.AppendLine($"  result       = {s.result}");
             sb.AppendLine($"  outputPath   = {s.outputPath}");
@@ -142,6 +144,78 @@ namespace DuckMow.EditorTools
             return s.result == BuildResult.Succeeded;
         }
 
+        /// <summary>
+        /// Give this build's payload its own URLs, by filling in the template's stamp.
+        ///
+        /// Every build writes Build/Web.data.unityweb and its siblings under the same names, so a
+        /// returning player's browser is holding a file at each of those URLs from the PREVIOUS
+        /// deployment and is free to serve any of them from cache. It decides per file, which is the
+        /// part that bites: a player can be handed this build's data alongside last build's wasm.
+        /// The two do not agree about anything and the loader either hangs or throws out of
+        /// instantiation, which the page reports to the player as "could not start in this browser".
+        /// The window for it is exactly a redeploy, which is where it was seen twice.
+        ///
+        /// Unity's own IndexedDB cache keys on the URL as well, so it carries the same hazard and
+        /// takes the same cure.
+        ///
+        /// The stamp is a hash OF THE PAYLOAD rather than the clock. A rebuild that produces
+        /// identical bytes — the same commit built twice — keeps its stamp and stays cached, which
+        /// is the point of having a cache at all; a build that changed anything gets new URLs and
+        /// cannot be mixed with the last one.
+        ///
+        /// Failure here is deliberately not fatal. The placeholder left in place is a string the
+        /// template tests for, so an unstamped page loads exactly as it did before this existed.
+        /// A cache-busting step that can fail a build is worse than the fault it prevents.
+        /// </summary>
+        static void StampCacheBust(string outputDir)
+        {
+            try
+            {
+                string indexPath = Path.Combine(outputDir, "index.html");
+                string buildDir = Path.Combine(outputDir, "Build");
+                if (!File.Exists(indexPath) || !Directory.Exists(buildDir)) return;
+
+                string html = File.ReadAllText(indexPath);
+                if (!html.Contains(Placeholder))
+                {
+                    Debug.LogWarning($"[Duck] {Placeholder} is not in the built index.html, so this " +
+                                     "player's files keep the URLs the last one used. The template " +
+                                     "at Assets/WebGLTemplates/DuckMow/index.html is where it lives.");
+                    return;
+                }
+
+                // Ordered by name so two machines building identical output agree on the hash.
+                var files = Directory.GetFiles(buildDir, "*", SearchOption.TopDirectoryOnly);
+                System.Array.Sort(files, System.StringComparer.Ordinal);
+
+                string stamp;
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    foreach (var f in files)
+                    {
+                        // The name as well as the bytes: a rename alone changes what the page asks for.
+                        var name = Encoding.UTF8.GetBytes(Path.GetFileName(f));
+                        sha.TransformBlock(name, 0, name.Length, null, 0);
+                        var bytes = File.ReadAllBytes(f);
+                        sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
+                    }
+                    sha.TransformFinalBlock(System.Array.Empty<byte>(), 0, 0);
+                    stamp = System.BitConverter.ToString(sha.Hash).Replace("-", "").Substring(0, 12).ToLowerInvariant();
+                }
+
+                File.WriteAllText(indexPath, html.Replace(Placeholder, stamp));
+                Debug.Log($"[Duck] cache stamp {stamp} written into {indexPath} " +
+                          $"({files.Length} payload files hashed)");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[Duck] could not stamp index.html, so this player's files keep " +
+                                 $"the URLs the last one used: {e.Message}");
+            }
+        }
+
+        const string Placeholder = "__DUCK_BUILD_STAMP__";
+
         [MenuItem("Duck/6 · Build WebGL (development)", priority = 6)]
         public static void BuildWebGLDev()
         {
@@ -156,6 +230,7 @@ namespace DuckMow.EditorTools
                 options = BuildOptions.Development
             };
             var report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result == BuildResult.Succeeded) StampCacheBust(report.summary.outputPath);
             Debug.Log($"[Duck] dev build {report.summary.result} -> {report.summary.outputPath}");
         }
     }
