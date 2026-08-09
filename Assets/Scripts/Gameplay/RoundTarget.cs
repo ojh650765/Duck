@@ -7,9 +7,18 @@ namespace DuckMow
         public float coverage;     // fraction of the picture that got mown
         public float spill;        // fraction of mowing that landed outside the picture
         public float accuracy;     // coverage penalised by spill
-        public float edgeQuality;  // how cleanly the outline was followed
         public float style;        // drifting, boosting, showmanship
         public float mownArea;     // square metres actually cut
+
+        /// <summary>
+        /// How much of the outline was actually cut, discounted by how far over it the mowing went.
+        ///
+        /// NOT "how often does cut match inside along the boundary band", which is what it was and
+        /// which paid 0.516 for a lawn nobody had touched — every cell on the outer half of the band
+        /// passes that test by being left alone. Half a quality mark for inaction. See
+        /// <see cref="Scoring.Evaluate"/>, which is where both halves of this are counted.
+        /// </summary>
+        public float edgeQuality;
 
         /// <summary>
         /// Whether the picture READS, on a curve rather than a ratio.
@@ -28,7 +37,17 @@ namespace DuckMow
         /// </summary>
         public float legibility;
 
-        /// <summary>How little of the mowing landed outside the picture. Simply 1 - spill.</summary>
+        /// <summary>
+        /// How little of the mowing landed outside the picture — once there is enough of a picture
+        /// for that to be a compliment.
+        ///
+        /// It was simply 1 - spill, and spill is a ratio of the work done to itself, so it was
+        /// scale free: one immaculate square metre scored a perfect 1.0, and an untouched lawn
+        /// scored 1.0 as well, because spill's divide-by-zero guard returns nought and cannot tell
+        /// "did not spill" from "did not mow". It is now that same ratio times how much of the
+        /// picture exists, which is nought at nought and exactly 1 - spill from a quarter filled
+        /// upward. See <see cref="Scoring.Evaluate"/>.
+        /// </summary>
         public float neatness;
 
         // There was a `stages` field here, carrying how the duck did in the round's LATER STAGES so
