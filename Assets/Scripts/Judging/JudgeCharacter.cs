@@ -147,10 +147,6 @@ namespace DuckMow
                 // Lifted a few millimetres off the card face along the number's own forward, so the
                 // picture cannot z-fight with the plate it is printed on.
                 _portrait.localPosition = anchor.localPosition + anchor.localRotation * (Vector3.back * 0.004f);
-                // Sized off the card so a bigger prop gets a bigger picture, rather than a constant
-                // that is right for one of the three rigs and wrong for the other two.
-                float s = card != null ? Mathf.Max(card.localScale.x, 0.2f) * 0.62f : 0.34f;
-                _portrait.localScale = new Vector3(s, s, s);
 
                 // Sprites/Default, and specifically for its CULLING: it draws both faces.
                 //
@@ -162,6 +158,23 @@ namespace DuckMow
                 _portraitMat = new Material(sh) { name = "CardPortrait", hideFlags = HideFlags.DontSave };
                 _portrait.GetComponent<MeshRenderer>().sharedMaterial = _portraitMat;
             }
+
+            // SIZED EVERY TIME, and sized from the TEXTURE as well as from the card.
+            //
+            // Off the card, so a bigger prop gets a bigger picture rather than a constant that is
+            // right for one of the three rigs and wrong for the other two. Off the texture, because
+            // a quad scaled square draws a square picture whatever is on it — the same fault the
+            // venue tour's RawImage had, one dimension at a time. It has never shown here because
+            // ContestantPortraits renders four square targets, so this is the latent half of that
+            // bug rather than a live one; it is fixed at the same time because "the pictures happen
+            // to be square" is not a thing the next person to change the render size will know.
+            //
+            // Outside the construction block on purpose. The quad is built once and then re-used for
+            // every winner, so a scale set only at creation would be a scale taken from whichever
+            // portrait happened to be first.
+            float s = card != null ? Mathf.Max(card.localScale.x, 0.2f) * 0.62f : 0.34f;
+            float aspect = portrait.height > 0 ? (float)portrait.width / portrait.height : 1f;
+            _portrait.localScale = new Vector3(s * aspect, s, s);
 
             _portraitMat.mainTexture = portrait;
             // Sprites/Default multiplies by the vertex/instance colour, which is black on a bare

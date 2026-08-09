@@ -337,23 +337,18 @@ namespace DuckMow
         /// </summary>
         public string PressOnLabel => "THE JUDGES";
 
-        /// <summary>
-        /// What the next round of the championship IS, in words a player can read, for the prompt on
-        /// the scoreboard.
-        ///
-        /// Under the old rule the board could only ever offer one thing — a fresh picture — and the
-        /// HUD said so in a fixed string. Now the board is the join between two STAGES, and pressing
-        /// on from round one's board goes to the goose rally rather than to another lawn. A prompt
-        /// still reading "NEXT ROUND" would be true and useless; the player's actual question at that
-        /// board is "what am I about to be asked to do".
-        ///
-        /// Safe to read at the board because <see cref="Tournament.BankRound"/> has already run by
-        /// then — see the Scoreboard case in <see cref="SetState"/>, which banks before it fills the
-        /// board — so <see cref="Championship.RoundNumber"/> has already moved on to the round this
-        /// names. Answered through <see cref="StageOfRound"/> so the prompt and the state the board
-        /// is about to enter cannot disagree.
-        /// </summary>
-        public string NextRoundLabel => StageName(ThisRoundsStage);
+        // NextRoundLabel is gone, and it is a DELETION rather than a rewording.
+        //
+        // It existed for one caller — the scoreboard's continue prompt — and named the stage the
+        // board was about to walk into: GOOSE RALLY, BLOOM RUSH. The prompt no longer names it, on
+        // the owner's instruction, because the curtain announces the stage a moment later and a
+        // prompt that says it first spends the arrival before the player gets there.
+        //
+        // Reworded in place it would have become a property called NextRoundLabel that returns
+        // "NEXT STAGE" — a name promising something it no longer does, sitting in a public API for
+        // the next person to reach for when they DO want the stage named. The name for that is
+        // StageName, it is still here, and the two callers that legitimately want it — the
+        // round-start log, and everything that puts a stage on a sign — go straight to it.
 
         /// <summary>The venue's own name for a stage. One spelling, wherever it is printed.</summary>
         static string StageName(GameState stage) => stage switch
