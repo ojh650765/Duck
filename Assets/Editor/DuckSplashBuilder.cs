@@ -30,13 +30,30 @@ namespace DuckMow.EditorTools
     /// </summary>
     public static class DuckSplashBuilder
     {
-        const string MastheadPath = "Assets/Art/Textures/Title/title_masthead.png";
+        /// <summary>
+        /// The roundel, not the masthead.
+        ///
+        /// Both exist and either would work, and the reason to pick this one is what a splash IS. A
+        /// masthead is a title — it names the game, and the front page already does that a second
+        /// later on a board built for it. A roundel is a STAMP, and a stamp is what goes on the front
+        /// of a picture: it says who made this before the thing itself starts. Showing the title
+        /// twice in three seconds makes the first one an advertisement for the second.
+        ///
+        /// It is also the shape that survives the format. A splash logo is centred on whatever the
+        /// window happens to be, and a wordmark 1536 px wide either shrinks to unreadable on a narrow
+        /// window or dominates a wide one. A disc is the same disc at every aspect.
+        /// </summary>
+        const string LogoPath = "Assets/Art/Textures/Title/title_roundel.png";
 
         /// <summary>
         /// The cream the rest of the game's signage is painted on — DuckUIBuilder's Cream, to the
-        /// value. The default background is a near-black that belongs to no scene in this project,
-        /// and the masthead is a red letterform with a white keyline drawn for a pale board: on
-        /// near-black the keyline reads as a halo round the letters rather than as paint.
+        /// value. The default background is a near-black that belongs to no scene in this project.
+        ///
+        /// It matters more for a roundel than it would for a wordmark. The mark's outer band is the
+        /// game's brick red and it is a DISC on transparency, so the background is not behind the
+        /// logo, it is the thing the logo is stamped on. On near-black a red ring reads as a warning
+        /// light; on cream it reads as paint on a board, which is what everything else in this game
+        /// is.
         /// </summary>
         static readonly Color Field = new Color(0.97f, 0.94f, 0.86f, 1f);
 
@@ -49,13 +66,13 @@ namespace DuckMow.EditorTools
         [MenuItem("Duck/9 · Build splash screen", priority = 90)]
         public static void Build()
         {
-            var masthead = AssetDatabase.LoadAssetAtPath<Sprite>(MastheadPath);
-            if (masthead == null)
+            var logo = AssetDatabase.LoadAssetAtPath<Sprite>(LogoPath);
+            if (logo == null)
             {
                 // A Texture rather than a Sprite is the one failure worth naming, because the file
                 // is plainly there and the cast is what came back empty — which reads as a missing
                 // asset and is not one.
-                Debug.LogError($"[Duck] no Sprite at {MastheadPath}. The file may be imported as a " +
+                Debug.LogError($"[Duck] no Sprite at {LogoPath}. The file may be imported as a " +
                                "plain Texture; the splash logo list takes Sprites only. Set its " +
                                "Texture Type to 'Sprite (2D and UI)' and run this again.");
                 return;
@@ -67,7 +84,7 @@ namespace DuckMow.EditorTools
             PlayerSettings.SplashScreen.drawMode = PlayerSettings.SplashScreen.DrawMode.AllSequential;
             PlayerSettings.SplashScreen.logos = new[]
             {
-                PlayerSettings.SplashScreenLogo.Create(LogoSeconds, masthead)
+                PlayerSettings.SplashScreenLogo.Create(LogoSeconds, logo)
             };
 
             // Ask for the engine logo to go. On a licence that does not allow it this is ignored,
@@ -85,7 +102,7 @@ namespace DuckMow.EditorTools
             if (!splashOn)
             {
                 Debug.Log("[Duck] splash screen OFF. This licence allows it, so the build opens " +
-                          "straight on the game. The masthead logo and the cream field are still " +
+                          "straight on the game. The roundel and the cream field are still " +
                           "configured underneath, so if a future licence forces the splash back on " +
                           "it comes back dressed correctly rather than as Unity's default.");
                 return;
@@ -94,7 +111,7 @@ namespace DuckMow.EditorTools
             Debug.LogWarning(
                 "[Duck] the Unity splash CANNOT be disabled on this licence — the request was made " +
                 "and did not take. Falling back, which is the plan and not a fault: the splash now " +
-                "shows DUCK MOW for " + LogoSeconds + "s on the game's own cream field" +
+                "shows the roundel for " + LogoSeconds + "s on the game's own cream field" +
                 (engineLogo ? ", alongside the engine logo." : ", and the engine logo is off.") +
                 " To remove it entirely, a Plus or Pro licence is the only lever; nothing in this " +
                 "project can do it.");
