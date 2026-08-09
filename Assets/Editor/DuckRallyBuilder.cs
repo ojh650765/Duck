@@ -332,21 +332,52 @@ namespace DuckMow.EditorTools
             // work; nothing in this arena has anything for them to do.
             grass.groundMaterial = Mat("M_GrassGround");
             grass.bladeMaterial = Mat("M_GrassBlades");
-            // Coarser chunks and a shorter draw distance than the lawn: the arena is three times the
-            // area, and the player is looking across it rather than down at it, so blades past about
-            // thirty metres are costing frames to draw something that reads as flat colour anyway.
-            // STAGE ONE'S GRASS, UNCHANGED.
+            // STAGE ONE'S GRASS AT STAGE ONE'S DENSITY, DRAWN A SHORTER WAY OUT.
             //
-            // Density, blade shape and LOD distances are left at their defaults — the same numbers
-            // the mowing round's lawn uses — because "bring it as it is" is the whole instruction and
-            // every previous attempt to be clever about the cost made it look worse. Two passes were
-            // spent thinning it and both times the answer came back that the lawn was too sparse.
+            // Density and blade shape are left at their defaults — the same numbers the mowing
+            // round's lawn uses — because "bring it as it is" is the whole instruction and every
+            // previous attempt to be clever about the cost made it look worse. Two passes were spent
+            // thinning it and both times the answer came back that the lawn was too sparse. That
+            // experiment is closed; do not re-run it.
             //
-            // The ONE thing scaled is the chunk COUNT, and that is what keeps it honest rather than
-            // what changes it: Stage 1 divides a 64 m field into 8 chunks, so a chunk is 8 m. This
-            // field is 152 m, so it needs nineteen of them to keep chunks the same size. Same blades
-            // per chunk, same LOD behaviour, same cost per square metre — just more square metres.
+            // Chunk COUNT is scaled to keep chunks the same size rather than to change anything:
+            // stage 1 divides a 64 m field into 8 chunks, so a chunk is 8 m, and this field is 152 m
+            // so it takes nineteen of them.
             grass.chunksPerSide = Mathf.RoundToInt(size / 8f);
+
+            // ---- and THIS is the part that was described and never applied ----
+            //
+            // The paragraph above used to open by promising "coarser chunks and a shorter draw
+            // distance than the lawn ... blades past about thirty metres are costing frames to draw
+            // something that reads as flat colour anyway", and then two lines later left the LOD
+            // distances at the lawn's defaults. The mitigation was argued for and never written. It
+            // also said the arena is "three times the area", which is the linear ratio (152/64 = 2.4)
+            // mistaken for the areal one: 152^2 / 64^2 is 5.64, so 8x8 chunks became 19x19 and the
+            // grass bill went up more than five and a half times at identical density.
+            //
+            // The measured frame was 1.27 M triangles and 2.16 M vertices. Those two numbers are the
+            // proof: the ratio between them is 1.70, and a grass blade is exactly 5 verts to 3 tris,
+            // which is 1.667. A frame whose vertex-to-triangle ratio sits that close to the blade
+            // mesh's own is a frame that is mostly blade mesh.
+            //
+            // Draw distance is the honest lever, and the argument for it here is the one the old
+            // comment already made: the player looks ACROSS this arena rather than down at it, so
+            // the far grass is subtending almost nothing and reads as flat colour. Distance culling
+            // changes what is drawn a long way off; density changes what the lawn looks like
+            // underfoot. Only the second of those was ever rejected.
+            //
+            // The four shader numbers and the two LOD numbers are ONE system and have to move
+            // together — GrassField.ApplyDrawDistance now says so out loud and warns if they do not.
+            // Blades thin away by 28 m and have no height left by 30 m, the far mesh swaps in at 22
+            // (past the point the thinning has already removed everything that mesh drops), and
+            // nothing is drawn past 32.
+            grass.overrideDrawDistance = true;
+            grass.thinStart = 10f;
+            grass.thinEnd = 28f;
+            grass.fadeStart = 18f;
+            grass.fadeEnd = 30f;
+            grass.lod0Distance = 22f;
+            grass.lod1Distance = 32f;
 
             BuildSurround(lawn);
         }

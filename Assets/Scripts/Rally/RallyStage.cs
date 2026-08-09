@@ -142,18 +142,36 @@ namespace DuckMow
         {
             State = Step.Leaving;
 
-            // The way back is a seam too, and it used to be the worst one in the game: the arena
-            // simply vanished and the reveal cut in from ninety metres up. Now the arena's last beat
-            // is swept away by the same weather that brought it, and the picture is underneath when
-            // the frame clears.
+            // A COVER, NOT A TRANSITION. See TurfStage.Leave, which is the same beat and the same
+            // three paragraphs.
+            //
+            // This used to run a full signed seam — a three-quarter-second wipe carrying "THE
+            // STANDINGS / THE BOARD IS NEXT", a hold, and a second of curtain going back up — and the
+            // owner's report was that stage two "plays a scene-transition sequence and then the
+            // scoreboard", where stage one simply arrives at its board. They are right, and the
+            // argument against it is already written in this codebase: GameDirector's note above the
+            // way into the judging says a curtain in this game MEANS A JOURNEY, that every other seam
+            // covers a scene being loaded or a machine being teleported, and that wiping the frame
+            // for a state change inside one scene "told the player they were being taken somewhere,
+            // and then put them back down in the venue they never left".
+            //
+            // What is NOT discretionary is the cover itself. Both scenes live at the origin — the
+            // arena's 152 m lawn stands exactly where the venue's plots do — so Main cannot be shown
+            // until the arena is gone, and it is genuinely gone for the length of an unload. That is
+            // the one frame-range a curtain here is actually paying for, so that is all it now
+            // covers: slammed down with no outro, no sign and no animation, and cleared the same way
+            // by the state that lands under it.
             //
             // Skipped entirely on an abort, where the curtain is already down and somebody else owns
             // raising it — see AbortNow.
             if (!StageSeam.InProgress)
             {
-                string headline = "THE PICTURE", kicker = "BACK TO THE LAWN";
-                GameDirector.Instance?.NextSeamLabel(out headline, out kicker);
-                yield return StageSeam.Begin(MatchState.Seam.StageToRound, headline, kicker);
+                // The two things Begin did that this beat still needs. The crossing count feeds
+                // curtain intensity later in the evening and is a fact about the round rather than
+                // about the wipe; the wheel comes off because the arena is about to stop existing.
+                MatchState.Crossed();
+                if (InputReader.Instance != null) InputReader.Instance.DrivingEnabled = false;
+                StageSeam.CoverNow(MatchState.Seam.StageToRound);
             }
 
             // Order matters. The arena is unloaded FIRST and Main woken afterwards, so there is never
@@ -169,10 +187,14 @@ namespace DuckMow
             Wake();
             _boot = null;
 
-            // Left DOWN on purpose. The round's next act is the reveal, which re-frames the camera
-            // ninety metres up and re-evaluates the picture; raising the curtain here would show a
-            // frame of the lawn from the arena's lens first. GameDirector raises it once the reveal
-            // has taken. See GameDirector's Reveal case.
+            // Left DOWN on purpose. Main has only just woken and its camera is still holding
+            // whatever pose it went to sleep in, a whole round ago; clearing here would show a frame
+            // of that stale lawn before anything has re-framed it. GameDirector clears it the
+            // instant the Scoreboard state has snapped the rig onto the board — see its SetState
+            // tail, which cuts the curtain on exactly the condition it already cuts the camera on.
+            //
+            // (This used to say "the round's next act is the reveal". It has not been since a round
+            // became a stage: a rally round goes straight to the board and never reveals a picture.)
         }
 
         void Sleep()

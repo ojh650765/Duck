@@ -127,13 +127,19 @@ namespace DuckMow
         {
             State = Step.Leaving;
 
-            // The way back is a seam too. Skipped on an abort, where the curtain is already down and
-            // whoever slammed it owns raising it — see TurfStage.AbortNow and GameDirector.
+            // A COVER, NOT A TRANSITION — the same change, for the same reason, as RallyStage.Leave,
+            // whose comment carries the full argument.
+            //
+            // Changed here as well even though the owner only reported it against stage two, because
+            // "make it consistent with stage one" is a rule rather than a bug report, and two arenas
+            // that ended differently from each other would simply be the next thing reported. The
+            // board that follows this one is the last screen before the ending, which makes it the
+            // worst place in the game to spend two seconds on a wipe.
             if (!StageSeam.InProgress)
             {
-                string headline = "THE PICTURE", kicker = "BACK TO THE LAWN";
-                GameDirector.Instance?.NextSeamLabel(out headline, out kicker);
-                yield return StageSeam.Begin(MatchState.Seam.StageToRound, headline, kicker);
+                MatchState.Crossed();
+                if (InputReader.Instance != null) InputReader.Instance.DrivingEnabled = false;
+                StageSeam.CoverNow(MatchState.Seam.StageToRound);
             }
 
             // Order matters. The arena is unloaded FIRST and Main woken afterwards, so there is
@@ -149,9 +155,11 @@ namespace DuckMow
             Wake();
             _boot = null;
 
-            // Left DOWN on purpose — the round's next act re-frames the camera for the reveal, and
-            // raising here would show one frame of the lawn through the arena's lens first.
-            // GameDirector raises it once the reveal has taken. See its Reveal case.
+            // Left DOWN on purpose — Main has only just woken and its camera still holds the pose it
+            // slept in a round ago, so clearing here would show a frame of a stale lawn. GameDirector
+            // clears it the instant the Scoreboard state has snapped the rig onto the board; see its
+            // SetState tail. (The old note here said the next act was "the reveal", which stopped
+            // being true when a round became a stage.)
         }
 
         void Sleep()
