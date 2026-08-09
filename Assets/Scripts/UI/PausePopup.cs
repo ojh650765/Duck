@@ -51,6 +51,13 @@ namespace DuckMow.UI
         public virtual bool PausesTime => true;
         public virtual bool BlocksDriving => true;
         public virtual bool ClosesOnEscape => true;
+        /// <summary>
+        /// FALSE by default: a popup is a screen unless it says otherwise, so a new full-screen one
+        /// gets the right behaviour from whatever it covers without its author knowing this exists.
+        /// The dialog that wants the board behind it left visible is the one that declares it — see
+        /// IPopup.ShowsWhatIsUnder, and ConfirmPopup, which is the case it was written for.
+        /// </summary>
+        public virtual bool ShowsWhatIsUnder => false;
 
         /// <summary>Where this popup's canvas sits in the composite. See <see cref="BuildCanvas"/>.</summary>
         protected abstract int SortingOrder { get; }
@@ -135,6 +142,8 @@ namespace DuckMow.UI
         float _clock;
         float _open;                 // 0 on the frame it is pushed, 1 once the board has landed
         bool _covered;
+        /// <summary>What the thing on top of us said about whether we should still be seen.</summary>
+        bool _coveredVisible = true;
         bool _closeRequested;
         bool _detached;              // a menu action tore the stack down; we are already gone
         bool _disposed;
@@ -219,15 +228,17 @@ namespace DuckMow.UI
         /// rather than a mechanism: if the stack ever starts ticking the whole pile, this popup goes
         /// quiet instead of answering the same keypress as the one on top of it.
         /// </summary>
-        public void OnCovered()
+        public void OnCovered(bool stillVisible)
         {
             _covered = true;
+            _coveredVisible = stillVisible;
             ApplyCover();
         }
 
         public void OnRevealed()
         {
             _covered = false;
+            _coveredVisible = true;
             // Deafened again on the way back UP, not only on the way down: the key that dismissed the
             // popup above us is still down on this very frame.
             Deafen();
@@ -252,11 +263,30 @@ namespace DuckMow.UI
         /// animated dim would simply never advance a frame. Snapping is honest about that, and it
         /// reads fine anyway, because the board arriving on top is itself animating in and is where
         /// the eye already is.
+        ///
+        /// ---- two covered looks, not one ----
+        ///
+        /// The 0.45 sink is right for a DIALOG stacked on this board — that is the emphasis idiom
+        /// ComicSequence settled on, "settled panels sink back and the hero holds the light", and
+        /// without it the question on the top board reads as decoration on the bottom one. It is
+        /// wrong for a SCREEN that replaces this board: a 45% board under a card's own translucent
+        /// scrim is two screens legible at once, which is what pressing CONTROLS used to look like.
+        ///
+        /// So the newcomer says which it is and this obeys — see IPopup.ShowsWhatIsUnder.
+        ///
+        /// The CANVAS goes off rather than the alpha merely going to zero, and that is this
+        /// project's own established rule rather than an optimisation invented here: ComicSequence
+        /// records that "a fully transparent full-screen image is still a full-screen quad of
+        /// overdraw" and disables the graphic instead. This board is a scrim, a plank and a column
+        /// of plates, all of them full-width, on a platform that counts fill rate. Nothing else
+        /// changes — the popup is still in the stack, still owns its canvas, still holds the clock
+        /// and the wheel, exactly as IPopup promises. It is not being torn down, it is not on screen.
         /// </summary>
         void ApplyCover()
         {
-            if (_group == null) return;
-            _group.alpha = _covered ? 0.45f : 1f;
+            bool hidden = _covered && !_coveredVisible;
+            if (_group != null) _group.alpha = _covered && !hidden ? 0.45f : 1f;
+            if (_canvas != null) _canvas.enabled = !hidden;
         }
 
         // ------------------------------------------------------------------ the frame
@@ -354,7 +384,7 @@ namespace DuckMow.UI
 
         // ------------------------------------------------------------------ input
 
-        void HandleInput()
+        protected virtual void HandleInput()
         {
             if (Items.Count == 0) return;
 
@@ -417,13 +447,13 @@ namespace DuckMow.UI
             if (confirm) Activate(_index);
         }
 
-        void Select(int index)
+        protected void Select(int index)
         {
             if (index < 0 || index >= Items.Count) return;
             _index = index;
         }
 
-        void Activate(int index)
+        protected void Activate(int index)
         {
             if (index < 0 || index >= Items.Count) return;
             var item = Items[index];
@@ -534,8 +564,17 @@ namespace DuckMow.UI
                 w += weight;
             }
 
-            if (_pointer != null && Items.Count > 0)
+            if (_pointer != null)
             {
+                // OFF when nothing on the plate column is selected, which is a state that now
+                // exists: a subclass may own selectable rows that are not plates, and the settings
+                // page does. Left on, the marker would sit at whatever height the springs last
+                // averaged to — the board's middle, on the first frame — pointing at a plate the
+                // player has not chosen. See PopupView.Index.
+                bool any = Items.Count > 0 && _index >= 0;
+                if (_pointer.gameObject.activeSelf != any) _pointer.gameObject.SetActive(any);
+                if (!any) return;
+
                 // Follows the SPRINGS rather than the index, so it slides between plates and
                 // overshoots with them instead of teleporting.
                 if (w > 1e-3f) y /= w;
@@ -593,6 +632,24 @@ namespace DuckMow.UI
         }
 
         protected Transform Root => _root != null ? _root.transform : null;
+
+        /// <summary>
+        /// The signboard, for a subclass laying out rows of its own beside the plates.
+        ///
+        /// Null until <see cref="BuildBoard"/> has run, which is the same order every other builder
+        /// here obeys: the board is the thing everything else is positioned against.
+        /// </summary>
+        protected RectTransform Board => _board;
+
+        /// <summary>
+        /// Which plate is lit, or -1 for none.
+        ///
+        /// Settable because a subclass may own selectable things that are NOT plates. The settings
+        /// page is three dials and one plate in a single column, and while the selection is on a
+        /// dial no plate should be lifted — see SettingsPopup, and MainMenu's note on why a dial is
+        /// a line of type rather than a button.
+        /// </summary>
+        protected int Index { get => _index; set => _index = value; }
 
         /// <summary>The wash over the game behind. Alpha is the popup's own business.</summary>
         protected void BuildScrim(float alpha)
@@ -1027,7 +1084,7 @@ namespace DuckMow.UI
         /// </summary>
         static int CountItems()
         {
-            int n = 2;                                  // RESUME and BACK TO MENU, always
+            int n = 3;                                  // RESUME, SETTINGS and BACK TO MENU, always
             if (ControlsPrimer.HasCardHere) n++;
             if (CanOfferQuit) n++;
             return n;
@@ -1061,6 +1118,24 @@ namespace DuckMow.UI
             // are no controls to list, and a plate opening a card headed LAWN ART over the menu would
             // be the board describing a place the player is not standing in.
             if (ControlsPrimer.HasCardHere) AddItem("CONTROLS", ShowControls);
+
+            // SETTINGS, and it is here for the reason the row above it is: the content existed and
+            // was unreachable. Volume, mute and rumble have been persistent and adjustable since the
+            // audio pass, and the only door to any of them was a card on the FRONT PAGE — so a
+            // player who found the game too loud in the middle of a stage had to leave the stage to
+            // turn it down, which is asking somebody to quit in order to change the volume.
+            //
+            // Unconditional, unlike CONTROLS. There is nothing scene-shaped about a volume: the
+            // front page's own pause board can offer this honestly, and MasterAudio and Haptics are
+            // statics that exist wherever the game is running.
+            //
+            // It PUSHES rather than drawing dials of its own, which is the whole reason the popups
+            // are a stack — the board stays exactly where it is with the page in front of it, and
+            // Escape peels one layer back to the board rather than dropping the player into the
+            // round. And the page is a VIEW: not one line of it knows what mute means, because
+            // MasterAudio and Haptics already do and two copies of that is how two screens end up
+            // disagreeing about whether the game is muted.
+            AddItem("SETTINGS", ShowSettings);
 
             // BACK TO MENU IS ALWAYS HERE. It used to be omitted where GameDirector.Instance was
             // null, and that omission is worth recording because the reasoning behind it was sound
@@ -1245,6 +1320,16 @@ namespace DuckMow.UI
             PopupStack.PopAll();
             StageLauncher.ReturnToMenu();
         }
+
+        /// <summary>
+        /// Put the settings page in front of this board.
+        ///
+        /// The same push as <see cref="ShowControls"/> and <see cref="AskToQuit"/>, and there is
+        /// nothing to check first: unlike the controls card there is no scene-shaped reason a volume
+        /// might not exist. The page declares ShowsWhatIsUnder false, so this board's canvas goes
+        /// off while it is up rather than sitting at 45% under a second translucent screen.
+        /// </summary>
+        void ShowSettings() => PopupStack.Push(new SettingsPopup());
 
         /// <summary>
         /// Put the controls card in front of this board.

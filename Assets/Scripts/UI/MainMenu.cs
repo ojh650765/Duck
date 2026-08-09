@@ -482,7 +482,7 @@ namespace DuckMow
         // WHERE THE VOLUME BAR IS, which is deliberately not the same number as how loud the game is.
         //
         // MasterAudio.Master is an AMPLITUDE, because that is what AudioListener.volume is. This is
-        // the SLIDER POSITION, and the two are a power apart — see VolumeCurve. Keeping the position
+        // the SLIDER POSITION, and the two are a power apart — see MasterAudio.ControlCurve. Keeping the position
         // here rather than deriving it from the amplitude every frame is not a cache: Nudge rounds
         // the amplitude it stores to a thousandth, and at the bottom of a 2.5-power curve a
         // thousandth of amplitude is a whole step of slider. Round-tripping through the amplitude
@@ -1430,24 +1430,16 @@ namespace DuckMow
         // makes goes through Nudge. Persistence is MasterAudio's too — it debounces its own
         // PlayerPrefs flushes, so nothing here calls Save except CloseCard, once, on the way out.
 
-        /// <summary>
-        /// The power between the bar's position and the amplitude underneath it. See the section
-        /// comment; the short version is that 1.0 is a control that only works at the bottom.
-        /// </summary>
-        const float VolumeCurve = 2.5f;
-
-        /// <summary>How far one press of Left or Right moves the BAR. A twentieth, so a full sweep
-        /// is twenty presses and every stop is a round number on screen.</summary>
-        const float VolumeStep = 0.05f;
+        // The curve and the step used to be two private constants and two private methods here. They
+        // moved to MasterAudio when the pause board grew a settings page: two screens with two
+        // curves print two different percentages for the same amplitude, and the player is told they
+        // are at 70% on one board and 50% on the other. Nothing about the reading changed — these
+        // are the same numbers, in the one place both boards can see them.
 
         /// <summary>Seconds a direction must be held before it starts repeating, and the interval
         /// once it does. Slow enough that a single tap is never read as two, fast enough that
         /// holding Right takes about a second and three quarters from silence to full.</summary>
         const float AdjustDelay = 0.38f, AdjustRepeat = 0.085f;
-
-        static float AmplitudeFor(float position) => Mathf.Pow(Mathf.Clamp01(position), VolumeCurve);
-
-        static float PositionFor(float amplitude) => Mathf.Pow(Mathf.Clamp01(amplitude), 1f / VolumeCurve);
 
         /// <summary>
         /// Put the bar back in step with the master volume.
@@ -1468,8 +1460,8 @@ namespace DuckMow
         void ReadVolumePosition(bool force)
         {
             float amp = MasterAudio.Master;
-            if (force || Mathf.Abs(AmplitudeFor(_volumePos) - amp) > 0.004f)
-                _volumePos = PositionFor(amp);
+            if (force || Mathf.Abs(MasterAudio.AmplitudeAt(_volumePos) - amp) > 0.004f)
+                _volumePos = MasterAudio.PositionAt(amp);
         }
 
         /// <summary>
@@ -1490,7 +1482,7 @@ namespace DuckMow
         void SetVolumePosition(float position)
         {
             _volumePos = Mathf.Clamp01(position);
-            MasterAudio.Nudge(AmplitudeFor(_volumePos) - MasterAudio.Master);
+            MasterAudio.Nudge(MasterAudio.AmplitudeAt(_volumePos) - MasterAudio.Master);
         }
 
         int RowFor(Setting setting)
@@ -1666,7 +1658,7 @@ namespace DuckMow
 
                 default:
                     float before = _volumePos;
-                    SetVolumePosition(_volumePos + direction * VolumeStep);
+                    SetVolumePosition(_volumePos + direction * MasterAudio.ControlStep);
                     // Silent when the bar is already against its end, so holding Right at 100% is
                     // not a stuck rattle.
                     if (!Mathf.Approximately(before, _volumePos)) Play(hoverClip, 0.16f);
