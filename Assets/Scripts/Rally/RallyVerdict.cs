@@ -161,22 +161,16 @@ namespace DuckMow
         void Advance(Step next) { State = next; _timer = 0f; }
 
         /// <summary>
-        /// Take the camera off the bench and onto the board, with the round's marks on it.
+        /// A standings table built from the rally alone, for when there is no championship.
         ///
-        /// The rally's award is folded in HERE rather than being recomputed for display, so the
-        /// number on the board is the number the championship banks. The camera is a mode change,
-        /// not a teleport — CameraDirector blends into the Scoreboard shot and creeps in while the
-        /// rows land, which is why the move is a lerp and not a cut.
-        /// </summary>
-        /// <summary>
-        /// A standings table built from the rally alone, for when there is no tournament.
+        /// The only table this beat builds now — see <see cref="BeginBoard"/>, which stands aside
+        /// entirely when there IS a championship, because the venue's board is coming and it has the
+        /// running total on it. The marks are computed the way the championship would have banked
+        /// them, so a standalone rally prints the same figure the same match would have scored
+        /// inside a real evening.
         ///
-        /// This is not only a review convenience. The beat used to end silently the moment
-        /// Tournament.Instance was null — the standalone arena, a scene opened on its own, anything
-        /// that reaches the arena without a championship behind it — and the symptom was the one
-        /// thing nobody can debug from: the judges deliver a verdict and then nothing happens, with
-        /// no error. A ceremony that has a result to show should always show it; the round's marks
-        /// are simply zero when no round was played.
+        /// (An orphaned doc block describing BeginBoard's camera move used to sit above this one,
+        /// left behind by an earlier edit. It has gone with the board it was describing.)
         /// </summary>
         System.Collections.Generic.List<Standing> StandingsFromRally()
         {
@@ -228,25 +222,41 @@ namespace DuckMow
         {
             if (scoreboard == null) return false;
 
-            var t = Tournament.Instance;
-            // Close the ROUND, not fold a beat into somebody else's. The rally is round two of the
-            // championship in its own right, so what the four gardens ended in IS this round's
-            // result — see Tournament.CloseMatchRound, which builds the standings from the handoff
-            // rather than from four lawns nobody mowed this round.
+            // ---- IN A CHAMPIONSHIP THIS ARENA DOES NOT RAISE A BOARD AT ALL ----
             //
-            // Asked for here rather than only by the director, because THIS board is what the player
-            // reads first: it is on screen while the arena is still loaded, a good few seconds before
-            // Main wakes up behind it. A board filled from stale standings would show round one's
-            // pictures with the rally's placings sorted over the top of them. The call is idempotent
-            // and the director makes it again on the way out, which covers the routes that never
-            // reach this beat at all.
-            if (t != null) t.CloseMatchRound(MatchStage.Rally, Venue.Player.centre);
+            // It used to, and the player got two boards in a row for one round: this one, filled
+            // with the match's own marks out of thirty, and then the venue's the moment the arena
+            // unloaded and Main woke up behind it — filled, until now, from exactly the same
+            // standings. The same four rows, twice, with a curtain in between. That is the "stage
+            // two shows stage one's scoreboard" the owner is reading: it is not stage one's data,
+            // it is stage one's BOARD, the per-round marks table a lawn round ends on, and then it
+            // is shown again.
+            //
+            // The one that goes is this one, and the choice is forced rather than preferred:
+            // GameDirector's Scoreboard state is not a graphic, it is the gate. It banks the round
+            // (see Tournament.BankRound on why the board and not the verdict), it is where SPACE
+            // goes to the next stage, and it is where a completed championship becomes the ending.
+            // It cannot be dropped, so a single board has to be that one — and it now carries the
+            // running total across all three rounds, which is the number this beat could never have
+            // shown honestly anyway, because nothing has been banked while the arena is still up.
+            //
+            // The CloseMatchRound call that used to sit here has gone with the board it was for.
+            // Its stated reason was that this board reads the standings before the director closes
+            // them; with no board there is nothing in this scene that reads Tournament.Standings at
+            // all, and the director closes the round on the way out as it always did.
+            if (Tournament.Instance != null) return false;
 
-            System.Collections.Generic.IReadOnlyList<Standing> order =
-                t != null && t.Standings != null && t.Standings.Count > 0 ? t.Standings : StandingsFromRally();
+            // ---- STANDALONE ONLY, and then this board is the only word there is ----
+            //
+            // An arena opened on its own — the review loop, and the front page's stage select — has
+            // no championship behind it and no venue to go back to. The beat used to end silently
+            // the moment Tournament.Instance was null, and the symptom was the one thing nobody can
+            // debug from: the judges deliver a verdict and then nothing happens, with no error. A
+            // ceremony that has a result to show should always show it.
+            var order = StandingsFromRally();
             if (order == null || order.Count == 0)
             {
-                Debug.LogWarning("[Rally] the board has nothing to show — no tournament and no " +
+                Debug.LogWarning("[Rally] the board has nothing to show — no championship and no " +
                                  "rally results. The verdict ends at the cards.");
                 return false;
             }

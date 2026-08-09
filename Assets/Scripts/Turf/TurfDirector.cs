@@ -126,6 +126,12 @@ namespace DuckMow
         public float RevealProgress { get; private set; }
         /// <summary>True once the camera has left the overhead for the results board.</summary>
         public bool OnBoard { get; private set; }
+        /// <summary>
+        /// True once the board question has been ANSWERED, whichever way. Separate from
+        /// <see cref="OnBoard"/> because "no board in this stage" and "a board is up" are different
+        /// facts and the HUD only cares about the second — see ShowBoard.
+        /// </summary>
+        bool _boardSettled;
         /// <summary>True once the camera has come down onto the player's machine with the card up.</summary>
         public bool OnCard { get; private set; }
         float _cardAt;
@@ -216,6 +222,7 @@ namespace DuckMow
 
             _standings.Clear();
             OnBoard = false;
+            _boardSettled = false;
             OnCard = false;
             _swooped = false;
             // Cleared, or a retry runs its whole closing five seconds in silence because the first
@@ -337,9 +344,14 @@ namespace DuckMow
                     // card cannot arrive while a judge still has a card going up, or the screen is
                     // announcing a result the bench has not given yet; and the board cannot arrive
                     // while the player is still reading their own placing off the card.
+                    //
+                    // The BOARD is now conditional — see ShowBoard, which declines to raise one when
+                    // there is a championship board coming. So the gate on it is "has this been
+                    // decided yet", not "is a board up": OnBoard still means a board is on screen,
+                    // because that is what TurfHud reads it for to take its own card down.
                     bool benchDone = verdict == null || verdict.Finished;
                     if (!OnCard && benchDone && _phaseTimer >= boardAt) ShowCard();
-                    if (OnCard && !OnBoard && _phaseTimer >= _cardAt + cardSeconds) ShowBoard();
+                    if (OnCard && !_boardSettled && _phaseTimer >= _cardAt + cardSeconds) ShowBoard();
                     if (_phaseTimer >= revealSeconds) State = Phase.Done;
                     break;
             }
@@ -587,8 +599,8 @@ namespace DuckMow
             ParkForVerdict();
 
             // And then the bench reads it back. The overhead says what happened; three animals at a
-            // desk say what it was worth, which is this game's language for a verdict everywhere
-            // else and had no business being a line of centred text here.
+            // desk say who took it, which is this game's language for a verdict everywhere else and
+            // had no business being a line of centred text here.
             verdict?.Begin();
 
             var winner = CompetitorAt(Winner);
@@ -703,88 +715,94 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Leave the overhead and settle the results board.
+        /// Decide whether this stage owns a results board, and raise one if it does.
         ///
-        /// The board is the venue's own — the same object the championship posts to — so the four
-        /// rows the player reads here are laid out exactly like the rows they will read after the
-        /// judges. A second board with its own layout would be a second answer to the same
+        /// ONE BOARD PER ROUND, AND IT IS THE LAST WORD. In a championship that board is the
+        /// venue's, after the arena has handed back, and it carries the running total across all
+        /// three rounds; this stage stands aside for it. Played on its own there is no venue and no
+        /// total, so this stage raises its own and prints what it measured.
+        ///
+        /// When it does raise one the board is the venue's own object — the same one the
+        /// championship posts to — so the four rows are laid out exactly like the rows read after
+        /// the judges. A second board with its own layout would be a second answer to the same
         /// question, and this stage is not entitled to one: it reports, the panel rules.
-        ///
-        /// The percentage goes in the RANK column rather than the marks column, because the marks
-        /// column is out of thirty and belongs to the judges. What this stage knows is how much
-        /// ground somebody covered, and that is what it says.
         ///
         /// (This comment lived above the parc-ferme fields for a while, describing a board they have
         /// nothing to do with. Put back on the method it is about.)
         /// </summary>
         void ShowBoard()
         {
+            _boardSettled = true;
+
+            // ---- IN A CHAMPIONSHIP THIS STAGE DOES NOT RAISE A BOARD AT ALL ----
+            //
+            // It used to, and the player was shown two boards in a row for one round: this one,
+            // here, and then the venue's own the moment the arena unloaded and Main woke up behind
+            // it. Two boards is one board too many whatever either of them says, and the second is
+            // the one that cannot be dropped — GameDirector's Scoreboard state is where the round is
+            // BANKED, where SPACE goes to the next stage, and where a completed championship turns
+            // into the ending. It is a gate, not a graphic. So the board that goes is this one.
+            //
+            // This board also used to project the running total by hand: this stage's marks through
+            // BloomMarks, added to the championship table, printed before anything had been banked.
+            // It was right, and it was a second copy of arithmetic that lives in Tournament — a copy
+            // that had already been wrong once, predicting seven marks for a round that banked
+            // fifteen. The venue's board now prints the table AFTER BankRound, so the number the
+            // player reads is not a forecast of the banked total, it is the banked total.
+            //
+            // What is left on screen here instead is the stage card, which stays up because OnBoard
+            // is never set: the player's own placing, over their own machine, held until the curtain.
+            // That is a better last frame for an arena than a ninety-metre sweep to a table they are
+            // about to be shown properly.
+            if (Tournament.Instance != null && Tournament.Instance.Championship != null) return;
+
             OnBoard = true;
             var mask = TurfMask.Instance;
             if (scoreboard == null || mask == null) return;
 
-            // WHAT THE BOARD IS FOR, and it is not this stage.
+            // ---- STANDALONE ONLY, and then this board is the only word there is ----
             //
-            // It used to print each gardener's share of the arena, as a percentage and as a mark
-            // out of thirty — which is the same four numbers the card the player has just finished
-            // reading already gave them, on a board they had to be flown ninety metres to see. A
-            // board that repeats the previous shot is a board with nothing to say.
+            // A stage opened on its own — the review loop, and the front page's stage select — has
+            // no championship to total and no venue to go back to, so ending on the cards alone
+            // would end it on no result at all. What it can honestly say is what it measured: this
+            // match's marks, on the competition's own thirty.
             //
-            // What it says instead is the CHAMPIONSHIP: rounds one, two and three added up, with
-            // this stage's ground folded in. That is the only number in the game the player cannot
-            // work out from what is already on screen, it is the number the ending turns on — the
-            // three-round total is what picks the winning or losing cutscene — and it is the number
-            // this board prints after every other round, which is what makes it this board.
-            var table = Tournament.Instance != null ? Tournament.Instance.Championship?.Table : null;
-
+            // Through Tournament.BloomMarks rather than a bare `share * 30`, because that is the
+            // expression the championship would have banked and a standalone run should print the
+            // same figure a real round would.
             var rows = new List<Standing>(_standings.Count);
             for (int i = 0; i < _standings.Count; i++)
             {
                 int slot = _standings[i];
                 var s = TurfArena.Get(slot);
-                // This round's marks, on the competition's own scale rather than as a share.
-                //
-                // Through Tournament.BloomMarks rather than the bare `share * 30` this used to do,
-                // and the difference is not cosmetic. That expression is what the CHAMPIONSHIP banks
-                // for this round, and it normalises against an even four-way split — a quarter of
-                // the arena is par and scores half the round. Multiplying the raw share by thirty
-                // here made this board predict seven marks for a round that was about to be banked
-                // at fifteen, so the last thing the player read before the ending disagreed with the
-                // total the ending turns on.
-                //
                 // THE PLACE IS PART OF THE MARK and has to be filled in. _standings is already in
                 // finishing order — it is the same list TurfHandoff.Post numbers its results from —
-                // so the row index is the place. Leaving the field at its default zero would reopen
-                // exactly the disagreement the paragraph above is about: BloomMarks reads an unplaced
-                // result as owed no winner's premium, so this board would quietly predict four marks
-                // fewer for the leader than the championship is about to bank.
+                // so the row index is the place. Left at its default zero, BloomMarks reads the
+                // result as UNPLACED and owed no winner's premium, and this board prints four marks
+                // fewer for the leader than a championship round would bank for the same play.
+                //
+                // Standalone has no championship for that to contradict, which is exactly why it is
+                // worth stating: a review board that quietly prints a different number from the one
+                // the real thing awards is a review board nobody can trust. The cumulative running
+                // total that used to be added here is gone with the rest of this path's
+                // championship handling — see the note above; there is no table to add.
                 float stageMarks = Tournament.BloomMarks(new TurfHandoff.Result
                 {
                     share = mask.Share(slot),
                     place = i + 1
                 });
-                float running = stageMarks;
-
-                if (table != null)
-                {
-                    foreach (var e in table)
-                        if (string.Equals(e.name, s.contestant, System.StringComparison.OrdinalIgnoreCase))
-                        { running += e.points; break; }
-                }
-
                 rows.Add(new Standing
                 {
                     name = s.contestant,
                     species = s.species,
                     isPlayer = s.isPlayer,
                     livery = s.livery,
-                    total = running,
-                    // rallyMarked makes the row print a bare number instead of "N / 30", which is
-                    // what a cumulative total needs — three rounds do not fit in one round's
-                    // denominator, and a board reading "71 / 30" is a board nobody trusts again.
-                    rallyMarked = table != null,
-                    // No grade and no percentage. The column that used to carry the share is left
-                    // empty on purpose: the share is the card's job and it has just done it.
+                    total = stageMarks,
+                    // False, so the row prints "N / 30": one match's marks DO fit in one round's
+                    // denominator, and stating it is what tells the player what the number is out of.
+                    rallyMarked = false,
+                    // No grade. The column that used to carry the share is left empty on purpose:
+                    // the share is the card's job and it has just done it.
                     rank = "",
                 });
             }
@@ -793,7 +811,7 @@ namespace DuckMow
 
             cameraDirector?.SetMode(CameraMode.Scoreboard, 1.6f);
             scoreboard.ResetBoard();
-            scoreboard.Settle(rows, table != null ? "CHAMPIONSHIP" : "MOST GROUND");
+            scoreboard.Settle(rows, "MOST GROUND");
             AudioDirector.Instance?.CrowdCheer(0.8f, applaud: true);
         }
 

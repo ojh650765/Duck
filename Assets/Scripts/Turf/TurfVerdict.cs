@@ -15,7 +15,21 @@ namespace DuckMow
     /// It is also the honest presentation of what this stage actually is. Bloom Rush does not decide
     /// anything — see <see cref="TurfDirector"/>: it measures ground and hands the number to the
     /// competition. Ending on the panel is that fact made visible. The overhead says WHAT happened;
-    /// the bench says what it was worth; the board says where it leaves everybody.
+    /// the bench says WHO TOOK IT; the board says where it leaves everybody.
+    ///
+    /// ---- the cards carry a face, not a percentage ----
+    ///
+    /// They used to hold up each contestant's share of the arena in whole percent, in finishing
+    /// order. That was three numbers the player had just finished reading off the overhead, held up
+    /// again by three animals — and it made the bench a second display rather than a verdict.
+    ///
+    /// <see cref="RallyVerdict"/> settled this argument for the other arena and the argument is
+    /// identical here: a mark answers "how well did you do", and this stage is not marked out of ten
+    /// by anybody — it is WON, on ground held. A photograph answers "who took it" in a way three
+    /// digits never could, particularly to the three losing gardeners sitting in the plaza watching
+    /// somebody else's portrait go up. So the same mechanism is reused rather than reinvented:
+    /// <see cref="ContestantPortraits"/> renders the faces and <see cref="JudgeCharacter.ShowPortrait"/>
+    /// hangs them on the cards, exactly as the rally does.
     ///
     /// Driven straight off <see cref="JudgeCharacter"/> rather than through <see cref="JudgePanel"/>,
     /// the same choice <see cref="RallyVerdict"/> makes and for the same reason: the panel's job is
@@ -33,6 +47,9 @@ namespace DuckMow
         public TurfDirector director;
         public JudgePanel panel;
         public CameraDirector cameraDirector;
+        [Tooltip("Portraits, rendered from the real models. Without it the cards come up blank and " +
+                 "the beat says nothing.")]
+        public ContestantPortraits portraits;
 
         [Header("Timing")]
         [Tooltip("Seconds held on the overhead before the camera comes down to the bench.")]
@@ -46,14 +63,54 @@ namespace DuckMow
 
         public Step State { get; private set; } = Step.Idle;
         public bool Finished => State == Step.Done;
+        /// <summary>Whose face the cards are showing. Empty when nobody could be named.</summary>
+        public string Winner { get; private set; } = "";
 
         float _time;
         int _raised;
         bool _running;
+        Color _livery = Color.white;
+
+        /// <summary>
+        /// Who the bench is about to name, and why it is this and not the championship's table.
+        ///
+        /// <see cref="TurfDirector.Winner"/> is the slot at the head of the arena's own standings,
+        /// which are sorted on CELLS HELD at the horn. That is what winning means in this stage, and
+        /// it is the same order every other thing the player has just looked at was drawn from: the
+        /// overhead's percentages, the placings on the stage card, and <see cref="TurfHandoff"/>'s
+        /// <c>place</c>, which is what the championship banks. So the face going up cannot disagree
+        /// with the standings the player is reading beside it.
+        ///
+        /// It is deliberately NOT read off <see cref="Tournament.Standings"/>. Those are not closed
+        /// for this stage until the arena has finished and handed back — the director does it on the
+        /// way out — so asking here would either return the PREVIOUS round's table or force this
+        /// beat to close the round early, which is the one thing an arena must not do while it is
+        /// still on screen.
+        ///
+        /// The one seam where the two rules could part is a rounding tie: marks come off the share
+        /// through <see cref="Tournament.BloomMarks"/>, which is monotonic in share but rounds to a
+        /// whole number, so two gardeners a fraction of a percent apart can bank the same mark and be
+        /// separated alphabetically on the table while the ground still separates them here. Ground
+        /// is the right answer for this bench — it is the thing the stage measured — and the
+        /// director already raises <see cref="TurfDirector.DeadHeat"/> for that case.
+        /// </summary>
+        string NameWinner(out Color livery)
+        {
+            livery = Color.white;
+            int slot = director != null ? director.Winner : -1;
+            if (slot < 0) return "";
+            var s = TurfArena.Get(slot);
+            livery = s.livery;
+            return s.contestant;
+        }
 
         /// <summary>Begin. Called by the director the moment the standings are settled.</summary>
         public void Begin()
         {
+            // Named before the bench is checked, so the stage still knows who won even in a scene
+            // with no judges in it to say so.
+            Winner = NameWinner(out _livery);
+
             if (panel == null || panel.judges == null || panel.judges.Length == 0)
             {
                 // No bench in this scene is a wiring fault, not a reason to strand the stage one
@@ -130,17 +187,18 @@ namespace DuckMow
         }
 
         /// <summary>
-        /// Put the next card up, carrying a percentage.
+        /// Put the next card up, carrying the winner's face.
         ///
-        /// The cards read the SHARE OF THE ARENA, in whole percent, in the order the standings
-        /// finished — so the first card up is the winner's number. Not a mark out of ten: this
-        /// stage does not award marks, it measures ground, and printing a ten here would claim an
-        /// authority it deliberately does not have. The number on the card is the same number on
-        /// the board and the same number the panel will fold into the round.
+        /// All three carry the SAME face, which is the point of it: this is one verdict delivered by
+        /// three people, not three separate opinions. The rally does exactly this and the reasoning
+        /// carries over whole — see the class note.
+        ///
+        /// The card is tinted to the winner's livery rather than to whoever is holding it, so the
+        /// result is legible from across the plaza to somebody who cannot make out a face at that
+        /// distance. That is the same job the per-slot tint used to do for the per-slot numbers.
         /// </summary>
         void RaiseNext()
         {
-            var standings = director != null ? director.Standings : null;
             var c = panel.judges[_raised]?.character;
             int at = _raised;
             _raised++;
@@ -148,21 +206,36 @@ namespace DuckMow
 
             c.CardUp = 1f;
 
-            var mask = TurfMask.Instance;
-            if (mask != null && standings != null && at < standings.Count)
-            {
-                int slot = standings[at];
-                c.SetCardNumber(Mathf.RoundToInt(mask.Share(slot) * 100f));
-                // Tinted to the gardener whose number it is, so three cards in a row are three
-                // contestants rather than three digits.
-                if (c.cardRenderer != null)
-                    c.cardRenderer.material.color = Color.Lerp(Color.white, TurfArena.Livery(slot), 0.55f);
-            }
+            // Instance is the fallback and not the route: the arena builds portraits of its own, the
+            // same way the rally's does, so the faces are there in a scene opened on its own. But a
+            // BloomRush.unity saved before that wiring existed still has a bench, and in a
+            // championship the venue's own portraits are alive behind the arena — Main is asleep,
+            // not unloaded, and the static outlives a deactivated root. Reaching for that is the
+            // difference between a face and a blank on a scene nobody has rebuilt yet.
+            var source = portraits != null ? portraits : ContestantPortraits.Instance;
+            var tex = source != null && !string.IsNullOrEmpty(Winner) ? source.Get(Winner) : null;
+            if (tex != null) c.ShowPortrait(tex);
+            else c.SetCardNumber(1);          // a bench with no portrait still has to say SOMETHING
 
-            // The reaction is the sign of the result from THIS bench's point of view: the winner's
-            // card is applauded, the rest are simply read out.
-            c.Punch(at == 0 ? 0.9f : -0.25f);
-            AudioDirector.Instance?.CrowdCheer(at == 0 ? 0.7f : 0.2f);
+            // Said out loud, exactly as the rally says it, because a blank card is the one failure
+            // this beat cannot survive and it has four causes that look identical on screen: no
+            // portraits anywhere, no winner to name, no subject rendered for that contestant, or a
+            // card rig with nothing to hang the picture on.
+            Debug.Log($"[Bloom] card {_raised} for '{Winner}': portraits=" +
+                      $"{(portraits != null ? "wired" : source != null ? "via Instance" : "NONE")} " +
+                      $"texture={(tex != null ? tex.width + "px" : "NULL")} " +
+                      $"cardNumber={(c.cardNumber != null ? "yes" : "NULL")} " +
+                      $"card={(c.card != null ? c.card.name : "NULL")}");
+
+            if (c.cardRenderer != null)
+                c.cardRenderer.material.color = Color.Lerp(Color.white, _livery, 0.55f);
+
+            // Every card is the same good news now, so every card is applauded and the room builds
+            // rather than the second and third being read out flat. That flatness was correct while
+            // the cards were three different contestants' numbers and is simply wrong for three
+            // copies of one result.
+            c.Punch(0.9f);
+            AudioDirector.Instance?.CrowdCheer(0.4f + at * 0.2f, applaud: _raised >= 3);
         }
     }
 }

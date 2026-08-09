@@ -306,10 +306,25 @@ namespace DuckMow.EditorTools
                 // (0, 0, -39.5), which in this arena is a patch of turf outside the hedge.
                 if (camera != null) camera.judgesLookAt = bench.transform;
 
+                // Portraits, rendered from the real models at startup. The bench holds up the
+                // WINNER'S FACE at the end of this stage rather than four percentages — see
+                // TurfVerdict — so without these the beat is three judges holding up blanks.
+                //
+                // Built into this scene rather than borrowed from Main, and that is what makes the
+                // arena openable on its own: in a championship Main is only asleep behind the
+                // arena, so its portraits would in fact answer, but a BloomRush.unity opened
+                // straight from the Project window has no Main behind it and would show nothing.
+                // The rally solved this the same way in its own scene. The SUBJECT LIST is shared
+                // with the rally rather than written again, so the goose on this bench is the same
+                // goose on that one and on the venue's tour card.
+                var portraits = systems.gameObject.AddComponent<ContestantPortraits>();
+                portraits.subjects = DuckRallyBuilder.BuildPortraitSubjects();
+
                 var v = systems.gameObject.AddComponent<TurfVerdict>();
                 v.director = director;
                 v.panel = bench;
                 v.cameraDirector = camera;
+                v.portraits = portraits;
                 director.verdict = v;
             }
             else
