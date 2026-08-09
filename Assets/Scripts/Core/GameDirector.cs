@@ -1161,6 +1161,27 @@ namespace DuckMow
                     cameraDirector?.SetMode(CameraMode.VenueTour, 0.9f);
                     _tourIndex = -1;
                     _tourHold = 0f;
+
+                    // ASK FOR THE PORTRAITS HERE, where the answer can be relied on.
+                    //
+                    // They are rendered once, speculatively, at the end of the second frame of this
+                    // scene's life — ninety seconds before this beat, from inside a
+                    // WaitForEndOfFrame, at the least well defined moment in a frame to ask a
+                    // scriptable pipeline for a manual camera render. Nothing checked that it
+                    // worked and nothing could repair it if it had not: see ContestantPortraits
+                    // .Render, whose flag used to be set before the work rather than after it. The
+                    // failure is a target that was allocated and cleared and never drawn into, so
+                    // the tour card shows a face-shaped patch of one flat colour — intermittently,
+                    // because it is a race that usually goes the right way, and more likely on a
+                    // slower machine or in a browser than on the one it was written on.
+                    //
+                    // This is the right beat to ask from and it is not a guess: it is a minute and
+                    // a half into a round, so the pipeline is unquestionably warm; it is several
+                    // seconds ahead of the first HUD.ShowContestant, because the camera has to fly
+                    // to the first plot before a card is filled; and it changes the camera mode on
+                    // the same frame with a 0.9 s blend, which is where four small renders are
+                    // least likely to be felt. Once per tour, not once per contestant.
+                    ContestantPortraits.Instance?.Render(force: true);
                     break;
 
                 case GameState.Scoreboard:

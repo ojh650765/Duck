@@ -122,6 +122,13 @@ namespace DuckMow
             // with no judges in it to say so.
             Winner = NameWinner(out _livery);
 
+            // And the faces asked for before they are needed, the same guarantee the venue tour and
+            // the rally's bench take. The one speculative render this arena does happens at the end
+            // of its second frame and nothing checked that it worked; this beat is the settle, a
+            // couple of seconds ahead of the first card, and it is the one that knows the pipeline
+            // is warm. See ContestantPortraits.Render.
+            (portraits != null ? portraits : ContestantPortraits.Instance)?.Render(force: true);
+
             if (panel == null || panel.judges == null || panel.judges.Length == 0)
             {
                 // No bench in this scene is a wiring fault, not a reason to strand the stage one
