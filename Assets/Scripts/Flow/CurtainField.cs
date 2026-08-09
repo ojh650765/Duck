@@ -244,11 +244,24 @@ namespace DuckMow
             // A lit side and a shadow side, meeting at the midrib — but as two flat planes with a
             // hard join, the way a carved leaf catches the light, not as an airbrush across it.
             float rib = 1f - Edge(0f, 0.045f, Mathf.Abs(u));
-            shade = Mathf.Lerp(0.72f, 1.06f, 0.5f + 0.5f * u) - rib * 0.22f;
-            // The veins survive banding as an undulation ALONG the band boundary rather than as
-            // detail inside it, which reads as a painted stroke rather than as noise. That is worth
-            // keeping: ART_BIBLE §5 asks for deliberate imperfection and explicitly not for noise.
-            shade -= 0.05f * Mathf.Abs(Mathf.Sin((v * 7.5f) + u * 2.2f)) * (1f - Mathf.Abs(u));
+            // Deep enough to CROSS a band, which it has to be earned rather than assumed: at the old
+            // 0.22 the rib landed inside the same band as the blade around it and disappeared,
+            // surfacing only where the vein term happened to nudge it over a boundary. That drew the
+            // midrib as a dashed line — the atlas dump shows it plainly. Under a quantiser a
+            // subtractive detail is either bigger than a band step or it is not there at all.
+            shade = Mathf.Lerp(0.72f, 1.06f, 0.5f + 0.5f * u) - rib * 0.40f;
+            // The side veins are gone rather than reduced, and the reason is worth writing down
+            // because it applies to every soft detail anyone is tempted to add back here.
+            //
+            // Under a quantiser a small change in VALUE becomes a large change in POSITION. The
+            // leaf's base ramp only moves 0.17 of shade across a unit of u, so a vein worth 0.05
+            // walks the band boundary nearly a third of the tile sideways; dropping it to 0.02 still
+            // walked it an eighth, and the dump looked identical — a row of scallops down the leaf
+            // like the edge of a doily. Not a leaf, and squarely the "never noise" half of §5.
+            //
+            // A flat-shaded carved leaf has a rib and two planes. It does not have veins, and the
+            // asymmetry in the width term above is what keeps a field of them from reading as one
+            // stamp repeated.
             shade = Facet(shade, 0.50f, 1.06f, 3);
         }
 

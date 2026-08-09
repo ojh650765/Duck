@@ -1466,17 +1466,22 @@ namespace DuckMow
                         // the scoreboard already delivered, standing between the player and the two
                         // authored comic pages that are the actual payoff.
                         //
-                        // What survives is what the ceremony was borrowing anyway: the loudest
-                        // curtain in the game — confetti, brass, the lights up — because THIS is the
-                        // moment the evening ends, and the board deserves to be got off with a bang
-                        // whatever comes next. The extra hold stays too: the ending page builds its
-                        // first panel on its first frame, and the curtain should not lift on that
-                        // happening.
+                        // The curtain that used to stand here is gone as well, on the same reading
+                        // taken one step further. It was kept as the ceremony's last surviving
+                        // borrowing — the loudest wipe in the game, confetti and brass, to get the
+                        // board off with a bang — and a sign over it saying HOW IT ENDED.
                         //
-                        // The sign earns its place by the same rule that stripped the words off the
-                        // two menu boards: it NAMES something a wipe cannot say on its own, and it
-                        // is genuinely new — the game is over, and here is how it turned out. It is
-                        // also the one sign in the game that arrives exactly once a session.
+                        // But there is no scene load at this boundary. The ending page is built in
+                        // THIS scene, so the curtain was hiding nothing; it was a second flourish
+                        // standing in front of the authored one, which is the same mistake the
+                        // pageant made and the reason the pageant was cut. The sign is the clearest
+                        // case: announcing "how it ended" immediately before showing how it ended
+                        // is the game narrating its own payoff a beat early.
+                        //
+                        // Nothing flashes without it. ComicSequence.Begin sets its fade fully opaque
+                        // and applies it on the frame it starts, so the ending page covers itself
+                        // from its own first frame — which is exactly why the extra hold existed,
+                        // and exactly why it is not needed once the curtain is not there.
                         //
                         // VictoryCeremony and CeremonyNight are deliberately left in the project and
                         // GameState.Ceremony is deliberately still a working state. The enum is
@@ -1486,12 +1491,7 @@ namespace DuckMow
                         // asks for it by name — DuckSimulator and DuckCurtainShots both wait on it.
                         // Deleting the class would break the harness to remove code that costs
                         // nothing to leave sitting in an unreachable case.
-                        if (settled)
-                            EnterThrough(GameState.Ending, MatchState.Seam.IntoFinale,
-                                         "HOW IT ENDED",
-                                         tournament.Championship.PlayerIsChampion
-                                             ? "YOU WON THE DAY" : "THE FINAL RESULT",
-                                         extraHold: 0.45f);
+                        if (settled) SetState(GameState.Ending);
                         break;
                     }
 

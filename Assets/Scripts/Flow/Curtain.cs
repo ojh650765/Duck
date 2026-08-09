@@ -197,7 +197,7 @@ namespace DuckMow
             er.offsetMin = new Vector2(-9f, -9f);
             er.offsetMax = new Vector2(9f, 9f);
             _plateEdge = edgeGo.AddComponent<Image>();
-            _plateEdge.sprite = RoundedSprite();
+            _plateEdge.sprite = BoardSprite();
             _plateEdge.type = Image.Type.Sliced;
             _plateEdge.raycastTarget = false;
             _plateEdge.color = new Color(0.93f, 0.89f, 0.75f, 1f);
@@ -206,7 +206,7 @@ namespace DuckMow
             faceGo.transform.SetParent(_plate, false);
             Stretch((RectTransform)faceGo.transform);
             _plateImage = faceGo.AddComponent<Image>();
-            _plateImage.sprite = RoundedSprite();
+            _plateImage.sprite = BoardSprite();
             _plateImage.type = Image.Type.Sliced;
             _plateImage.raycastTarget = false;
             _plateImage.color = new Color(0.13f, 0.28f, 0.17f, 1f);
@@ -243,39 +243,46 @@ namespace DuckMow
             return t;
         }
 
-        static Sprite _rounded;
+        static Sprite _board;
 
-        /// <summary>A nine-sliced rounded panel, built once, so the sign ships no art file.</summary>
-        static Sprite RoundedSprite()
+        /// <summary>
+        /// The sign's board: square-cornered painted timber, built once, so it ships no art file.
+        ///
+        /// This was a rounded rectangle with a 16 px radius, and against a frame full of flat-shaded
+        /// hand-painted cloth it was the last thing in the transition still reading as UI — a
+        /// roadside sign floating over a garden. ART_BIBLE §8 rejects a rounded-rectangle silhouette
+        /// outright, and the comment on the plate itself already asked for "a board of the same
+        /// painted timber the venue's signage is made of ... rather than a UI panel". The intent was
+        /// right and the sprite disagreed with it; the corners are what carried the disagreement.
+        ///
+        /// Square corners, then, and nothing else changes: the plate keeps its cream edge, its dark
+        /// green face and the couple of degrees of tilt that make it a thing somebody carried in.
+        /// Still nine-sliced, because the board is stretched to two very different sizes and only
+        /// the border should hold its scale — with square corners the slice has no curve to protect,
+        /// so the margin exists purely to keep the edge from being resampled.
+        /// </summary>
+        static Sprite BoardSprite()
         {
-            if (_rounded != null) return _rounded;
+            if (_board != null) return _board;
 
-            const int n = 48, r = 16;
+            const int n = 48;
             var tex = new Texture2D(n, n, TextureFormat.RGBA32, false, false)
             {
-                name = "Curtain plate",
+                name = "Curtain board",
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear,
                 hideFlags = HideFlags.HideAndDontSave
             };
             var px = new Color32[n * n];
-            for (int y = 0; y < n; y++)
-            for (int x = 0; x < n; x++)
-            {
-                float dx = Mathf.Max(r - x - 0.5f, x + 0.5f - (n - r), 0f);
-                float dy = Mathf.Max(r - y - 0.5f, y + 0.5f - (n - r), 0f);
-                float d = Mathf.Sqrt(dx * dx + dy * dy) - r;
-                float a = Mathf.Clamp01(0.5f - d);
-                px[y * n + x] = new Color32(255, 255, 255, (byte)(a * 255f));
-            }
+            for (int i = 0; i < px.Length; i++) px[i] = new Color32(255, 255, 255, 255);
             tex.SetPixels32(px);
             tex.Apply(false, true);
 
-            _rounded = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f, 0,
-                                     SpriteMeshType.FullRect, new Vector4(r + 2, r + 2, r + 2, r + 2));
-            _rounded.name = "Curtain plate";
-            _rounded.hideFlags = HideFlags.HideAndDontSave;
-            return _rounded;
+            _board = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f, 0,
+                                   SpriteMeshType.FullRect, new Vector4(6f, 6f, 6f, 6f));
+            _board.name = "Curtain board";
+            _board.hideFlags = HideFlags.HideAndDontSave;
+            return _board;
         }
 
         void BuildAudio()

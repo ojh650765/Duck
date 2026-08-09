@@ -634,7 +634,13 @@ namespace DuckMow.EditorTools
             // The show is on the masthead and the class is underneath it in small type, which is how a
             // horticultural show bill reads and is the whole point of the event being GARDENER OF THE
             // YEAR with lawn art as one class inside it.
-            var ribbon = DuckUIBuilder.Frac("Ribbon", group, 0.55f, -0.30f, 1.06f, 0.14f);
+            // Dropped from a top edge of 0.14 to 0.00 so it hangs BELOW the board instead of riding
+            // up into it. At 0.14 the ribbon's upper third overlapped the masthead art: it is built
+            // last so it drew on top, which made the render's own drop shadow and keyline read as a
+            // torn edge across the bottom-right of the title. A ribbon pinned across a board's
+            // corner is the intent, but the sign has to stay legible, and "GARDENER OF THE YEAR"
+            // runs the full width of that render.
+            var ribbon = DuckUIBuilder.Frac("Ribbon", group, 0.55f, -0.44f, 1.06f, 0.00f);
             DuckUIBuilder.AddImage(ribbon, DuckUIBuilder.Spr("banner_ribbon_512"), Color.white, Image.Type.Sliced);
             // The ribbon's writable cream field is only the middle third of the sprite; the rest is
             // stripe, tails and transparent margin. These fractions are the ones the HUD measured off
@@ -1130,23 +1136,36 @@ namespace DuckMow.EditorTools
             var content = BuildCard(root, "SettingsCard", "SETTINGS", out CanvasGroup group,
                                     "UP DOWN TO PICK  ·  LEFT RIGHT TO CHANGE  ·  " +
                                     "ESC OR A CLICK OFF THE BOARD GOES BACK",
-                                    "HOW LOUD THE SHOW IS",
-                                    0.36f, 0.15f, 0.92f, 0.655f);
+                                    "HOW LOUD THE SHOW IS, AND HOW MUCH IT SHAKES",
+                                    // Grown from 0.15..0.655 to fit a third row. Split evenly top and
+                                    // bottom rather than taken from one end, so the board stays where
+                                    // the player's eye already expects it on a card they have opened
+                                    // before. The content rect is 0.615 of the card, so this buys
+                                    // about sixty pixels of usable height.
+                                    0.36f, 0.105f, 0.92f, 0.70f);
 
-            // The card is 545 px tall and its content 335, which two rows and a bar do not fill and
-            // are not asked to. The gaps are uneven on purpose: 27 px between MASTER VOLUME and its
-            // own bar, 45 px between that bar and MUTE. A settings board where every gap is equal is
-            // a board on which nothing tells you which control the bar belongs to.
-            var rows = new MainMenu.SettingRow[2];
+            // The card is now 643 px tall and its content 395, carrying three rows and a bar.
+            //
+            // The gaps stay uneven on purpose, and the reason survives the extra row: 27 px between
+            // MASTER VOLUME and its own bar, 45 px between that bar and MUTE. A settings board where
+            // every gap is equal is a board on which nothing tells you which control the bar belongs
+            // to. RUMBLE sits 30 px under MUTE — closer to it than the bar is to either — because
+            // they are the two switches and reading them as a pair is worth more than an even column.
+            //
+            // The BAR's height is the one figure here that is not free. Its trough is 0.62 of the
+            // bar rect and the artwork is 48 px tall nine-sliced, so the bar has to stay at 77 px or
+            // the rounded ends stop being the shape they were painted. The rows absorbed the change
+            // instead, coming down from 80 px to 72.
+            var rows = new MainMenu.SettingRow[3];
 
             rows[0] = SettingLine(content, "Volume", MainMenu.Setting.MasterVolume,
-                                  "MASTER VOLUME", "100%", 0.745f, 0.985f);
+                                  "MASTER VOLUME", "100%", 0.818f, 1.000f);
 
             // The bar is a SIBLING of the volume row rather than a child of it, so the row's rect
             // stays the label line. That is what puts the chevron beside the words instead of
             // halfway down the empty space under them, and it is why MainMenu hit-tests volumeBar
             // separately — the bar is not inside the row it belongs to.
-            var bar = DuckUIBuilder.Frac("VolumeBar", content, Gutter, 0.450f, 1f, 0.680f);
+            var bar = DuckUIBuilder.Frac("VolumeBar", content, Gutter, 0.555f, 1f, 0.750f);
 
             // richText OFF on both, and that is a real hazard rather than a precaution. TMP reads a
             // less-than sign as the opening of a markup tag; a lone "<" survives it today because
@@ -1180,7 +1199,13 @@ namespace DuckMow.EditorTools
             fill.fillAmount = 1f;
 
             rows[1] = SettingLine(content, "Mute", MainMenu.Setting.Mute, "MUTE", "OFF",
-                                  0.075f, 0.315f);
+                                  0.259f, 0.441f);
+
+            // The pad's own switch. Reads OFF here and is overwritten on the first ApplySettings
+            // from Haptics.Enabled, which is loaded from PlayerPrefs before any scene — the same
+            // reason MASTER VOLUME is built saying 100% and then corrected.
+            rows[2] = SettingLine(content, "Rumble", MainMenu.Setting.Rumble, "RUMBLE", "ON",
+                                  0.001f, 0.183f);
 
             menu.settingRows = rows;
             menu.settingsPointer = Marker("Pointer", content, Gutter, 44f);

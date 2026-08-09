@@ -73,7 +73,10 @@ namespace DuckMow
         /// key rebinding to hand out when the whole game is polled off two devices by hand. A
         /// settings page padded with controls that do nothing is worse than a short one.
         /// </summary>
-        public enum Setting { MasterVolume, Mute }
+        // Rumble is last so the board reads loud-to-quiet down the card and the pad's own switch sits
+        // at the bottom, away from the two rows that are about sound. Append-only: the builder writes
+        // these into a serialised array, so reordering renames every row in an already-built scene.
+        public enum Setting { MasterVolume, Mute, Rumble }
 
         [Serializable]
         public class Item
@@ -1645,6 +1648,22 @@ namespace DuckMow
                     Play(clickClip, 0.30f);
                     break;
 
+                case Setting.Rumble:
+                    // Right is ON, left is OFF, for the same reason the mute does it that way — and
+                    // note the polarity is the honest one here rather than the mute's inversion:
+                    // right means MORE rumble, and it also means the flag is true.
+                    if (!discrete) return;
+                    bool rumble = direction > 0;
+                    if (rumble == Haptics.Enabled) return;
+                    Haptics.Enabled = rumble;
+                    Play(clickClip, 0.30f);
+                    // A sample on the way on, and only on the way on. A player switching rumble on
+                    // has no other way to find out whether their pad actually does anything — the
+                    // next rumble is a klaxon away — and one that fires on the way OFF would be the
+                    // control disobeying the press that just turned it off.
+                    if (rumble) Haptics.MiniTurbo();
+                    break;
+
                 default:
                     float before = _volumePos;
                     SetVolumePosition(_volumePos + direction * VolumeStep);
@@ -1670,6 +1689,15 @@ namespace DuckMow
             if (row == null) return;
 
             _setIndex = index;
+
+            if (row.setting == Setting.Rumble)
+            {
+                Haptics.Enabled = !Haptics.Enabled;
+                Play(clickClip, 0.30f);
+                if (Haptics.Enabled) Haptics.MiniTurbo();
+                return;
+            }
+
             if (row.setting != Setting.Mute) return;
 
             MasterAudio.Muted = !MasterAudio.Muted;
@@ -1775,6 +1803,14 @@ namespace DuckMow
                         if (row.setting == Setting.Mute)
                         {
                             row.value.text = muted ? "ON" : "OFF";
+                        }
+                        else if (row.setting == Setting.Rumble)
+                        {
+                            row.value.text = Haptics.Enabled ? "ON" : "OFF";
+                            // Dulled when OFF, which is the opposite of the mute row and correct for
+                            // both: each dulls when the thing it names is not reaching the player.
+                            // MUTE ON means no sound, RUMBLE OFF means no rumble.
+                            dulled = !Haptics.Enabled;
                         }
                         else
                         {

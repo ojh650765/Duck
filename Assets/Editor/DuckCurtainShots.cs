@@ -54,18 +54,27 @@ namespace DuckMow.EditorTools
             // "THE CHAMPIONSHIP", one of them "THE SASH IS AWARDED", for a championship that was
             // renamed and a ceremony that was cut. The sheet looked authoritative and was describing
             // a game that no longer existed.
-            var labels = new[]
+            // The running order is LAWN ART, then GOOSE RALLY, then BLOOM RUSH last — so the round
+            // number on a sign is decided by which STAGE it names, not by which curtain style
+            // happens to be loudest. The sheet had GOOSE RALLY over "FINAL ROUND", which is the
+            // second round wearing the third's kicker.
+            var labels = new (string head, string kick)[]
             {
-                // StageToRound, mid-championship: back out of an arena onto the picture.
-                ("LAWN ART", StageSeam.RoundKicker(2)),
-                // MenuToRound: the grass comes up and you are standing in it.
-                ("LAWN ART", StageSeam.RoundKicker(1)),
-                // RoundToRally on the final round.
-                ("GOOSE RALLY", StageSeam.RoundKicker(3)),
-                // RoundToBloom.
-                ("BLOOM RUSH", StageSeam.RoundKicker(3)),
-                // IntoFinale — GameDirector.cs:1490, the one seam allowed to shout.
-                ("HOW IT ENDED", "YOU WON THE DAY")
+                ("LAWN ART",     StageSeam.RoundKicker(1)),
+                // MenuToRound is wordless and always was — the grass rising already says a round is
+                // starting. Kept in the sheet as a null pair on purpose: it is the only frame that
+                // exercises Curtain's no-sign path, where _signWanted goes false and the plate is
+                // never positioned or drawn.
+                (null,           null),
+                ("GOOSE RALLY",  StageSeam.RoundKicker(2)),
+                ("BLOOM RUSH",   StageSeam.RoundKicker(3)),
+                // Fanfare is OFF THE LIVE ROUTE. It was the IntoFinale seam, and that boundary no
+                // longer runs a curtain at all — the scoreboard goes straight to the ending page.
+                // Shot anyway, and wordless, because the style is still selectable and a style that
+                // no tool ever photographs is a style that quietly rots. Not captioned "HOW IT
+                // ENDED" any more: that sign does not exist, and a sheet that shows it would be
+                // describing the game as it was for the third time in this file's life.
+                (null,           null)
             };
 
             for (int i = 0; i < styles.Length; i++)
