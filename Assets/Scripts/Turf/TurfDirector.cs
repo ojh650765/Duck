@@ -730,35 +730,130 @@ namespace DuckMow
         /// (This comment lived above the parc-ferme fields for a while, describing a board they have
         /// nothing to do with. Put back on the method it is about.)
         /// </summary>
+        /// <summary>
+        /// What this stage is worth to one gardener, on the competition's own thirty.
+        ///
+        /// THE ONLY PLACE THIS IS WORKED OUT. It has been worked out in three places before now and
+        /// two of them were wrong — the stage card once printed 7 for a round that banked 22, and
+        /// this board once predicted 7 for a round about to bank 15 — because each caller rebuilt
+        /// the arithmetic instead of asking for it. Both of those readings now come through here,
+        /// so the number on the card and the number on the board cannot be different numbers.
+        ///
+        /// The place is taken from the standings rather than passed in, for the same reason: a
+        /// caller that forgets it gets an UNPLACED result, which BloomMarks correctly pays no
+        /// winner's premium, and the leader silently loses four marks. A slot that is not in the
+        /// standings at all reads as unplaced, which is the honest answer for one that never played.
+        /// </summary>
+        /// <summary>
+        /// Which arena slot a championship row belongs to, or -1.
+        ///
+        /// By name, because the championship table and the arena roster are two different lists that
+        /// only ever agree on that. Case-insensitively, because one is display copy.
+        /// </summary>
+        static int SlotOf(string contestant)
+        {
+            for (int i = 0; i < TurfArena.Count; i++)
+                if (string.Equals(TurfArena.Get(i).contestant, contestant,
+                                  System.StringComparison.OrdinalIgnoreCase)) return i;
+            return -1;
+        }
+
+        public float StageMarks(int slot)
+        {
+            var mask = TurfMask.Instance;
+            if (mask == null) return 0f;
+            return Tournament.BloomMarks(new TurfHandoff.Result
+            {
+                share = mask.Share(slot),
+                place = _standings.IndexOf(slot) + 1
+            });
+        }
+
         void ShowBoard()
         {
             _boardSettled = true;
 
-            // ---- IN A CHAMPIONSHIP THIS STAGE DOES NOT RAISE A BOARD AT ALL ----
+            // ---- WHICH BOARD ENDS A ROUND, AND WHY THE RULE IS NOT "WHICH ARENA" ----
             //
-            // It used to, and the player was shown two boards in a row for one round: this one,
-            // here, and then the venue's own the moment the arena unloaded and Main woke up behind
-            // it. Two boards is one board too many whatever either of them says, and the second is
-            // the one that cannot be dropped — GameDirector's Scoreboard state is where the round is
-            // BANKED, where SPACE goes to the next stage, and where a completed championship turns
-            // into the ending. It is a gate, not a graphic. So the board that goes is this one.
+            // For a while this stage raised no board at all in a championship, because it raised one
+            // here and the venue raised another the instant the arena unloaded, and two boards for
+            // one round is one board too many. The one that survived was the venue's, on the
+            // argument that GameDirector's Scoreboard state cannot simply be dropped: it BANKS the
+            // round, it is the SPACE door to the next stage, and it is the branch that turns a
+            // finished championship into the ending. That is all true. It is a gate, not a graphic.
             //
-            // This board also used to project the running total by hand: this stage's marks through
-            // BloomMarks, added to the championship table, printed before anything had been banked.
-            // It was right, and it was a second copy of arithmetic that lives in Tournament — a copy
-            // that had already been wrong once, predicting seven marks for a round that banked
-            // fifteen. The venue's board now prints the table AFTER BankRound, so the number the
-            // player reads is not a forecast of the banked total, it is the banked total.
+            // It was the wrong board to keep for the LAST round, and the owner has said so: after
+            // Bloom Rush there is no next stage to walk to, so unloading the arena, waking the
+            // venue and flying to its board exists only to show a table and immediately leave for
+            // the ending page. A round that continues has somewhere to go and the trip is on the
+            // way; the last round's trip is a detour.
             //
-            // What is left on screen here instead is the stage card, which stays up because OnBoard
-            // is never set: the player's own placing, over their own machine, held until the curtain.
-            // That is a better last frame for an arena than a ninety-metre sweep to a table they are
-            // about to be shown properly.
-            if (Tournament.Instance != null && Tournament.Instance.Championship != null) return;
+            // So the rule is NOT "the rally keeps the venue board and Bloom keeps its own". It is
+            // THE LAST BOARD OF THE EVENING IS SHOWN WHERE THE EVENING ENDED. IsFinalRound is read
+            // before anything is banked, which is exactly when it means "the round being played now
+            // is the last one" — so this fires for Bloom Rush in the shipping running order, does
+            // not fire for the rally, and would correctly follow the stages if somebody reordered
+            // them. GameDirector reads the same fact from the other side and stays silent when this
+            // board has spoken; neither of them decides it alone.
+            //
+            // The gate itself does not move. The venue state is still entered, still banks, still
+            // tests IsComplete and still hands over to the ending — it just draws nothing.
+            var champ = Tournament.Instance != null ? Tournament.Instance.Championship : null;
+            if (champ != null && !champ.IsFinalRound) return;
 
             OnBoard = true;
             var mask = TurfMask.Instance;
             if (scoreboard == null || mask == null) return;
+
+            // ---- THE LAST ROUND, IN A CHAMPIONSHIP: the evening's total ----
+            //
+            // Banked rounds PLUS this one, because this one is not banked yet — the arena does not
+            // close its standings until it hands back, so the table at this moment holds rounds one
+            // and two. The addition is the projection, and it is safe here for the reason it was not
+            // safe before: the marks come from StageMarks, which is the same call the stage card
+            // read a few seconds ago, rather than from a second copy of the arithmetic. That copy is
+            // what once printed seven for a round about to bank fifteen.
+            if (champ != null)
+            {
+                var table = champ.Table;
+                var totals = new List<Standing>(table.Count);
+                foreach (var e in table)
+                {
+                    int slot = SlotOf(e.name);
+                    float projected = e.points + (slot >= 0 ? StageMarks(slot) : 0f);
+                    totals.Add(new Standing
+                    {
+                        name = e.name,
+                        species = e.species,
+                        isPlayer = e.isPlayer,
+                        livery = e.livery,
+                        total = projected,
+                        // True, so the row prints a bare number. Three rounds do not fit in one
+                        // round's denominator and a board reading "61 / 30" is a board nobody
+                        // trusts again — Standing.rallyMarked's own note records this as the case
+                        // it was kept alive for.
+                        rallyMarked = true,
+                        // No grade. A letter grade describes one round; there is no such thing as a
+                        // grade for an evening.
+                        rank = "",
+                    });
+                }
+                totals.Sort((a, b) =>
+                {
+                    int byTotal = b.total.CompareTo(a.total);
+                    return byTotal != 0 ? byTotal : string.CompareOrdinal(a.name, b.name);
+                });
+
+                cameraDirector?.SetMode(CameraMode.Scoreboard, 1.6f);
+                scoreboard.ResetBoard();
+                scoreboard.Settle(totals, "CHAMPION");
+                AudioDirector.Instance?.CrowdCheer(0.9f, applaud: true);
+
+                // Told, not inferred. The venue's Scoreboard state goes silent on this and nothing
+                // else, so the two can never both decide the other one is showing the board.
+                TurfHandoff.ClosingBoardShown = true;
+                return;
+            }
 
             // ---- STANDALONE ONLY, and then this board is the only word there is ----
             //

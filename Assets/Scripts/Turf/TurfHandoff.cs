@@ -39,6 +39,22 @@ namespace DuckMow
 
         /// <summary>Set once the match has ended and the results below are real rather than left over.</summary>
         public static bool ResultsReady;
+
+        /// <summary>
+        /// True once this stage has raised the CLOSING board — the evening's table, shown in the
+        /// arena because this was the last round and there is nowhere after it but the ending.
+        ///
+        /// A fact reported by the stage that did it, not a rule the venue re-derives. The venue has
+        /// to stay silent exactly when this board has spoken, and the tempting way to arrange that
+        /// is for both sides to test Championship.IsFinalRound independently. That is one edit away
+        /// from a round with NO board at all: the rally's verdict stands aside from its own board
+        /// unconditionally, so if the running order ever made the rally the last round, both sides
+        /// would decide the other one was handling it. Reporting what actually happened cannot get
+        /// out of step with what actually happened.
+        ///
+        /// Cleared by <see cref="Clear"/>, which <see cref="Send"/> calls on the way into the stage.
+        /// </summary>
+        public static bool ClosingBoardShown;
         public static Result[] Results = System.Array.Empty<Result>();
         /// <summary>Share of the arena nobody claimed. Shown on the reveal; the honest remainder.</summary>
         public static float NeutralShare;
@@ -48,6 +64,7 @@ namespace DuckMow
             Active = false;
             RoundNumber = 0;
             ResultsReady = false;
+            ClosingBoardShown = false;
             NeutralShare = 0f;
             Results = System.Array.Empty<Result>();
         }

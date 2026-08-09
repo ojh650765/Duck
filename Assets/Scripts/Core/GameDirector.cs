@@ -1197,14 +1197,51 @@ namespace DuckMow
                     // lawn and ends looking at a neighbour's plot, the blend is the right edit and is
                     // kept.
                     bool hardCut = from == GameState.Rally || from == GameState.Bloom;
-                    cameraDirector?.SetMode(CameraMode.Scoreboard, hardCut ? 0f : 1.1f);
-                    if (hardCut) cameraDirector?.SnapToCurrent();
+
+                    // ---- THE GATE STILL RUNS; IT JUST DOES NOT ALWAYS DRAW ----
+                    //
+                    // This state is not a graphic, it is the gate: it banks the round, it is the
+                    // SPACE door to the next stage, and it is the branch that turns a finished
+                    // championship into the ending. None of that moves. What moves is the BOARD.
+                    //
+                    // An arena that was the last round of the evening has already shown the closing
+                    // table on its own board, where the evening actually ended — see
+                    // TurfDirector.ShowBoard, which reads the same fact from the other side. Coming
+                    // back here to show a second one means unloading the arena, waking the venue and
+                    // flying ninety metres to a table the player read a few seconds ago, purely to
+                    // leave for the ending page. The owner asked for that trip to stop existing.
+                    //
+                    // ASKED, NOT RE-DERIVED. The arena reports whether it actually raised the closing
+                    // board; this does not work out for itself whether it should have. The tempting
+                    // version tests Championship.IsFinalRound on both sides — and that is one edit
+                    // from a round with no board at all, because RallyVerdict stands aside from its
+                    // own board unconditionally, so a running order that made the rally last would
+                    // have both sides deciding the other one was handling it.
+                    //
+                    // Scoped to the stage whose flag it is, rather than to "any arena". TurfHandoff
+                    // is Bloom Rush's handoff, so reading it on the rally's way out would be asking
+                    // the wrong stage — and it would be a live fault rather than a tidiness one: the
+                    // flag survives a stage, so a championship restarted after a finished one could
+                    // carry a true into round two and silently eat the rally's board. Clear() covers
+                    // that on both routes that reset a championship; this makes it unreachable.
+                    _arenaClosedTheRound = from == GameState.Bloom && TurfHandoff.ClosingBoardShown;
+
+                    if (!_arenaClosedTheRound)
+                    {
+                        cameraDirector?.SetMode(CameraMode.Scoreboard, hardCut ? 0f : 1.1f);
+                        if (hardCut) cameraDirector?.SnapToCurrent();
+                    }
                     // The round's points join the championship here — see Tournament.BankRound for
                     // why this and not the verdict. It has to happen before the board is filled, so
                     // that whether this was the last round is already known by the time the board
                     // decides what to call the contestant on top of it.
+                    //
+                    // UNCONDITIONAL, and it stays the only place a round is banked. The arena's own
+                    // board projects the total rather than banking it, precisely so that this
+                    // remains true: one banking site, one _banked guard, no path that counts a round
+                    // twice. That path existed once and is not being reopened for a graphic.
                     tournament?.BankRound();
-                    if (tournament != null)
+                    if (tournament != null && !_arenaClosedTheRound)
                     {
                         // THE RUNNING TOTAL, not this round.
                         //
@@ -1287,7 +1324,17 @@ namespace DuckMow
                 bool cameFromArena = from == GameState.Rally || from == GameState.Bloom;
                 if (cameFromArena)
                 {
-                    Curtain.Live?.ClearInstant();
+                    // ...UNLESS the venue is not going to be shown at all, in which case the cover
+                    // stays down and the ending page takes over from underneath it.
+                    //
+                    // There is exactly one frame in it and it is the frame that matters. This state
+                    // is entered from Tick, so the venue renders once before the next Tick sends it
+                    // to the ending — and Main has just woken with its camera still holding whatever
+                    // pose it slept in a round ago, framing the plaza board from a previous round.
+                    // Clearing here would flash that. Leaving the cover down costs nothing, because
+                    // ComicSequence.Begin sets its fade fully opaque on the frame it starts, so the
+                    // page is already covering the screen when BeginEnding drops this.
+                    if (!_arenaClosedTheRound) Curtain.Live?.ClearInstant();
                     StageSeam.Forget();
                 }
                 else StartCoroutine(RaiseSeam());
@@ -1735,8 +1782,14 @@ namespace DuckMow
                     // builder failed to wire, an empty standings list — would otherwise leave the
                     // last round of a championship parked on a screen that accepts no input at all,
                     // which is the one failure worse than a bad ceremony.
-                    bool settled = _stateTime > 2.5f &&
-                                   (scoreboard == null || scoreboard.Finished || _stateTime > 12f);
+                    // Nothing to wait for when this state drew nothing: the board the player is
+                    // meant to read is the arena's, they have already read it, and the arena held
+                    // it for the rest of its own reveal. Holding here would be holding on a venue
+                    // that is not on screen and must never get onto it — see the curtain note in
+                    // SetState's tail, which keeps the cover down across exactly this one frame.
+                    bool settled = _arenaClosedTheRound ||
+                                   (_stateTime > 2.5f &&
+                                    (scoreboard == null || scoreboard.Finished || _stateTime > 12f));
 
                     // The last round resolves itself. The payoff for winning a championship cannot
                     // sit behind a keypress the player has no reason to expect is waiting for them.
@@ -1877,7 +1930,11 @@ namespace DuckMow
                         // BackToMenu rather than a state: it guards its own re-entry and covers the
                         // load with the curtain, which is the same door the pause board's BACK TO
                         // MENU goes through.
-                        BackToMenu();
+                        //
+                        // INSTANTLY, because the page has already concluded and taken itself off
+                        // screen — see LeaveToMenu, where the animated close was spending its whole
+                        // duration revealing the venue behind it.
+                        BackToMenu(instant: true);
                     }
                     break;
             }
@@ -1993,6 +2050,14 @@ namespace DuckMow
 
             _endingBudget = Mathf.Clamp(_ending.TotalSeconds + 8f, 10f, 180f);
             _ending.Begin();
+
+            // The page is opaque from this frame, so anything still covering the venue can go.
+            //
+            // This is the other half of the cover the Scoreboard tail leaves down when an arena
+            // closed the round: the curtain is handed straight to the ending page rather than being
+            // lifted onto a venue nobody is meant to see. A no-op on every other route into the
+            // ending, where the frame is already clear.
+            Curtain.Live?.ClearInstant();
             Debug.Log($"[Duck] ending: {(won ? "the pond is bought" : "the pond is sold")} " +
                       $"on {(tournament != null ? tournament.Championship.PlayerPoints : 0)} points.");
         }
@@ -2032,6 +2097,18 @@ namespace DuckMow
         bool _leavingToMenu;
 
         /// <summary>
+        /// True while the Scoreboard state is running as a gate with no board: the round it is
+        /// closing was the last one, and the arena it came from has already shown the evening's
+        /// table on its own board.
+        ///
+        /// Recomputed on every entry to the state, before <see cref="Tournament.BankRound"/>, which
+        /// is the only moment it can be read correctly — banking is what makes IsFinalRound stop
+        /// being true. Read three times after that: to skip the camera move, to skip the hold, and
+        /// to keep the cover down over the one frame between here and the ending page.
+        /// </summary>
+        bool _arenaClosedTheRound;
+
+        /// <summary>
         /// Leave the championship and go back to the front page.
         ///
         /// A scene load rather than a state, unlike everything else in this class. A round resets in
@@ -2039,16 +2116,21 @@ namespace DuckMow
         /// camera, lawn, canvas and mown picture — rebuilding all of that inside the game scene would
         /// be a second copy of DuckMenuBuilder free to drift from the first.
         /// </summary>
-        public void BackToMenu()
+        /// <param name="instant">
+        /// Cover with no wipe. For the one exit where there is nothing to play out of: the ending
+        /// page has just concluded and switched itself off, so an animated close spends its time
+        /// wiping away a frame the player was never supposed to be shown.
+        /// </param>
+        public void BackToMenu(bool instant = false)
         {
             // LoadSceneAsync is not idempotent and Escape is a key players hold down, so a second
             // call while the first is still loading would queue a redundant load.
             if (_leavingToMenu) return;
             _leavingToMenu = true;
-            StartCoroutine(LeaveToMenu());
+            StartCoroutine(LeaveToMenu(instant));
         }
 
-        System.Collections.IEnumerator LeaveToMenu()
+        System.Collections.IEnumerator LeaveToMenu(bool instant)
         {
             // Cover BEFORE the tear-down, so the arena unloading and the mower being put back are
             // both behind the curtain rather than the last thing the player sees of the round.
@@ -2069,7 +2151,26 @@ namespace DuckMow
             // Curtain supports this properly rather than by accident: an empty headline sets
             // _signWanted false, the sign group is held at zero alpha and the plate is never drawn.
             // What is left is the wipe itself, which was always the part carrying the feeling.
-            yield return StageSeam.Begin(MatchState.Seam.RoundToMenu);
+            // ---- OUT OF THE ENDING, THERE IS NOTHING TO WIPE AWAY FROM ----
+            //
+            // The owner: "when the ending sequence plays, the scoreboard shows for a moment". It
+            // does, and this line is why. ComicSequence.Conclude switches its page off the instant
+            // it finishes, so by the time this coroutine starts the page is GONE — and what is
+            // underneath it is the venue, with the camera still framing the plaza board from the
+            // Scoreboard beat. The animated close then spends two thirds of a second wiping that
+            // board off screen, which is two thirds of a second of showing it.
+            //
+            // A wipe is right when the player is being carried out of somewhere they were: leaving
+            // mid-round, or Escape from a live arena. It is wrong here, because the journey ended
+            // when the page did. So the cover is instant and the load happens behind it.
+            //
+            // The other half of this report is fixed upstream: the last round no longer walks back
+            // to the venue board at all, so on the normal route there is no longer a board under
+            // the page to be revealed. This handles the frame regardless of what is behind it,
+            // which is the right division — one fix removes the content, the other removes the
+            // reveal, and neither depends on the other being there.
+            if (instant) StageSeam.CoverNow(MatchState.Seam.RoundToMenu);
+            else yield return StageSeam.Begin(MatchState.Seam.RoundToMenu);
 
             // Deliberately NOT AbandonRally/AbandonBloom. Both call StopAllCoroutines, which would
             // kill this coroutine halfway through its own transition and leave the game covered by a
