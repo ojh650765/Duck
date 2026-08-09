@@ -205,6 +205,22 @@ namespace DuckMow
                     rank = Scoring.Rank(marks),
                 });
             }
+
+            // Sorted by the MARKS, not left in the order the gardens were ranked in.
+            //
+            // Those were the same list while placing WAS the score. They are not any more: the rally
+            // is placed on integrity and marked on integrity plus the offensive half, so a competitor
+            // who saved a little less and fought a lot harder can out-score the one above them. That
+            // is deliberate — see Tournament.RallyMarks — but Scoreboard.Settle writes rows top-down
+            // exactly as handed and works its places out from them, so an unsorted list would put a
+            // "1ST" label on the second-highest number on the board.
+            list.Sort((a, b) =>
+            {
+                int byScore = b.RoundScore.CompareTo(a.RoundScore);
+                // Alphabetical on a tie, the same tiebreak Tournament.RankStandings uses, so this
+                // fallback board and a banked round never order four equal scores differently.
+                return byScore != 0 ? byScore : string.CompareOrdinal(a.name, b.name);
+            });
             return list;
         }
 

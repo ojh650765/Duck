@@ -738,8 +738,9 @@ namespace DuckMow
             var table = Tournament.Instance != null ? Tournament.Instance.Championship?.Table : null;
 
             var rows = new List<Standing>(_standings.Count);
-            foreach (int slot in _standings)
+            for (int i = 0; i < _standings.Count; i++)
             {
+                int slot = _standings[i];
                 var s = TurfArena.Get(slot);
                 // This round's marks, on the competition's own scale rather than as a share.
                 //
@@ -750,7 +751,18 @@ namespace DuckMow
                 // here made this board predict seven marks for a round that was about to be banked
                 // at fifteen, so the last thing the player read before the ending disagreed with the
                 // total the ending turns on.
-                float stageMarks = Tournament.BloomMarks(new TurfHandoff.Result { share = mask.Share(slot) });
+                //
+                // THE PLACE IS PART OF THE MARK and has to be filled in. _standings is already in
+                // finishing order — it is the same list TurfHandoff.Post numbers its results from —
+                // so the row index is the place. Leaving the field at its default zero would reopen
+                // exactly the disagreement the paragraph above is about: BloomMarks reads an unplaced
+                // result as owed no winner's premium, so this board would quietly predict four marks
+                // fewer for the leader than the championship is about to bank.
+                float stageMarks = Tournament.BloomMarks(new TurfHandoff.Result
+                {
+                    share = mask.Share(slot),
+                    place = i + 1
+                });
                 float running = stageMarks;
 
                 if (table != null)
