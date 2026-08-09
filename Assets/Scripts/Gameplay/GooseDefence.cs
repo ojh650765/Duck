@@ -1223,6 +1223,14 @@ namespace DuckMow
             else if (tier == Tier.Good) _outcome.goods++;
             else _outcome.normals++;
 
+            // The sharpest thing in the haptic vocabulary, and it belongs here: this is the one event
+            // in the rally the player is actively trying to cause, arriving in a moment when the
+            // screen is busy and the crowd is loud. No tier scaling — the amplitude is the point, and
+            // a NORMAL parry that feels like a weak PERFECT would read as a worse parry than it was.
+            // Unconditional because _mower is the player's own machine (bound from director.mower at
+            // line 617), so there is no rival that can reach this method.
+            Haptics.GooseStrike();
+
             // Where the machine is pointing is where the goose goes. The most direct reading of the
             // arcade-car-soccer reference, and it makes aiming a driving problem rather than a second
             // control to learn.

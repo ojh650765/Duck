@@ -867,6 +867,9 @@ namespace DuckMow
                     // And the stand reacts, which nothing was doing: the round ended in front of four
                     // hundred spectators and they sat through it in silence.
                     AudioDirector.Instance?.CrowdCheer(0.55f);
+                    // And the pad, on the same beat as the horn. This is the moment the player loses
+                    // control of the round, so it is worth feeling rather than only hearing.
+                    Haptics.Klaxon();
                     // The klaxon can land while the player is still up in the air. Abandon the lift
                     // rather than letting its Falling phase hand driving back during the reveal.
                     _aerialPhase = AerialPhase.Idle;
@@ -952,6 +955,11 @@ namespace DuckMow
                     break;
                 case GameState.Verdict:
                     // Every judge has spoken; pull off the bench and onto the duck.
+                    // The pad editorialises here and nowhere else in the round — applause figure for
+                    // a good mark, one flat press for a bad one. The favourable/unfavourable split
+                    // is read off the same rank bands the results screen colours itself from
+                    // (HUD.cs:710), so the hands and the eyes cannot disagree about how it went.
+                    Haptics.Verdict(judges != null && (judges.Rank == "S" || judges.Rank == "A" || judges.Rank == "B"));
                     cameraDirector?.SetJudgeFocus(null);
                     StageForPortrait();
                     // Cut, for the same reason the bench is a cut: blending from the bench to a

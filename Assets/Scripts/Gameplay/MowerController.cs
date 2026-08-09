@@ -31,6 +31,10 @@ namespace DuckMow
         public float yawAcceleration = 16f;
         [Tooltip("Speed below which steering has no authority, in m/s.")]
         public float steerCutIn = 0.8f;
+        [Tooltip("Steering authority kept while the engine is being asked for something the machine " +
+                 "is not delivering — pinned against a wall, nosed into a stone. 0 restores the old " +
+                 "behaviour, where being stopped meant being unable to turn away from what stopped you.")]
+        [Range(0f, 1f)] public float pinnedSteerAuthority = 0.45f;
 
         [Header("Grip")]
         [Range(0f, 1f)] public float grip = 0.34f;
@@ -330,7 +334,7 @@ namespace DuckMow
                 // because nothing was scrubbing the lateral velocity either.
                 if (_staggerTimer <= 0f) ApplyDrive(throttle, dt);
                 ApplyGrip(right, lateral, dt);
-                ApplySteering(steer, dt);
+                ApplySteering(steer, throttle, dt);
             }
             else
             {
@@ -489,7 +493,7 @@ namespace DuckMow
             }
         }
 
-        void ApplySteering(float steer, float dt)
+        void ApplySteering(float steer, float throttle, float dt)
         {
             float speedFrac = Mathf.Clamp01(Mathf.Abs(ForwardSpeed) / maxSpeed);
             float yawRateDeg = Mathf.Lerp(yawRateLow, yawRateHigh, speedFrac * speedFrac);
@@ -498,7 +502,22 @@ namespace DuckMow
             if (IsDrifting) yawRateDeg *= driftYawBonus;
 
             float authority = Mathf.Clamp01(Mathf.Abs(ForwardSpeed) / steerCutIn);
-            float dirSign = ForwardSpeed < -0.2f ? -1f : 1f;
+
+            // The ramp above exists so a parked machine does not pirouette on the spot when the
+            // stick is only being wheeled about, and that is worth keeping. But it reads "stopped"
+            // as "parked", and a mower pinned against a wall is stopped: authority goes to zero at
+            // the exact moment the player is trying to turn off the thing that stopped them, so the
+            // machine sticks there and the wall feels like flypaper. Parked means no throttle, not
+            // no motion — when the engine is being asked for something and the machine is not
+            // delivering it, the player is stuck and steering is the only way out.
+            bool pinned = Mathf.Abs(throttle) > 0.15f && Mathf.Abs(ForwardSpeed) < steerCutIn;
+            if (pinned) authority = Mathf.Max(authority, pinnedSteerAuthority);
+
+            // Below the cut-in there is no meaningful ForwardSpeed to read a direction off, so a
+            // machine pinned while reversing would steer as though it were going forwards — the one
+            // case where the floor above would hand back authority and then point it the wrong way.
+            float dirSign = ForwardSpeed < -0.2f ? -1f
+                          : (pinned && Mathf.Abs(ForwardSpeed) < 0.2f && throttle < -0.15f ? -1f : 1f);
 
             // In a drift the wheel never crosses centre: the machine always turns the way the drift
             // was started, and the stick only chooses how tightly. That is what makes a drift a line
@@ -600,6 +619,14 @@ namespace DuckMow
                      : DriftCharge >= Tier(2) ? 2
                      : DriftCharge >= Tier(1) ? 1 : 0;
             DriftTier = tier;
+
+            // Held, once a frame, for as long as the slide lasts — Haptics.Drift expects exactly
+            // that and expires on its own when the calls stop, so there is nothing to shut off when
+            // the drift ends, the round ends, or this object is destroyed. Intensity comes off the
+            // slip angle rather than off the charge: the player feels how sideways the machine is,
+            // not how close the payout is, and the tier already has its own snap when it lands.
+            if (inputSource == null)
+                Haptics.Drift(Mathf.Clamp01(Mathf.Abs(SlipAngle) / 32f) * Mathf.Lerp(0.35f, 1f, SpeedFraction));
         }
 
         void Release()
@@ -613,6 +640,7 @@ namespace DuckMow
                 _miniTurboSpeed = DriftTier == 1 ? driftTierSpeed.x
                                 : DriftTier == 2 ? driftTierSpeed.y
                                 : driftTierSpeed.z;
+                if (inputSource == null) Haptics.MiniTurbo();
             }
             _driftLatched = false;
             DriftSign = 0f;
@@ -697,6 +725,7 @@ namespace DuckMow
             if (impulse < 0.35f) return;
             LastImpactStrength = Mathf.Clamp01(impulse / 6f);
             OnImpact?.Invoke(LastImpactStrength, c.GetContact(0).point);
+            if (inputSource == null) Haptics.Bonk(LastImpactStrength);
         }
 
         /// <summary>
@@ -762,6 +791,11 @@ namespace DuckMow
 
             LastImpactStrength = strength;
             OnImpact?.Invoke(strength, impactPoint);
+
+            // Only the machine the player is holding. Every mower in the scene runs this code, and a
+            // rival nosing a gnome across the venue has no business shaking a pad in someone's hands
+            // — inputSource is non-null exactly when something other than the player is driving.
+            if (inputSource == null) Haptics.Bonk(strength);
         }
 
         /// <summary>
