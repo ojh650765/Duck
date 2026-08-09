@@ -103,7 +103,15 @@ namespace DuckMow
         // Not lower than this: the uncut blade layer stands about half a metre off the lawn and
         // the mower parks on open grass, so a lens under roughly 1.2 m world height starts taking
         // grass across the bottom of the shot and eventually sits inside it.
-        public float verdictHeight = 0.55f;
+        // Down from 0.55 on the owner's eye. The shot aims at a point 0.86 m up the machine, so the
+        // camera sat 1.41 m above its origin and looked very slightly DOWN at a duck on a mower —
+        // which flattens the machine and shows more lawn than duck. At 0.32 the lens is nearer the
+        // rider's own height and the silhouette stands against the sky instead of against grass.
+        //
+        // Written here AND in the two scenes that carry it, because no builder does. Bloom Rush is
+        // the exception and deliberately so: DuckTurfBuilder sets 1.85 for that arena, which is why
+        // stage three's shot is higher and is a decision rather than drift.
+        public float verdictHeight = 0.32f;
         [Tooltip("Yaw around the mower, so we see the duck three-quarter rather than head on.")]
         public float verdictYaw = 34f;
         [Tooltip("Push the subject to screen right, leaving the left clear for the scores.")]

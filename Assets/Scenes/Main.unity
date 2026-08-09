@@ -49948,7 +49948,7 @@ MonoBehaviour:
   judgeCloseFov: 36
   judgeCloseHeight: 0.8
   verdictDistance: 4.3
-  verdictHeight: 0.55
+  verdictHeight: 0.32
   verdictYaw: 34
   verdictScreenOffset: 1.15
   verdictFov: 32

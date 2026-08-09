@@ -95,7 +95,16 @@ namespace DuckMow.EditorTools
                 {
                     name = "SET",
                     pivot = Pivot, radius = Distance, yaw = Bearing,
-                    yawSwing = 2f, height = 4.6f, heightSwing = 0.3f, cycle = 30f,
+                    // 4.0, down from 4.6. The front page was looking slightly DOWN on its own set,
+                    // which is the one angle that makes a diorama read as a model rather than as a
+                    // place — height is what turns a showground into a tabletop. Six tenths is
+                    // enough to put the lens nearer the bunting's own line without lifting the
+                    // horizon into the menu plates.
+                    //
+                    // heightSwing is left at 0.3. It is the breath in the shot, and it is measured
+                    // against the mower rather than against the height, so it does not want to
+                    // shrink when the camera comes down.
+                    yawSwing = 2f, height = 4.0f, heightSwing = 0.3f, cycle = 30f,
                     lookAt = new Vector3(-2.25f, 0f, -21.4f), fov = 46f,
                     // 5.9 m out and 71% across. The yaw turns the machine's nose toward frame left
                     // and slightly toward the lens, which is both the three-quarter view every one of
