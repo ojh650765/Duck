@@ -136,13 +136,33 @@
         warningBanner.style.display = 'block';
       }
 
+      // A stamp that changes when, and only when, the payload changes.
+      //
+      // Every build writes Build/Web.data.unityweb and its siblings under the SAME NAMES, so a
+      // returning player's browser already holds a file at each of these URLs from the previous
+      // deployment. It is free to serve any of them from cache, and it decides per file — which
+      // means a player can be handed the new data alongside the old wasm. Those two do not agree
+      // about anything, and the failure is not a polite one: the loader either hangs or throws out
+      // of instantiation, which the page reports as "could not start in this browser".
+      //
+      // Unity's own IndexedDB cache keys on the URL too, so it has exactly the same hazard and the
+      // same cure. Appending the stamp makes each deployment's files new URLs, so a mixed pair is
+      // not something the browser can construct.
+      //
+      // Filled in by DuckBuild after the player is written, from a hash of the payload itself
+      // rather than from the clock: a rebuild that produces identical bytes keeps its stamp and
+      // stays cached, which is the whole point of caching. Left as the bare placeholder if that
+      // step ever fails to run, and the page still works — it is a query string.
+      var buildStamp = "418b73f437c0";
+      var v = buildStamp.indexOf("DUCK_BUILD_STAMP") === -1 ? "?v=" + buildStamp : "";
+
       var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/Web.loader.js";
+      var loaderUrl = buildUrl + "/Web.loader.js" + v;
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/Web.data.unityweb",
-        frameworkUrl: buildUrl + "/Web.framework.js.unityweb",
-        codeUrl: buildUrl + "/Web.wasm.unityweb",
+        dataUrl: buildUrl + "/Web.data.unityweb" + v,
+        frameworkUrl: buildUrl + "/Web.framework.js.unityweb" + v,
+        codeUrl: buildUrl + "/Web.wasm.unityweb" + v,
         streamingAssetsUrl: "StreamingAssets",
         companyName: "Duck Mow",
         productName: "Duck Mow",
