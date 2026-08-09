@@ -422,10 +422,39 @@ namespace DuckMow.EditorTools
             // card that was ever available.
             var portraitFrame = Frac("PortraitFrame", field, 0f, 0f, 0.127f, 1f);
             AddImage(portraitFrame, Spr(ScoreCard), Color.white, Image.Type.Sliced);
-            var portrait = Frac("Portrait", portraitFrame, 0.10f, 0.09f, 0.90f, 0.91f);
-            hud.tourPortrait = portrait.gameObject.AddComponent<RawImage>();
+
+            // THE APERTURE AND THE PICTURE ARE TWO RECTS NOW, and the split is the fix.
+            //
+            // A RawImage has no preserveAspect — that property is on Image — so it fills whatever
+            // rect it is handed at whatever shape that rect happens to be, always. This one was
+            // handed a rect 95x66, holding a square render, so every rival on the venue tour was
+            // drawn 45% too wide.
+            //
+            // It was square-ish before the card padding sweep and the fault was invisible; the sweep
+            // pulled the frame in off the plate's painted rule and the shape changed under it. The
+            // frame was right to move. What was wrong is that the picture's proportions were a
+            // property of the LAYOUT rather than of the picture.
+            //
+            // So: the WINDOW keeps the inset that holds the picture inside the mount, and the
+            // PICTURE is a child of it with an AspectRatioFitter that letterboxes inside whatever
+            // the window turns out to be. The ratio is written from the texture at the moment it is
+            // assigned — see HUD.ShowContestant — so this survives somebody re-rendering the
+            // portraits at a different size, which is the one thing a hand-picked frame shape could
+            // never do.
+            //
+            // FIT IN PARENT, so it is a letterbox and not a crop. These are heads: a crop that made
+            // the picture fill this window would take a third of the height, and the top of it is
+            // where the face is.
+            var window = Frac("PortraitWindow", portraitFrame, 0.10f, 0.09f, 0.90f, 0.91f);
+            var picture = Frac("Portrait", window, 0f, 0f, 1f, 1f);
+            hud.tourPortrait = picture.gameObject.AddComponent<RawImage>();
             hud.tourPortrait.raycastTarget = false;
             hud.tourPortrait.enabled = false;
+            hud.tourPortraitFit = picture.gameObject.AddComponent<AspectRatioFitter>();
+            hud.tourPortraitFit.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+            // Square is what the four contestants render at today, so a scene that somehow never
+            // reaches ShowContestant still holds a plausible shape rather than a degenerate one.
+            hud.tourPortraitFit.aspectRatio = 1f;
 
             var nm = Frac("Name", field, 0.148f, 0.46f, 0.63f, 1f);
             hud.tourName = AddText(nm, "", 30f, TextAlignmentOptions.Left, Cream, 0.22f, false);

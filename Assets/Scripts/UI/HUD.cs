@@ -88,6 +88,12 @@ namespace DuckMow
         public TextMeshProUGUI tourGrade;
         [Tooltip("Face of whoever is being shown. Rendered from the real model at startup.")]
         public RawImage tourPortrait;
+        [Tooltip("Keeps that face the shape it was rendered at.\n\n" +
+                 "A RawImage has no preserveAspect — that is on Image — so without this it is drawn " +
+                 "at whatever shape its rect happens to be. Its ratio is written from the TEXTURE " +
+                 "every time one is assigned, so re-rendering the portraits at a different size " +
+                 "needs no change here.")]
+        public AspectRatioFitter tourPortraitFit;
 
         [Header("Outro")]
         public CanvasGroup outroGroup;
@@ -395,21 +401,35 @@ namespace DuckMow
                         // Nothing to offer on the last board: the ending page takes over by itself,
                         // and a prompt here would invite the player to skip their own payoff.
                         //
-                        // It NAMES THE NEXT STAGE. This said "NEXT ROUND", which was true and told
-                        // the player nothing, and before that "NEXT PICTURE", which was true only
-                        // while every round was a picture. A round is a stage now — press on from
-                        // round one's board and the goose rally is what opens — so the honest answer
-                        // to "what does this key do" is the name of the thing about to happen. See
-                        // GameDirector.NextRoundLabel, which is answered by the same running order
-                        // the board is about to walk into, so the prompt cannot promise a stage the
-                        // championship is not going to play.
+                        // IT NO LONGER NAMES THE STAGE, on the owner's instruction, and the reason
+                        // is worth keeping because the argument for naming it was a good one.
+                        //
+                        // This has been "NEXT PICTURE", then "NEXT ROUND", then the stage's own name
+                        // — GOOSE RALLY, BLOOM RUSH — on the grounds that the honest answer to "what
+                        // does this key do" is the name of the thing about to happen. That is true
+                        // of a SIGN. It is not what a prompt is for. A prompt is read in the second
+                        // before a key is pressed and its job is to say that the key carries on;
+                        // announcing the destination here spends the arrival before the player gets
+                        // there, and the game already announces it properly a moment later, on the
+                        // curtain, where a sign that reads GOOSE RALLY is doing exactly its job.
+                        // Two announcements of the same thing, four seconds apart, and the first one
+                        // is a caption on a menu.
+                        //
+                        // The names have not gone anywhere: RallyStage and TurfStage put them on the
+                        // curtain, TurfDirector announces one in the arena, the controls card heads
+                        // itself with one, and the front page's class list is made of them.
+                        //
+                        // The LAST board says nothing at all, and that is unchanged: the ending page
+                        // takes over by itself, so a prompt here would invite the player to skip
+                        // their own payoff. It is also why this cannot promise a stage that is not
+                        // coming — the only board that offers to press on is one with a round left.
                         //
                         // R does reset the running points — it has to, because they are already
                         // banked by the time this board is up — but saying so would put the points
                         // table back on screen, and "START OVER" is true either way.
                         outroPrompt.text = Champ != null && Champ.IsComplete
                             ? ""
-                            : $"[SPACE]  {director.NextRoundLabel}     [R]  START OVER     [ESC]  PAUSE";
+                            : "[SPACE]  NEXT STAGE     [R]  START OVER     [ESC]  PAUSE";
                     break;
 
                 case GameState.Ceremony:
@@ -593,8 +613,49 @@ namespace DuckMow
                     ? ContestantPortraits.Instance.Get(s.name) : null;
                 tourPortrait.texture = tex;
                 tourPortrait.enabled = tex != null;
+                FitPortrait(tex);
             }
             _tourCardShown = true;
+        }
+
+        /// <summary>
+        /// Keep the tour's portrait the shape it was rendered at.
+        ///
+        /// THE RATIO COMES OFF THE TEXTURE, which is the whole point of doing it here rather than
+        /// baking a frame shape that happens to match today's render. ContestantPortraits makes four
+        /// square targets at the moment; the day somebody wants taller ones, this reads the new
+        /// number and the card is still right, because the only thing that was ever wrong was
+        /// letting the LAYOUT decide the proportions of a PICTURE.
+        ///
+        /// The fitter is added on the spot when the scene predates it. A builder-baked reference
+        /// only reaches a player once somebody re-runs the builder and saves, and a stretched face
+        /// in the meantime is the fault this method exists to end — the same argument
+        /// ComicSequence.GroundThePage makes for repairing a baked canvas from the runtime side. On
+        /// an old scene the fitter lands on the RawImage's own rect rather than on a window inside
+        /// it, so the picture covers the mount instead of sitting in it: differently framed, and
+        /// correctly proportioned, which is the half that matters.
+        /// </summary>
+        void FitPortrait(Texture tex)
+        {
+            if (tourPortraitFit == null && tourPortrait != null)
+            {
+                // Written out rather than with ??, which is the one operator that must not be used
+                // on a UnityEngine.Object: it tests for a real null and the engine's own null is a
+                // live managed reference wearing an overloaded operator. It happens to be safe on a
+                // fresh GetComponent and it is not a habit to leave lying in a file.
+                var existing = tourPortrait.gameObject.GetComponent<AspectRatioFitter>();
+                tourPortraitFit = existing != null
+                    ? existing : tourPortrait.gameObject.AddComponent<AspectRatioFitter>();
+            }
+            if (tourPortraitFit == null) return;
+
+            tourPortraitFit.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+            // Guarded, because a zero height is a division by zero and the infinity that comes out
+            // of it is written straight into a layout. A texture that has not finished being made
+            // reads 0x0, and RenderTexture.Create is asynchronous enough on WebGL to make that a
+            // real frame rather than a theoretical one.
+            if (tex != null && tex.width > 0 && tex.height > 0)
+                tourPortraitFit.aspectRatio = (float)tex.width / tex.height;
         }
 
         bool _tourCardShown;
