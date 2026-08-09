@@ -64,7 +64,12 @@ namespace DuckMow
 
             const byte threshold = 128;
             int cutInside = 0, cutOutside = 0, totalCut = 0;
-            int edgeGood = 0, edgeTotal = 0;
+            // The two halves of the outline band, counted apart. Following the line is one thing and
+            // slopping over it is another, and the mark below has to be able to tell them apart —
+            // which a single edgeGood counter over the whole band could not, because it scored both
+            // with the same "does cut match inside" test and then averaged them.
+            int edgeInside = 0, edgeInsideCut = 0;
+            int edgeOutside = 0, edgeOutsideCut = 0;
 
             for (int i = 0; i < cut.Length; i++)
             {
@@ -79,18 +84,82 @@ namespace DuckMow
 
                 if (boundary[i])
                 {
-                    edgeTotal++;
-                    if (isCut == isIn) edgeGood++;
+                    if (isIn) { edgeInside++; if (isCut) edgeInsideCut++; }
+                    else { edgeOutside++; if (isCut) edgeOutsideCut++; }
                 }
             }
 
             s.coverage = insideCount > 0 ? (float)cutInside / insideCount : 0f;
             s.spill = totalCut > 0 ? (float)cutOutside / totalCut : 0f;
             s.accuracy = Mathf.Clamp01(s.coverage * (1f - 0.65f * s.spill));
-            s.edgeQuality = edgeTotal > 0 ? (float)edgeGood / edgeTotal : 0f;
             s.mownArea = totalCut * cellArea;
-            s.neatness = 1f - s.spill;
             s.legibility = Legibility(s.coverage);
+
+            // ---- the two gates, and why a quality metric needs one ----
+            //
+            // TWO OF THE FOUR METRICS USED TO BE SATISFIED BY INACTION, and the owner found it by
+            // asking why a player who drew nothing scored 9 out of 30.
+            //
+            // Neatness was 1 - spill, and spill's zero-guard cannot tell "did not spill" from "did
+            // not mow": an untouched lawn divided nothing by nothing, got 0, and was handed a
+            // PERFECT 1.0 for neatness. Edge quality counted a boundary cell as correct whenever
+            // cut == inside, and on an untouched lawn every cell on the outer half of the band
+            // passes that test for free — which is why it sat at 0.516 rather than at nothing.
+            // Through the bench's weights those two paid roughly half marks each for doing nothing
+            // at all, and mowing a five percent sliver immaculately scored HIGHER (10) than mowing
+            // nothing (9), which made "do less" a strategy with a gradient to climb.
+            //
+            // The cause is not the zero-guard and it is not the number 0.516. It is that a quality
+            // is a quality OF something, and both were being paid out before there was anything for
+            // them to be a quality of. Neither guard below is load bearing any more.
+            //
+            // Deliberately NOT a threshold with a special case at zero. A threshold moves the
+            // exploit to just above itself — mow one percent more than the test asks and collect
+            // full neatness again — where making the credit proportional means every metre of the
+            // discount has to be bought back with work.
+
+            // NEATNESS: how little of your mowing missed, times whether you drew a picture at all.
+            //
+            // Precision is scale free — a single immaculate square metre scores 1.0 — so the gate
+            // is supplying information the ratio genuinely does not contain rather than counting
+            // the same fact twice. It saturates at the coverage where Legibility says a subject
+            // begins to exist, because that is the same question and the game should not hold two
+            // opinions about it. Past a quarter filled this is 1 and neatness is exactly what it
+            // has always been, which is what keeps a small immaculate lawn beating a big scruffy
+            // one — BRAMBLE's whole reason for being on the roster.
+            float picture = Mathf.Clamp01(s.coverage / PictureExists);
+            s.neatness = (1f - s.spill) * picture;
+
+            // EDGE: how much of the outline you actually cut, discounted by how badly you slopped
+            // over it.
+            //
+            // The old symmetric test asked "does cut match inside" across the whole band. Expand it
+            // and it is a MEAN of two half-credits, (onLine + (1 - overLine)) / 2 — and a mean is
+            // exactly the wrong operator here, because either term can carry the mark on its own.
+            // The second one is "the outside of the shape is still standing", which is true of a
+            // lawn nobody has touched, and that is where the free 0.516 came from.
+            //
+            // So the outline term MULTIPLIES instead of averaging: cut none of the line and no
+            // amount of untouched outfield pays you for it. The slop term keeps the half weight the
+            // mean gave it, which is not a fudge but the thing that holds the top of the scale
+            // still — at onLine = 1 this is 1 - overLine/2, algebraically identical to the old
+            // formula, so every contestant who actually got round the outline is marked exactly as
+            // before and only the ones who did not are docked.
+            //
+            // Full weight was tried and is wrong. The outside band is one swath wide, so overLine
+            // pins to 1.0 the moment anyone overshoots by a swath and stops carrying information;
+            // used at full weight it collapsed the whole field's edge to ~0.02 and took three to
+            // four marks off every contestant, which would have moved the yardstick the arenas were
+            // just tuned against.
+            //
+            // Nor is this the symmetric test multiplied by a gate, which is what it was written as
+            // first. That double counts — the symmetric test already docks every inside-band cell
+            // left standing — and it cost BRAMBLE three marks for one mistake, dropping the
+            // immaculate-but-unfinished contestant below the sloppy one and inverting the roster.
+            const float slopWeight = 0.5f;
+            float onLine = edgeInside > 0 ? (float)edgeInsideCut / edgeInside : 0f;
+            float overLine = edgeOutside > 0 ? (float)edgeOutsideCut / edgeOutside : 0f;
+            s.edgeQuality = Mathf.Clamp01(onLine * (1f - slopWeight * overLine));
 
             float driftScore = Mathf.Clamp01(driftMetres / 90f);
             float boostScore = Mathf.Clamp01(boostMetres / 220f);
@@ -117,7 +186,20 @@ namespace DuckMow
         /// player who remembered less but drew it cleanly genuinely deserves to win.
         /// </summary>
         public static float Legibility(float coverage)
-            => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.25f, 0.66f, coverage));
+            => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(PictureExists, PictureComplete, coverage));
+
+        /// <summary>
+        /// The coverage at which there is a picture there at all, and the coverage past which more
+        /// of it adds nothing.
+        ///
+        /// Named rather than typed into <see cref="Legibility"/>, because <see cref="Evaluate"/>
+        /// gates neatness on the first of them and the two have to mean the same thing. "A few
+        /// passes through a shape is not a heart, it is scribble" is one judgement about one number,
+        /// and the day the knee moves without the gate moving with it is the day a contestant can
+        /// farm a perfect neatness out of a lawn the same rulebook calls illegible.
+        /// </summary>
+        public const float PictureExists = 0.25f;
+        public const float PictureComplete = 0.66f;
 
         /// <summary>
         /// One judge's mark out of ten. Every station in the venue calls this, including the
