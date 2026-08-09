@@ -77,6 +77,14 @@ namespace DuckMow
             _raised = 0;
             State = Step.Settle;
 
+            // The same guarantee the venue tour takes, and this bench has the same hole: the
+            // portraits were rendered once at the end of this arena's second frame and nothing
+            // checked that the attempt worked. Asked for HERE rather than at RaiseNext because this
+            // is the settle — a second and a half before the first card comes up, with the crowd
+            // still landing — so four small renders cost nothing anybody can see. See
+            // ContestantPortraits.Render.
+            (portraits != null ? portraits : ContestantPortraits.Instance)?.Render(force: true);
+
             if (panel == null) return;
             foreach (var j in panel.judges)
             {

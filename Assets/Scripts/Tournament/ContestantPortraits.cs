@@ -86,11 +86,43 @@ namespace DuckMow
             return contestant != null && _portraits.TryGetValue(contestant, out var rt) ? rt : null;
         }
 
-        /// <summary>Render every portrait. Safe to call again; it simply redoes them.</summary>
-        public void Render()
+        /// <summary>
+        /// Render every portrait.
+        ///
+        /// ---- what this used to promise, and did not do ----
+        ///
+        /// Its summary said "safe to call again; it simply redoes them", and the first line refused
+        /// to. <c>_rendered</c> was set BEFORE the work, which made the flag mean "somebody has
+        /// tried" rather than "there are portraits", and three things followed from that:
+        ///
+        ///   * a pass that threw part way through left the flag set and the rest never happened;
+        ///   * <see cref="Get"/>'s own safety net — "if something asks earlier than expected, render
+        ///     on the spot" — was dead, because by the time anything calls Get the flag is always
+        ///     already true, so it could never repair anything;
+        ///   * and one attempt was all there ever was, made ninety seconds before the first use.
+        ///
+        /// That attempt is made from inside a WaitForEndOfFrame, which is the least well defined
+        /// moment in a frame to ask a scriptable pipeline for a manual single-camera render: the
+        /// frame's render loop has just run. Whether it is in a state to service one is not
+        /// something the coroutine controls, and it is exactly the kind of thing that differs
+        /// between one run and the next, between this machine and a slower one, and between the
+        /// editor and a browser. The symptom when it goes the wrong way is a target that was
+        /// allocated and cleared and never drawn into: a portrait the right shape and size, in one
+        /// flat colour, which is what <see cref="background"/> is.
+        ///
+        /// So the flag is set at the END now, and <paramref name="force"/> exists for the beat that
+        /// is about to USE the portraits to ask for a set it can rely on rather than hope the early
+        /// one worked. Targets are reused rather than remade when they are already the right size,
+        /// so asking again costs four small renders and allocates nothing.
+        ///
+        /// It cannot verify its own work — telling a drawn target from a cleared one means reading
+        /// pixels back off the GPU, which is expensive and asynchronous and would be a worse cure
+        /// than the disease. What it can do is be repeatable, and let the caller who knows the
+        /// pipeline is warm be the one who asks.
+        /// </summary>
+        public void Render(bool force = false)
         {
-            if (_rendered || subjects == null || subjects.Length == 0) return;
-            _rendered = true;
+            if ((_rendered && !force) || subjects == null || subjects.Length == 0) return;
 
             var camGO = new GameObject("~ PortraitCamera");
             camGO.transform.SetParent(transform, false);
@@ -130,15 +162,33 @@ namespace DuckMow
                 mr.sharedMaterial = s.material;
                 holder.transform.SetPositionAndRotation(spot, Quaternion.Euler(0f, 180f + s.yaw, 0f));
 
-                var rt = new RenderTexture(resolution, resolution, 16, RenderTextureFormat.ARGB32,
-                                           RenderTextureReadWrite.sRGB)
+                // Reused when one is already there at the right size, so a re-render costs four
+                // draws and no allocation — and, more importantly, so the RawImage and the quad
+                // that are already pointing at these textures go on pointing at the same objects.
+                // Replacing them would leave every consumer holding a released target and would
+                // turn a repeatable render into a leak.
+                _portraits.TryGetValue(s.contestant, out var rt);
+                if (rt != null && (rt.width != resolution || rt.height != resolution))
                 {
-                    name = $"Portrait_{s.contestant}",
-                    filterMode = FilterMode.Bilinear,
-                    wrapMode = TextureWrapMode.Clamp,
-                    antiAliasing = 1
-                };
-                rt.Create();
+                    rt.Release();
+                    Destroy(rt);
+                    rt = null;
+                }
+                if (rt == null)
+                {
+                    rt = new RenderTexture(resolution, resolution, 16, RenderTextureFormat.ARGB32,
+                                           RenderTextureReadWrite.sRGB)
+                    {
+                        name = $"Portrait_{s.contestant}",
+                        filterMode = FilterMode.Bilinear,
+                        wrapMode = TextureWrapMode.Clamp,
+                        antiAliasing = 1
+                    };
+                }
+                // Called on a target that already exists too: IsCreated goes false when the
+                // graphics device drops it — a browser tab restored, a resolution change — and a
+                // dropped target is the other way this beat can arrive holding one flat colour.
+                if (!rt.IsCreated()) rt.Create();
 
                 // Clear it explicitly. An uninitialised render texture is exactly what the broken
                 // build was showing, and a target that is cleared cannot show it even if a render
@@ -171,8 +221,18 @@ namespace DuckMow
                 _portraits[s.contestant] = rt;
             }
 
-            mf.sharedMesh = null;
-            holder.SetActive(false);
+            // BOTH DESTROYED, not merely switched off. The studio is built fresh on every call, and
+            // this became a call that can happen more than once — a camera and a mesh holder left
+            // behind per render is a leak that only starts costing anything the moment the method
+            // stops being a one-shot. The old code hid one of them and abandoned the other, which
+            // was invisible while there was exactly one call and would not have stayed that way.
+            Destroy(holder);
+            Destroy(camGO);
+
+            // LAST, and that is the whole of the repair. Set at the top, this flag meant "somebody
+            // has tried"; set here it means "there are portraits", which is the question every
+            // reader of it was actually asking.
+            _rendered = true;
         }
     }
 }
