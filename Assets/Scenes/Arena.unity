@@ -19861,7 +19861,7 @@ MonoBehaviour:
   musicJudgingBed: {fileID: 8300000, guid: bc1ce92aefbcf7a448004ce89cf58e2f, type: 3}
   fanfareGood: {fileID: 8300000, guid: e87b167ff01642445ac6220c2900dea4, type: 3}
   fanfareBad: {fileID: 8300000, guid: 0c885006517004c4db5ff9255e4c0a68, type: 3}
-  masterEngine: 0.55
+  masterEngine: 0.44
   masterBlade: 0.45
   masterAmbience: 0.35
   masterMusic: 0.34

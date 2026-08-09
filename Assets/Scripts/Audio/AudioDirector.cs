@@ -82,7 +82,16 @@ namespace DuckMow
         public AudioClip fanfareGood, fanfareBad;
 
         [Header("Mix")]
-        [Range(0f, 1f)] public float masterEngine = 0.55f;
+        // Under the blade, deliberately, and it used to be over it at 0.55 against the blade's 0.45.
+        //
+        // The engine runs for the whole round whatever the player does; the blade only sounds when
+        // they are actually cutting something. Mixing the constant above the variable buries the one
+        // piece of audio that is FEEDBACK under the one that is atmosphere, so a player could not
+        // hear the difference between mowing and driving over what they had already mown.
+        //
+        // Baked into all four scenes as well as sitting here. No builder writes this field, so the
+        // default alone reaches nothing that already exists — the same trap skipArmDelay was in.
+        [Range(0f, 1f)] public float masterEngine = 0.44f;
         [Range(0f, 1f)] public float masterBlade = 0.45f;
         [Range(0f, 1f)] public float masterAmbience = 0.35f;
         [Range(0f, 1f)] public float masterMusic = 0.34f;
