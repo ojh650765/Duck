@@ -456,17 +456,34 @@ namespace DuckMow.EditorTools
         /// </summary>
         static void BuildOutroCard(RectTransform root, HUD hud)
         {
-            var card = Frac("OutroCard", root, 0.20f, 0.045f, 0.80f, 0.205f);
+            // Taller than it was, by a hundredth of the frame, and the extra goes to the PROMPT.
+            //
+            // This card carries two beats and the prompt is the only thing on screen in one of them:
+            // during the reveal the placing line is deliberately blank — see HUD.UpdateOutro, which
+            // clears it whenever the player is not at the board — so the card is one instruction on
+            // a plank over a finished picture. That instruction was set at 20, which is the size
+            // this HUD uses for FOOTNOTES: the aerial hint, the stat labels, the quiet line along
+            // the bottom of the pause board. It is not a footnote. It is the thing the player is
+            // waiting on, over a busy ground, read from a sitting distance, and it was smaller than
+            // the word FILLED on a stat chip.
+            //
+            // 30 rather than 34, which is the placing's size: at the board the two are on screen
+            // together and an instruction that matches the result in weight competes with it. Below
+            // the result, above every label — which is where an instruction belongs.
+            var card = Frac("OutroCard", root, 0.20f, 0.045f, 0.80f, 0.215f);
             hud.outroGroup = card.gameObject.AddComponent<CanvasGroup>();
             hud.outroGroup.alpha = 0f;
             var field = Plate(card, CardDark);
 
-            var placing = Frac("Placing", field, 0f, 0.5f, 1f, 1f);
+            // The card grew so this could, without taking the placing's room: the field is 124 px
+            // where it was 113, and the split moved from half-and-half to 0.53, so both bands come
+            // out at 58 px. The placing keeps more height than it had, and the prompt gains eleven.
+            var placing = Frac("Placing", field, 0f, 0.53f, 1f, 1f);
             hud.outroPlacing = AddText(placing, "", 34f, TextAlignmentOptions.Center, Gold, 0.26f, false);
             hud.outroPlacing.fontStyle = FontStyles.Bold;
 
-            var prompt = Frac("Prompt", field, 0f, 0f, 1f, 0.46f);
-            hud.outroPrompt = AddText(prompt, "", 20f, TextAlignmentOptions.Center, Cream, 0.22f, false);
+            var prompt = Frac("Prompt", field, 0f, 0f, 1f, 0.47f);
+            hud.outroPrompt = AddText(prompt, "", 30f, TextAlignmentOptions.Center, Cream, 0.22f, false);
             hud.outroPrompt.fontStyle = FontStyles.Bold;
         }
 

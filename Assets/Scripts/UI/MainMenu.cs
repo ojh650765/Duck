@@ -1699,30 +1699,22 @@ namespace DuckMow
         /// <summary>
         /// Follow the mouse along the bar.
         ///
-        /// Mapped through the FILL's rect rather than the trough's, because the fill is inset inside
-        /// the trough by the artwork's own rim: mapping against the trough would put the grab point
-        /// a couple of pixels off the drawn edge at both ends, which is exactly the amount that
-        /// makes 100% feel unreachable.
-        ///
-        /// The width guard is not paranoia. A degenerate rect here is a division by zero, the NaN
-        /// travels through the curve into MasterAudio.Master, and MasterAudio.Sane documents what
-        /// arrives at the other end: Clamp01 passes NaN straight through, AudioListener.volume takes
-        /// it, and the entire game goes silent with nothing in the console. It is caught twice on
-        /// purpose; this is the end that knows why the number would be bad.
+        /// The mapping — through the FILL's rect and not the trough's, and why — moved to
+        /// <see cref="VolumeDial"/> when the pause board grew a bar of its own. Nothing about this
+        /// page's behaviour changed; the argument simply stopped being private to it, because two
+        /// screens that map a drag differently do not look different, they FEEL different, and only
+        /// at the ends. What stays here is what belongs to this page: which rect is the fill, and
+        /// the note it plays as the value passes each twentieth.
         /// </summary>
         void DragVolume(Vector2 screen)
         {
             var frame = volumeFill != null ? volumeFill.rectTransform : volumeBar;
-            if (frame == null) return;
-            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(frame, screen, _uiCamera,
-                                                                        out Vector2 local)) return;
-            var r = frame.rect;
-            if (r.width <= 1e-3f) return;
+            if (!DuckMow.UI.VolumeDial.PositionAt(frame, screen, _uiCamera, out float position)) return;
 
             // A twentieth, so the drag ticks at the same resolution the arrow keys step at and a
             // full sweep is twenty notes rather than a rattle.
             int before = Mathf.FloorToInt(_volumePos * 20f);
-            SetVolumePosition((local.x - r.xMin) / r.width);
+            SetVolumePosition(position);
             if (Mathf.FloorToInt(_volumePos * 20f) != before) Play(hoverClip, 0.14f);
         }
 
