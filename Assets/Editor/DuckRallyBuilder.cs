@@ -1441,7 +1441,7 @@ namespace DuckMow.EditorTools
             // The rivals arrive in their own colours and with their own driver in the seat, so three
             // opponents are three CONTESTANTS rather than three copies of the player's machine.
             Repaint(go, slot);
-            SeatRival(go.transform, slot);
+            DuckModelIntegration.SeatRival(go.transform, slot.contestant);
             return go;
         }
 
@@ -1458,63 +1458,12 @@ namespace DuckMow.EditorTools
             }
         }
 
-        /// <summary>
-        /// Put the contestant in the seat — and take the duck out of it first.
-        ///
-        /// Mower.prefab ships WITH the player's duck already sitting on it, under
-        /// VisualPivot/Duck. Adding a rival on top of that seated three opponents inside the duck
-        /// and, because the rival was parented to the mower ROOT rather than to VisualPivot, it did
-        /// not inherit the visual pivot's offset either — so the rivals sat above their own machines,
-        /// hovering, with a duck's head coming out of them.
-        ///
-        /// The fix is both halves: hide the duck, and take the rival's local transform FROM the
-        /// duck's rather than from a constant. The seat offset is a property of the model, and the
-        /// model already states it.
-        /// </summary>
-        static void SeatRival(Transform mower, in RallyArena.Slot slot)
-        {
-            var pivot = mower.Find("VisualPivot");
-            var duck = pivot != null ? pivot.Find("Duck") : null;
-
-            // Off, not deleted. The prefab connection stays intact, and a scene somebody opens can
-            // still be told what used to be there.
-            if (duck != null) duck.gameObject.SetActive(false);
-
-            string blenderName = char.ToUpper(slot.contestant[0]) + slot.contestant.Substring(1).ToLower();
-            var mesh = DuckAssetLibrary.GetCombined("Rivals.fbx", $"{blenderName}_Root",
-                                                    $"Rival_{blenderName}");
-            if (mesh == null)
-            {
-                // No rival model is not a reason to ship an empty seat — put the duck back.
-                if (duck != null) duck.gameObject.SetActive(true);
-                Debug.LogWarning($"[Rally] no rival mesh for {slot.contestant}; leaving the duck in the seat.");
-                return;
-            }
-
-            var go = new GameObject("Driver");
-            go.transform.SetParent(pivot != null ? pivot : mower, false);
-
-            // The duck's POSITION, but never its rotation or scale.
-            //
-            // GetCombined expresses each piece relative to the FBX root's parent, which keeps the
-            // importer's axis conversion baked into the vertices — so a rival mesh is already the
-            // right way up and wants an IDENTITY rotation. Copying the duck's local rotation on top
-            // of that is a second conversion applied to an already-converted mesh, and it laid every
-            // contestant on their back staring at the sky. DuckVenueBuilder seats the same meshes the
-            // same way and carries the same warning; this is that warning being re-learned.
-            //
-            // The seat height still comes from the duck, because that is measured against this exact
-            // model and is not worth re-deriving.
-            go.transform.localPosition = duck != null ? duck.localPosition
-                                                      : DuckModelIntegration.DuckSeatOffset;
-            go.transform.localRotation = Quaternion.identity;
-            go.transform.localScale = Vector3.one;
-
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = Mat("M_Rivals") ?? Mat("M_PropsAuthored");
-            mr.shadowCastingMode = ShadowCastingMode.On;
-        }
+        // SeatRival() USED TO BE HERE, and this file is where the bug was found and fixed: a
+        // rival parented to the mower ROOT does not inherit the ground offset MowerVisuals applies
+        // to VisualPivot at Awake, so the contestants hovered above their machines. Bloom Rush had
+        // its own copy of the same function, never got the same fix, and put every gardener 0.44 m
+        // into the air for the whole of stage three. One arena's fix that the other arena cannot
+        // receive is not a fix, so both now call DuckModelIntegration.SeatRival.
 
         static CameraDirector BuildCameraRig(GameObject playerMower)
         {

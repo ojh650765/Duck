@@ -723,18 +723,55 @@ namespace DuckMow
                 var t = director.tournament;
                 if (t != null)
                 {
-                    // This board shows one picture's result, and the line under it says only that.
+                    // THE LINE HAS TO DESCRIBE THE BOARD IT IS UNDER, and the board moved.
                     //
-                    // It used to read "YOU WON THE CHAMPIONSHIP" off a single round's placing, which
-                    // was a lie every time it appeared. The fix for that briefly went too far the
-                    // other way — "YOU WON ROUND 1 · +5 POINTS" — which put a round counter and a
-                    // running tally back on screen, and both are gone by request.
-                    int place = t.PlayerPlace;
-                    int of = Mathf.Max(t.Standings.Count, 1);
-                    outroPlacing.text = place == 1
-                        ? "YOU WON THIS ONE"
-                        : $"{Championship.Ordinal(place)} OF {of} THIS TIME";
-                    outroPlacing.color = place == 1 ? Gold : Cream;
+                    // This used to read a single round's placing and call it "3RD OF 4 THIS TIME",
+                    // which was right when the board above it showed one picture's result. It does
+                    // not any more: GameDirector fills it from Tournament.ChampionshipStandings —
+                    // the CUMULATIVE table — because an arena round used to end on two boards and
+                    // the one that survived had to be the one saying something new. So the rows said
+                    // "the evening so far" while the line under them said "this time", and worse,
+                    // the NUMBER was a different number: Tournament.PlayerPlace comes off the round's
+                    // standings and Championship.PlayerPlace comes off the table. The line could
+                    // legitimately say 3RD under a board showing the player top.
+                    //
+                    // Both are read from the same place the board reads, and the branch is the same
+                    // branch: cumulative when there is a table, the round when there is not.
+                    var champ = t.Championship;
+                    bool cumulative = champ != null && champ.Table != null && champ.Table.Count > 0;
+
+                    if (cumulative)
+                    {
+                        // "OF 4" is dropped. It counted rivals, and the quantity the player is
+                        // actually being told is the TOTAL — so the line states the total, in the
+                        // same "N / 90" the board and the arena cards already use.
+                        int place = champ.PlayerPlace;
+                        int outOf = Mathf.Max(champ.RoundsTotal, 1) * Championship.RivalRoundMax;
+                        string standing = champ.IsComplete
+                            ? (place == 1 ? "CHAMPION" : $"{Championship.Ordinal(place)} OVERALL")
+                            : (place == 1 ? "LEADING" : $"{Championship.Ordinal(place)} OVERALL");
+                        outroPlacing.text = $"{standing}  ·  {champ.PlayerPoints} / {outOf}";
+                        outroPlacing.color = place == 1 ? Gold : Cream;
+
+                        // CHAMPION is only ever printed on a COMPLETE championship. The note this
+                        // paragraph replaced recorded that an earlier version said "YOU WON THE
+                        // CHAMPIONSHIP" off one round's placing and "was a lie every time it
+                        // appeared"; the word is safe here for the two reasons it was not there —
+                        // the place is cumulative, and IsComplete means there is nothing left to
+                        // play. Before the last round it says LEADING, which is all that is known.
+                    }
+                    else
+                    {
+                        // No table yet: the board has fallen back to this round's standings, so the
+                        // line falls back with it. This is the original copy, kept because it was
+                        // never wrong about the board it was written for.
+                        int place = t.PlayerPlace;
+                        int of = Mathf.Max(t.Standings.Count, 1);
+                        outroPlacing.text = place == 1
+                            ? "YOU WON THIS ONE"
+                            : $"{Championship.Ordinal(place)} OF {of} THIS TIME";
+                        outroPlacing.color = place == 1 ? Gold : Cream;
+                    }
                 }
             }
 
