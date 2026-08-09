@@ -256,7 +256,20 @@ namespace DuckMow
 
         static float Mushroom(Vector2 p)
         {
-            float stem = RoundedBox(p - new Vector2(0f, -0.46f), new Vector2(0.22f, 0.40f), 0.12f);
+            // The stem RUNS UP INTO THE CAP, and the overlap is the whole point.
+            //
+            // RoundedBox takes b as the full half-extent, rounding included, so the stem used to be
+            // centred at -0.46 with a half-height of 0.40 and therefore stopped at y = -0.06 — while
+            // the cap, being the circle clipped to y >= 0.02, started 0.08 ABOVE that. The two solids
+            // never touched. SmoothUnion's k of 0.10 is wide enough to blur a field across a gap that
+            // small, which is why it looked joined on a distance plot and came apart on the lawn:
+            // the blend leaves a neck far thinner than the mower, so the first pass under the cap
+            // cuts the head off the stem.
+            //
+            // Bottom stays at -0.86 so the silhouette is unchanged; the top goes to 0.14, which is
+            // 0.12 inside the cap. Everything above y = 0.02 is buried in the cap and invisible, so
+            // what the player sees is the same mushroom with a neck that is actually made of stem.
+            float stem = RoundedBox(p - new Vector2(0f, -0.36f), new Vector2(0.22f, 0.50f), 0.12f);
             float capOuter = Circle(p - new Vector2(0f, 0.04f), 0.78f);
             float capClip = -(p.y - 0.02f);
             float cap = Mathf.Max(capOuter, capClip);
